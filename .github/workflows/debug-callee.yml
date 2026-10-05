@@ -7,7 +7,7 @@ on:
 
 jobs:
   hello:
-    name: Hello
+    name: Hello ${{ inputs.label }}
     runs-on: ubuntu-latest
     steps:
       - name: Echo
