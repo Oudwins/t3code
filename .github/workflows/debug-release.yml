@@ -15,5 +15,21 @@ jobs:
   call_it:
     name: Call debug callee
     uses: ./.github/workflows/debug-callee.yml
+    secrets: inherit
     with:
-      label: "test"
+      version: "0.1.0"
+      ref: "main"
+      release_channel: stable
+      relay_client_tracing: false
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+      relay_url: ""
+      label: Linux x64
+      runner: ubuntu-latest
+      platform: linux
+      target: AppImage
+      arch: x64
+      rust_target: x86_64-unknown-linux-gnu
+      resource_key: linux-x64
+      cli_archive: true
