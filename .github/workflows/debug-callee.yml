@@ -27,6 +27,6 @@ permissions:
 jobs:
   build:
     name: Build ${{ inputs.label }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     steps:
       - run: echo hi
