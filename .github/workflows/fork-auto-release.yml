@@ -1,0 +1,58 @@
+name: Fork auto release
+
+# Minimal release trigger for this private fork: every push to main gets a
+# new patch-bumped tag and a GitHub Release. This only makes the CLI's
+# version-discovery update check (cliReleaseIndexPageUrl in
+# packages/shared/src/cliRelease.ts) see a newer release; it does not build
+# or attach the per-platform CLI archives upstream's release.yml produces,
+# so the CLI's download-and-install step has nothing to fetch yet.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        run: |
+          latest="$(git tag --list 'v*.*.*' | grep -Ev -- '-(nightly|preview)' | sort -V | tail -n1)"
+          if [ -z "$latest" ]; then
+            next="0.0.1"
+          else
+            ver="${latest#v}"
+            IFS='.' read -r major minor patch <<< "$ver"
+            next="${major}.${minor}.$((patch + 1))"
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes
