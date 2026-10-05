@@ -4,29 +4,11 @@ on:
   workflow_call:
     inputs:
       label: { required: true, type: string }
-      runner: { required: true, type: string }
-      platform: { required: true, type: string }
-      target: { required: true, type: string }
-      arch: { required: true, type: string }
-      rust_target: { required: true, type: string }
-      resource_key: { required: true, type: string }
-      cli_archive: { required: false, default: false, type: boolean }
-      version: { required: true, type: string }
-      ref: { required: true, type: string }
-      release_channel: { required: true, type: string }
-      relay_client_tracing: { required: false, default: true, type: boolean }
-      clerk_publishable_key: { required: true, type: string }
-      clerk_jwt_template: { required: true, type: string }
-      clerk_cli_oauth_client_id: { required: true, type: string }
-      relay_url: { required: true, type: string }
-
-permissions:
-  actions: read
-  contents: read
 
 jobs:
-  build:
-    name: Build ${{ inputs.label }}
+  hello:
+    name: Hello
     runs-on: ubuntu-latest
     steps:
-      - run: echo hi
+      - name: Echo
+        run: echo "hello ${{ inputs.label }}"
