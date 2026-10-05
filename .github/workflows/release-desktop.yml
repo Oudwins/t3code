@@ -110,21 +110,23 @@ jobs:
       T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ inputs.clerk_cli_oauth_client_id }}
       T3CODE_RELAY_URL: ${{ inputs.relay_url }}
     steps:
-      # This repository is public, so Git needs no credentials. checkout's
-      # credential cleanup runs submodule foreach even with submodules disabled,
-      # which fails on the orphaned gitlinks in our vendored .repos tree.
-      # checkout.workers=0 writes the files on every core. Alternating both ways
-      # in one job on the Windows runners, it wrote the files about 10s faster
-      # (about 40% on arm64).
+      # This fork is private (upstream's is public, hence no credentials
+      # there), so the fetch needs an authenticated URL. checkout's credential
+      # cleanup runs submodule foreach even with submodules disabled, which
+      # fails on the orphaned gitlinks in our vendored .repos tree.
+      # checkout.workers=0 writes the files on every core. Alternating both
+      # ways in one job on the Windows runners, it wrote the files about 10s
+      # faster (about 40% on arm64).
       - name: Checkout
         shell: bash
         env:
           CHECKOUT_REF: ${{ inputs.ref }}
           GIT_TERMINAL_PROMPT: "0"
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$CHECKOUT_REF"
           git sparse-checkout set --no-cone '/*' '!/.repos/'
           git -c checkout.workers=0 checkout --detach FETCH_HEAD
