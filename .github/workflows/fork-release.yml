@@ -13,7 +13,7 @@ permissions:
 jobs:
   desktop_linux_x64:
     name: Desktop Linux x64
-    uses: ./.github/workflows/release-desktop.yml
+    uses: ./.github/workflows/debug-callee.yml
     with:
       version: "0.1.0"
       ref: "main"
