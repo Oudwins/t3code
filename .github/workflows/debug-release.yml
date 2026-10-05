@@ -12,22 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  preflight:
-    name: Preflight
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      version: ${{ steps.resolve.outputs.version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - id: resolve
-        name: Resolve release version
-        shell: bash
-        env:
-          DISPATCH_VERSION: ${{ github.event.inputs.version }}
-        run: |
-          echo "version=${DISPATCH_VERSION}" >> "$GITHUB_OUTPUT"
+  call_it:
+    name: Call debug callee
+    uses: ./.github/workflows/debug-callee.yml
+    with:
+      label: "test"
