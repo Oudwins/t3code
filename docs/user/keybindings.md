@@ -39,6 +39,13 @@ on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
 Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
 in Settings.
 
+## Move through lists
+
+In menus, pickers, the command palette, and search results, `Ctrl+N` or `Cmd+N` moves to
+the next item and `Ctrl+P` or `Cmd+P` to the previous one, the same as Down and Up. While a
+list is open these win over New Thread and the file picker; everywhere else those
+shortcuts work as usual. This is not configurable in Settings.
+
 ## Triage threads
 
 With a thread open, `mod+shift+s` settles it and `mod+alt+s` snoozes it. Both toggle:
