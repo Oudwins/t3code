@@ -4755,32 +4755,23 @@ export default function Sidebar() {
       if (attentionDirection !== null) {
         // Settled and snoozed threads are parked on purpose. A snoozed thread
         // that needs you again has already left the snoozed shelf.
-        const now = new Date().toISOString();
-        const localVisits = useUiStateStore.getState().threadLastVisitedAtById;
-        navigateToThreadKey(
-          resolveAdjacentAttentionThreadId({
-            threadIds: orderedThreadKeys,
-            currentThreadId: routeThreadKey,
-            direction: attentionDirection,
-            needsAttention: (threadKey) => {
-              const thread = threadByKey.get(threadKey);
-              if (
-                !thread ||
-                settledThreadKeysRef.current.has(threadKey) ||
-                snoozedThreadKeysRef.current.has(threadKey)
-              ) {
-                return false;
-              }
-              return threadNeedsAttention(thread, {
-                lastVisitedAt: resolveThreadLastVisitedAt(
-                  thread.lastVisitedAt,
-                  localVisits[threadKey],
-                ),
-                wokeAt: threadWokeAt(thread, { now }),
-              });
-            },
-          }),
-        );
+        const target = resolveAdjacentAttentionThreadId({
+          threadIds: orderedThreadKeys,
+          currentThreadId: routeThreadKey,
+          direction: attentionDirection,
+          needsAttention: (threadKey) => {
+            const thread = threadByKey.get(threadKey);
+            return (
+              thread !== undefined &&
+              !settledThreadKeysRef.current.has(threadKey) &&
+              !snoozedThreadKeysRef.current.has(threadKey) &&
+              threadNeedsAttention(thread)
+            );
+          },
+        });
+        if (!navigateToThreadKey(target)) {
+          toastManager.add({ type: "info", title: "No other threads need attention" });
+        }
         return;
       }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
