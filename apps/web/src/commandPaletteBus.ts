@@ -9,10 +9,21 @@ export interface CommandPaletteLinkedThreads {
 // without owning its React state.
 const COMMAND_PALETTE_OPEN_EVENT = "t3code:open-command-palette";
 
+/** One row of the workspace picker; the composer that opens it owns what selecting does. */
+export interface WorkspacePaletteOption {
+  readonly id: "local" | "worktree" | "previous-worktree";
+  readonly label: string;
+  readonly description: string | null;
+  readonly icon: "checkout" | "worktree" | "new-worktree" | "previous-worktree";
+  readonly selected: boolean;
+  readonly select: () => void;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
   readonly query?: string;
   readonly linkedThreads?: CommandPaletteLinkedThreads;
+  readonly workspace?: ReadonlyArray<WorkspacePaletteOption>;
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {

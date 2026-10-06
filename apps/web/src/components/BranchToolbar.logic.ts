@@ -7,6 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
+import type { WorkspacePaletteOption } from "../commandPaletteBus";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
@@ -170,6 +171,45 @@ export function resolvePreviousWorktreeSeed(input: {
 
 export function resolvePreviousWorktreeLabel(seed: PreviousWorktreeSeed): string {
   return seed.branch ? `Previous worktree (${seed.branch})` : "Previous worktree";
+}
+
+// The workspace selector's choices as command palette rows, in the same order
+// and wording as the dropdown.
+export function buildWorkspacePaletteOptions(input: {
+  activeWorktreePath: string | null;
+  effectiveEnvMode: EnvMode;
+  previousWorktree: PreviousWorktreeSeed | null;
+  select: (id: WorkspacePaletteOption["id"]) => void;
+}): WorkspacePaletteOption[] {
+  const options: WorkspacePaletteOption[] = [
+    {
+      id: "local",
+      label: resolveCurrentWorkspaceLabel(input.activeWorktreePath),
+      description: null,
+      icon: input.activeWorktreePath ? "worktree" : "checkout",
+      selected: input.effectiveEnvMode === "local",
+      select: () => input.select("local"),
+    },
+    {
+      id: "worktree",
+      label: resolveEnvModeLabel("worktree"),
+      description: null,
+      icon: "new-worktree",
+      selected: input.effectiveEnvMode === "worktree",
+      select: () => input.select("worktree"),
+    },
+  ];
+  if (input.previousWorktree) {
+    options.push({
+      id: "previous-worktree",
+      label: "Previous worktree",
+      description: input.previousWorktree.branch,
+      icon: "previous-worktree",
+      selected: false,
+      select: () => input.select("previous-worktree"),
+    });
+  }
+  return options;
 }
 
 export function resolveEffectiveEnvMode(input: {

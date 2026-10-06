@@ -20,10 +20,12 @@ import {
   useState,
 } from "react";
 
+import { openCommandPalette } from "../commandPaletteBus";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
+  buildWorkspacePaletteOptions,
   type EnvMode,
   type EnvironmentOption,
   resolveContextStripLabelsCompact,
@@ -63,6 +65,7 @@ import { cn } from "~/lib/utils";
 
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
+  openWorkspacePicker: () => void;
   usePreviousWorktree: () => void;
 }
 
@@ -206,10 +209,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
         render={<ComposerControl size="xs" />}
         className="min-w-0 max-w-[48%] flex-initial justify-start"
         data-composer-context-control
-        data-composer-shortcut={[
-          showEnvironmentPicker && !envLocked ? "composer.host" : "",
-          !envModeLocked ? "composer.workspace" : "",
-        ].join(" ")}
+        data-composer-shortcut={showEnvironmentPicker && !envLocked ? "composer.host" : undefined}
       >
         {triggerContent}
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
@@ -581,10 +581,32 @@ export const BranchToolbar = memo(function BranchToolbar({
     });
   }, [activeProjectRef, draftId, previousWorktreeSeed, setDraftThreadContext, threadRef]);
 
+  const canPickWorkspace = showGitControls && !envModeLocked && !forceNewWorktree;
+  const openWorkspacePicker = useCallback(() => {
+    if (!canPickWorkspace) return;
+    openCommandPalette({
+      workspace: buildWorkspacePaletteOptions({
+        activeWorktreePath,
+        effectiveEnvMode,
+        previousWorktree: previousWorktreeSeed,
+        select: (id) =>
+          id === "previous-worktree" ? onUsePreviousWorktree() : onEnvModeChange(id),
+      }),
+    });
+  }, [
+    activeWorktreePath,
+    canPickWorkspace,
+    effectiveEnvMode,
+    onEnvModeChange,
+    onUsePreviousWorktree,
+    previousWorktreeSeed,
+  ]);
+
   useImperativeHandle(
     ref,
     () => ({
       openBranchPicker: () => branchSelectorRef.current?.open(),
+      openWorkspacePicker,
       usePreviousWorktree: () => {
         if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
         onUsePreviousWorktree();
@@ -595,6 +617,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       canUsePreviousWorktree,
       onComposerFocusRequest,
       onUsePreviousWorktree,
+      openWorkspacePicker,
       previousWorktreeSeed,
       showGitControls,
     ],
