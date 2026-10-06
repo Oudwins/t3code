@@ -91,6 +91,10 @@ export class ServerConfig extends Context.Service<
     readonly devUrl: URL | undefined;
     readonly devAuthToken?: Redacted.Redacted<string> | undefined;
     readonly devAllowedOrigins: ReadonlyArray<string>;
+    /** Folders whose Git repository children each become a project (`CODE_PROJECTS_PARENT_DIRS`). */
+    readonly projectParentDirs: ReadonlyArray<string>;
+    /** Folders that each become a project (`CODE_PROJECTS`). */
+    readonly projectDirs: ReadonlyArray<string>;
     readonly noBrowser: boolean;
     readonly startupPresentation: StartupPresentation;
     readonly desktopBootstrapToken: string | undefined;
@@ -238,6 +242,8 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     staticDir: undefined,
     devUrl,
     devAllowedOrigins: [],
+    projectParentDirs: [],
+    projectDirs: [],
     noBrowser: false,
     startupPresentation: "browser",
   });

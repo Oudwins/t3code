@@ -76,6 +76,8 @@ const configLayer = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =
         staticDir: undefined,
         devUrl: undefined,
         devAllowedOrigins: [],
+        projectParentDirs: [],
+        projectDirs: [],
         noBrowser: false,
         startupPresentation: "browser",
         ...overrides,

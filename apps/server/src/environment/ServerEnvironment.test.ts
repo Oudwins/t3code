@@ -79,6 +79,8 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     staticDir: undefined,
     devUrl: undefined,
     devAllowedOrigins: [],
+    projectParentDirs: [],
+    projectDirs: [],
     noBrowser: false,
     startupPresentation: "browser",
   } satisfies ServerConfig.ServerConfig["Service"];

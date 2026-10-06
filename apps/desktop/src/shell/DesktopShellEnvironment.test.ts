@@ -129,6 +129,30 @@ describe("DesktopShellEnvironment", () => {
     }),
   );
 
+  it.effect("hydrates the project folder variables from the login shell on macOS", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = {
+        SHELL: "/bin/zsh",
+        PATH: "/usr/bin",
+        CODE_PROJECTS: "/inherited",
+      };
+
+      yield* runShellEnvironment({
+        env,
+        platform: "darwin",
+        handler: () =>
+          envOutput({
+            PATH: "/usr/bin",
+            CODE_PROJECTS_PARENT_DIRS: "/Users/test/code",
+            CODE_PROJECTS: "/Users/test/solo",
+          }),
+      });
+
+      assert.equal(env.CODE_PROJECTS_PARENT_DIRS, "/Users/test/code");
+      assert.equal(env.CODE_PROJECTS, "/inherited");
+    }),
+  );
+
   it.effect("preserves inherited POSIX values when present", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = {
