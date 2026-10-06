@@ -11,7 +11,7 @@ import {
   compileResolvedKeybindingsConfig,
   mergeWithDefaultKeybindings,
 } from "@t3tools/shared/keybindings";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   clampCollapsedComposerCursor,
@@ -25,6 +25,7 @@ import {
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "./composer-logic";
+import { cancelPendingChord, resolveShortcutCommand } from "./keybindings";
 import { carryDisplacedCustomAnswerIntoPrompt } from "./pendingUserInput";
 import { formatTerminalContextReference } from "./lib/terminalContext";
 
@@ -94,6 +95,31 @@ describe("composerSubmissionIntentForKey", () => {
         prompt,
       }),
     ).toBe(expected);
+  });
+
+  describe("while a chord waits for its second key", () => {
+    afterEach(cancelPendingChord);
+
+    it("does not treat the follow-up Enter as a send", () => {
+      const keybindings = compileResolvedKeybindingsConfig([
+        { key: "mod+g x", command: "terminal.toggle" },
+      ]);
+      resolveShortcutCommand(
+        { key: "g", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false },
+        keybindings,
+        { platform: "MacIntel" },
+      );
+      expect(
+        composerSubmissionIntentForKey({
+          ...input,
+          platform: "MacIntel",
+          keybindings,
+          event: enter,
+          sendShortcut: "enter",
+          prompt: "one line",
+        }),
+      ).toBeNull();
+    });
   });
 
   it.each(["MacIntel", "Win32", "Linux"])("uses the configured actions on %s", (platform) => {

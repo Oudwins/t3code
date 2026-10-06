@@ -290,7 +290,7 @@ import { DeviceSetup } from "./device/DeviceSetup";
 import { Dialog } from "./ui/dialog";
 import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
-import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { isChordFollowUp, resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { isEditableFocused } from "../lib/editableFocus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -7631,6 +7631,7 @@ export default function ChatView(props: ChatViewProps) {
       if (
         !shortcutContext.terminalFocus &&
         !shortcutContext.modelPickerOpen &&
+        !isChordFollowUp(event, keybindings) &&
         shouldTypeToFocusComposer(event)
       ) {
         if (composerRef.current?.insertTextAtEnd(event.key)) {

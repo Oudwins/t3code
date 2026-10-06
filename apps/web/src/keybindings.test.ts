@@ -1,4 +1,4 @@
-import { assert, describe, it } from "vite-plus/test";
+import { afterEach, assert, beforeEach, describe, it, vi } from "vite-plus/test";
 import {
   compileResolvedKeybindingsConfig,
   DEFAULT_RESOLVED_KEYBINDINGS,
@@ -12,7 +12,10 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import {
+  cancelPendingChord,
   formatShortcutLabel,
+  getPendingChordLabel,
+  isChordFollowUp,
   isDiffToggleShortcut,
   isRichTextBoldShortcut,
   modelPickerJumpCommandForIndex,
@@ -1525,6 +1528,220 @@ describe("Usage shortcuts", () => {
       resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
         platform: "Linux",
       }),
+    );
+  });
+});
+
+describe("chord shortcuts", () => {
+  const platform = "MacIntel";
+  const compileRules = (
+    rules: ReadonlyArray<{ key: string; command: KeybindingCommand; when?: string }>,
+  ) => compileResolvedKeybindingsConfig(rules);
+
+  function keyDown(overrides: Partial<ShortcutEventLike> = {}) {
+    return {
+      ...event(overrides),
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+  }
+  const leaderPress = () => keyDown({ key: "g", metaKey: true });
+  const plainPress = (key: string) => keyDown({ key });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    cancelPendingChord();
+  });
+  afterEach(() => {
+    cancelPendingChord();
+    vi.useRealTimers();
+  });
+
+  it("runs the command on the follow-up key and nothing on the leader alone", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
+    const leader = leaderPress();
+
+    assert.isNull(resolveShortcutCommand(leader, rules, { platform }));
+    assert.strictEqual(getPendingChordLabel(), "\u2318G");
+    assert.isTrue(leader.preventDefault.mock.calls.length > 0);
+
+    assert.strictEqual(
+      resolveShortcutCommand(plainPress("x"), rules, { platform }),
+      "terminal.toggle",
+    );
+    assert.isNull(getPendingChordLabel());
+  });
+
+  it("lets every listener resolve the same event, including the follow-up key", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
+    const leader = leaderPress();
+    resolveShortcutCommand(leader, rules, { platform });
+    assert.isNull(resolveShortcutCommand(leader, rules, { platform }));
+    assert.strictEqual(getPendingChordLabel(), "\u2318G");
+
+    const next = plainPress("x");
+    assert.strictEqual(resolveShortcutCommand(next, rules, { platform }), "terminal.toggle");
+    assert.strictEqual(resolveShortcutCommand(next, rules, { platform }), "terminal.toggle");
+  });
+
+  it("swallows a key no chord can take and returns to normal matching", () => {
+    const rules = compileRules([
+      { key: "mod+g x", command: "terminal.toggle" },
+      { key: "q", command: "usage.cost" },
+    ]);
+    resolveShortcutCommand(leaderPress(), rules, { platform });
+
+    const stray = plainPress("q");
+    assert.isNull(resolveShortcutCommand(stray, rules, { platform }));
+    assert.isTrue(stray.preventDefault.mock.calls.length > 0);
+    assert.isNull(getPendingChordLabel());
+
+    assert.strictEqual(resolveShortcutCommand(plainPress("q"), rules, { platform }), "usage.cost");
+  });
+
+  it("cancels on Escape without letting it through", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
+    resolveShortcutCommand(leaderPress(), rules, { platform });
+
+    const escape = plainPress("Escape");
+    assert.isNull(resolveShortcutCommand(escape, rules, { platform }));
+    assert.isTrue(escape.preventDefault.mock.calls.length > 0);
+    assert.isNull(getPendingChordLabel());
+  });
+
+  it("expires when the follow-up key never comes", () => {
+    const rules = compileRules([
+      { key: "mod+g x", command: "terminal.toggle" },
+      { key: "x", command: "usage.cost" },
+    ]);
+    resolveShortcutCommand(leaderPress(), rules, { platform });
+    vi.advanceTimersByTime(1500);
+
+    assert.isNull(getPendingChordLabel());
+    assert.strictEqual(resolveShortcutCommand(plainPress("x"), rules, { platform }), "usage.cost");
+  });
+
+  it("keeps waiting through modifier presses and a held leader", () => {
+    const rules = compileRules([{ key: "mod+g shift+x", command: "terminal.toggle" }]);
+    resolveShortcutCommand(leaderPress(), rules, { platform });
+    resolveShortcutCommand(keyDown({ key: "g", metaKey: true, repeat: true }), rules, { platform });
+    resolveShortcutCommand(keyDown({ key: "Shift", shiftKey: true }), rules, { platform });
+    assert.strictEqual(getPendingChordLabel(), "\u2318G");
+
+    assert.strictEqual(
+      resolveShortcutCommand(keyDown({ key: "x", shiftKey: true }), rules, { platform }),
+      "terminal.toggle",
+    );
+  });
+
+  it("takes the follow-up key from the chord, not from a plain shortcut on it", () => {
+    const rules = compileRules([
+      { key: "x", command: "usage.cost" },
+      { key: "mod+g x", command: "terminal.toggle" },
+    ]);
+    resolveShortcutCommand(leaderPress(), rules, { platform });
+    assert.strictEqual(
+      resolveShortcutCommand(plainPress("x"), rules, { platform }),
+      "terminal.toggle",
+    );
+  });
+
+  it("evaluates when-clauses per listener without swallowing the key for them", () => {
+    const rules = compileRules([
+      { key: "mod+g x", command: "terminal.toggle", when: "composerFocus" },
+    ]);
+    resolveShortcutCommand(leaderPress(), rules, { platform, context: { composerFocus: true } });
+
+    const next = plainPress("x");
+    assert.isNull(resolveShortcutCommand(next, rules, { platform, context: {} }));
+    assert.isFalse(next.preventDefault.mock.calls.length > 0);
+    assert.strictEqual(
+      resolveShortcutCommand(next, rules, { platform, context: { composerFocus: true } }),
+      "terminal.toggle",
+    );
+  });
+
+  it("does not start a chord outside its when-clause", () => {
+    const rules = compileRules([
+      { key: "mod+g x", command: "terminal.toggle", when: "!terminalFocus" },
+    ]);
+    const leader = leaderPress();
+    assert.isNull(
+      resolveShortcutCommand(leader, rules, { platform, context: { terminalFocus: true } }),
+    );
+    assert.isNull(getPendingChordLabel());
+    assert.isFalse(leader.preventDefault.mock.calls.length > 0);
+  });
+
+  it("never starts a chord while the terminal has focus", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
+    const leader = leaderPress();
+    assert.isNull(
+      resolveShortcutCommand(leader, rules, { platform, context: { terminalFocus: true } }),
+    );
+    assert.isNull(getPendingChordLabel());
+    assert.isFalse(leader.preventDefault.mock.calls.length > 0);
+  });
+
+  it("reports the follow-up key so raw-key handlers can leave it alone", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
+    assert.isFalse(isChordFollowUp(plainPress("x"), rules, { platform }));
+
+    resolveShortcutCommand(leaderPress(), rules, { platform });
+    const next = plainPress("x");
+    assert.isTrue(isChordFollowUp(next, rules, { platform }));
+    assert.isTrue(isChordFollowUp(next, rules, { platform }));
+    assert.isFalse(isChordFollowUp(plainPress("x"), rules, { platform }));
+  });
+
+  it("resolves a React wrapper and its native event as the same keypress", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
+    resolveShortcutCommand(leaderPress(), rules, { platform });
+
+    const native = plainPress("x");
+    const wrapper = { ...plainPress("x"), nativeEvent: native };
+    assert.strictEqual(resolveShortcutCommand(native, rules, { platform }), "terminal.toggle");
+    assert.strictEqual(resolveShortcutCommand(wrapper, rules, { platform }), "terminal.toggle");
+  });
+
+  it("ignores the Settings shortcut recorder's keypresses", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
+    const recorder = { closest: () => ({}) } as unknown as EventTarget;
+    const leader = { ...leaderPress(), target: recorder };
+    assert.isNull(resolveShortcutCommand(leader, rules, { platform }));
+    assert.isNull(getPendingChordLabel());
+    assert.isFalse(leader.preventDefault.mock.calls.length > 0);
+  });
+
+  it("lets the later rule win when a plain shortcut and a chord leader share a key", () => {
+    const chordLast = compileRules([
+      { key: "mod+g", command: "usage.cost" },
+      { key: "mod+g x", command: "terminal.toggle" },
+    ]);
+    assert.isNull(resolveShortcutCommand(leaderPress(), chordLast, { platform }));
+    assert.strictEqual(getPendingChordLabel(), "\u2318G");
+    cancelPendingChord();
+
+    const plainLast = compileRules([
+      { key: "mod+g x", command: "terminal.toggle" },
+      { key: "mod+g", command: "usage.cost" },
+    ]);
+    assert.strictEqual(
+      resolveShortcutCommand(leaderPress(), plainLast, { platform }),
+      "usage.cost",
+    );
+    assert.isNull(getPendingChordLabel());
+  });
+
+  it("labels a chord with both steps and keeps it out of modifier hints", () => {
+    const rules = compileRules([{ key: "mod+g x", command: "thread.jump.1" }]);
+    assert.strictEqual(shortcutLabelForCommand(rules, "thread.jump.1", { platform }), "\u2318G X");
+    assert.isFalse(
+      shouldShowThreadJumpHintsForModifiers(
+        { metaKey: true, ctrlKey: false, shiftKey: false, altKey: false },
+        rules,
+        { platform },
+      ),
     );
   });
 });

@@ -2,6 +2,7 @@ import {
   KeybindingRule as KeybindingRuleSchema,
   type KeybindingCommand,
   type KeybindingRule,
+  type KeybindingShortcut,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -38,6 +39,19 @@ export function decodeProjectScriptKeybindingRule(input: {
   return decoded.value;
 }
 
+function shortcutInput(shortcut: KeybindingShortcut): string {
+  const parts: string[] = [];
+  if (shortcut.modKey) parts.push("mod");
+  if (shortcut.ctrlKey) parts.push("ctrl");
+  if (shortcut.metaKey) parts.push("meta");
+  if (shortcut.altKey) parts.push("alt");
+  if (shortcut.shiftKey) parts.push("shift");
+  const keyToken =
+    shortcut.key === " " ? "space" : shortcut.key === "escape" ? "esc" : shortcut.key;
+  parts.push(keyToken);
+  return parts.join("+");
+}
+
 export function keybindingValueForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand | null,
@@ -47,20 +61,9 @@ export function keybindingValueForCommand(
     const binding = keybindings[index];
     if (!binding || binding.command !== command) continue;
 
-    const parts: string[] = [];
-    if (binding.shortcut.modKey) parts.push("mod");
-    if (binding.shortcut.ctrlKey) parts.push("ctrl");
-    if (binding.shortcut.metaKey) parts.push("meta");
-    if (binding.shortcut.altKey) parts.push("alt");
-    if (binding.shortcut.shiftKey) parts.push("shift");
-    const keyToken =
-      binding.shortcut.key === " "
-        ? "space"
-        : binding.shortcut.key === "escape"
-          ? "esc"
-          : binding.shortcut.key;
-    parts.push(keyToken);
-    return parts.join("+");
+    return "shortcut" in binding
+      ? shortcutInput(binding.shortcut)
+      : binding.chord.map(shortcutInput).join(" ");
   }
   return null;
 }

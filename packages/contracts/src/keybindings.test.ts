@@ -2,11 +2,13 @@ import { assert, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 
+import { ForwardCompatibleArray } from "./baseSchemas.ts";
 import {
   KeybindingsConfig,
   KeybindingRule,
   ResolvedKeybindingRule,
   ResolvedKeybindingsConfig,
+  ResolvedShortcutKeybindingRule,
 } from "./keybindings.ts";
 
 const decode = <S extends Schema.Top>(
@@ -181,6 +183,15 @@ it.effect("parses keybindings array payload", () =>
   }),
 );
 
+const shortcut = {
+  key: "p",
+  metaKey: false,
+  ctrlKey: false,
+  shiftKey: false,
+  altKey: false,
+  modKey: true,
+};
+
 it.effect("parses resolved keybinding rules", () =>
   Effect.gen(function* () {
     const parsed = yield* decode(ResolvedKeybindingRule, {
@@ -202,7 +213,38 @@ it.effect("parses resolved keybinding rules", () =>
         },
       },
     });
-    assert.strictEqual(parsed.shortcut.key, "d");
+    assert.strictEqual("shortcut" in parsed && parsed.shortcut.key, "d");
+  }),
+);
+
+const chordRule = {
+  command: "terminal.toggle" as const,
+  chord: [
+    { ...shortcut, key: "g" },
+    { ...shortcut, key: "x", modKey: false },
+  ] as const,
+};
+
+it.effect("round-trips chord rules through the resolved config", () =>
+  Effect.gen(function* () {
+    const encoded = yield* encodeResolvedKeybindings([chordRule]);
+    assert.deepEqual(encoded, [chordRule]);
+    const decoded = yield* decode(ResolvedKeybindingsConfig, encoded);
+    assert.deepEqual(decoded, [chordRule]);
+  }),
+);
+
+it.effect("lets a client without chord support drop chord rules instead of misreading them", () =>
+  Effect.gen(function* () {
+    const clientBeforeChords = ForwardCompatibleArray(ResolvedShortcutKeybindingRule);
+    const decoded = yield* decode(clientBeforeChords, [
+      chordRule,
+      { command: "terminal.split", shortcut },
+    ]);
+    assert.deepEqual(
+      decoded.map((rule) => rule.command),
+      ["terminal.split"],
+    );
   }),
 );
 
@@ -235,15 +277,6 @@ it.effect("parses resolved keybindings arrays", () =>
     assert.lengthOf(parsed, 2);
   }),
 );
-
-const shortcut = {
-  key: "p",
-  metaKey: false,
-  ctrlKey: false,
-  shiftKey: false,
-  altKey: false,
-  modKey: true,
-};
 
 it.effect("drops resolved rules with commands this build does not know", () =>
   Effect.gen(function* () {

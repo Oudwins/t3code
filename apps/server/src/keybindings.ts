@@ -76,7 +76,7 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
 
       encode: (resolved) =>
         Effect.gen(function* () {
-          const key = encodeShortcut(resolved.shortcut);
+          const key = encodeResolvedRuleKey(resolved);
           if (!key) {
             return yield* Effect.fail(
               new SchemaIssue.InvalidValue({
@@ -129,19 +129,27 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   },
 ];
 
-function keybindingShortcutContext(rule: KeybindingRule): string | null {
-  const parsed = parseKeybindingShortcut(rule.key);
+function keybindingShortcutContext(
+  rule: KeybindingRule,
+): { readonly key: string; readonly leader: string; readonly when: string } | null {
+  const parsed = compileResolvedKeybindingRule({ key: rule.key, command: rule.command });
   if (!parsed) return null;
-  const encoded = encodeShortcut(parsed);
-  if (!encoded) return null;
-  return `${encoded}\u0000${rule.when ?? ""}`;
+  const key = encodeResolvedRuleKey(parsed);
+  if (!key) return null;
+  const leader = "chord" in parsed ? encodeShortcut(parsed.chord[0]) : key;
+  return leader ? { key, leader, when: rule.when ?? "" } : null;
 }
 
 function hasSameShortcutContext(left: KeybindingRule, right: KeybindingRule): boolean {
   const leftContext = keybindingShortcutContext(left);
   const rightContext = keybindingShortcutContext(right);
   if (!leftContext || !rightContext) return false;
-  return leftContext === rightContext;
+  if (leftContext.when !== rightContext.when) return false;
+  if (leftContext.key === rightContext.key) return true;
+  // A chord's leader press and a plain shortcut on that key shadow each other.
+  const leftIsChord = leftContext.key !== leftContext.leader;
+  const rightIsChord = rightContext.key !== rightContext.leader;
+  return leftIsChord !== rightIsChord && leftContext.leader === rightContext.leader;
 }
 
 function keybindingRuleFromUpsertInput(input: ServerUpsertKeybindingInput): KeybindingRule {
@@ -174,6 +182,14 @@ function encodeShortcut(shortcut: KeybindingShortcut): string | null {
   if (shortcut.key !== "+" && shortcut.key.includes("+")) return null;
   const key = shortcut.key === " " ? "space" : shortcut.key;
   return [...modifiers, key].join("+");
+}
+
+function encodeResolvedRuleKey(rule: ResolvedKeybindingRule): string | null {
+  if ("shortcut" in rule) return encodeShortcut(rule.shortcut);
+  const [leader, next] = rule.chord;
+  const encodedLeader = encodeShortcut(leader);
+  const encodedNext = encodeShortcut(next);
+  return encodedLeader && encodedNext ? `${encodedLeader} ${encodedNext}` : null;
 }
 
 function encodeWhenAst(node: KeybindingWhenNode): string {

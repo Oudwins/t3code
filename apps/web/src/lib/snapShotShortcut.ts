@@ -109,13 +109,19 @@ export function sameSnapShotShortcut(
 
 export function snapShotKeybindingConflict<Command extends string>(
   shortcut: SnapShotShortcut,
-  keybindings: ReadonlyArray<{ readonly command: Command; readonly shortcut: KeybindingShortcut }>,
+  keybindings: ReadonlyArray<
+    | { readonly command: Command; readonly shortcut: KeybindingShortcut }
+    | {
+        readonly command: Command;
+        readonly chord: readonly [KeybindingShortcut, KeybindingShortcut];
+      }
+  >,
   platform = navigator.platform,
 ): Command | null {
   if (isModifierPairShortcut(shortcut)) return null;
   const key = shortcutConflictKey(shortcut, platform);
-  return (
-    keybindings.find((binding) => shortcutConflictKey(binding.shortcut, platform) === key)
-      ?.command ?? null
-  );
+  // A chord claims its leader press, so the leader collides like a plain shortcut.
+  const claimedKey = (binding: (typeof keybindings)[number]) =>
+    shortcutConflictKey("shortcut" in binding ? binding.shortcut : binding.chord[0], platform);
+  return keybindings.find((binding) => claimedKey(binding) === key)?.command ?? null;
 }

@@ -126,7 +126,7 @@ export function parseKeybindingShortcut(value: string): KeybindingShortcut | nul
   if (trailingEmptyCount > 0) {
     tokens.push("+");
   }
-  if (tokens.some((token) => token.length === 0)) {
+  if (tokens.some((token) => token.length === 0 || /\s/.test(token))) {
     return null;
   }
   if (tokens.length === 0) return null;
@@ -310,24 +310,41 @@ export function parseKeybindingWhenExpression(expression: string): KeybindingWhe
   return ast;
 }
 
+/** A chord's leader must be a modified key, so pressing it can never be typed text. */
+export function isChordLeaderShortcut(shortcut: KeybindingShortcut): boolean {
+  return shortcut.metaKey || shortcut.ctrlKey || shortcut.altKey || shortcut.modKey;
+}
+
+/**
+ * Parses a space-separated chord such as `mod+g x`: a modified leader
+ * followed by one more shortcut. Null for anything else, including a single
+ * shortcut. Escape cannot be the second step because it cancels a pending chord.
+ */
+export function parseKeybindingChord(
+  value: string,
+): readonly [KeybindingShortcut, KeybindingShortcut] | null {
+  const steps = value.trim().split(/\s+/);
+  if (steps.length !== 2) return null;
+  const leader = parseKeybindingShortcut(steps[0] ?? "");
+  const next = parseKeybindingShortcut(steps[1] ?? "");
+  if (!leader || !next) return null;
+  if (!isChordLeaderShortcut(leader)) return null;
+  if (next.key === "escape") return null;
+  return [leader, next];
+}
+
 export function compileResolvedKeybindingRule(rule: KeybindingRule): ResolvedKeybindingRule | null {
+  const whenAst =
+    rule.when === undefined ? undefined : (parseKeybindingWhenExpression(rule.when) ?? null);
+  if (whenAst === null) return null;
+  const when = whenAst === undefined ? {} : { whenAst };
+
+  // A plain shortcut first: whitespace around a `+` was always tolerated there.
   const shortcut = parseKeybindingShortcut(rule.key);
-  if (!shortcut) return null;
+  if (shortcut) return { command: rule.command, shortcut, ...when };
 
-  if (rule.when !== undefined) {
-    const whenAst = parseKeybindingWhenExpression(rule.when);
-    if (!whenAst) return null;
-    return {
-      command: rule.command,
-      shortcut,
-      whenAst,
-    };
-  }
-
-  return {
-    command: rule.command,
-    shortcut,
-  };
+  const chord = parseKeybindingChord(rule.key);
+  return chord ? { command: rule.command, chord, ...when } : null;
 }
 
 export function compileResolvedKeybindingsConfig(

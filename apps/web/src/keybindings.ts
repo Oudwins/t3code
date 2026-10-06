@@ -3,12 +3,16 @@ import {
   type KeybindingShortcut,
   type KeybindingWhenNode,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
   type ModelPickerJumpKeybindingCommand,
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
 import { isElectron } from "./env";
+import { isEditableFocused } from "./lib/editableFocus";
+import { isPreviewFocused } from "./lib/previewFocus";
+import { isTerminalFocused } from "./lib/terminalFocus";
 import { isMacPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
@@ -21,6 +25,9 @@ export interface ShortcutEventLike {
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
+  target?: EventTarget | null;
+  preventDefault?: () => void;
+  stopPropagation?: () => void;
 }
 
 export interface ShortcutModifierStateLike {
@@ -197,28 +204,46 @@ export function shortcutConflictKey(
   ].join("|");
 }
 
-function findEffectiveShortcutForCommand(
+function chordConflictKey(
+  chord: readonly [KeybindingShortcut, KeybindingShortcut],
+  platform: string,
+): string {
+  return `${shortcutConflictKey(chord[0], platform)} ${shortcutConflictKey(chord[1], platform)}`;
+}
+
+/**
+ * The binding that actually owns `command`'s shortcut: later rules shadow
+ * earlier ones that share a shortcut. A chord's leader press and a plain
+ * shortcut on the same key shadow each other the same way, because
+ * `resolveShortcutCommand` lets the later rule win.
+ */
+function findEffectiveBindingForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
   options?: ShortcutMatchOptions,
-): KeybindingShortcut | null {
+): ResolvedKeybindingRule | null {
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
-  const claimedShortcuts = new Set<string>();
+  const claimed = new Set<string>();
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
 
-    const conflictKey = shortcutConflictKey(binding.shortcut, platform);
-    if (claimedShortcuts.has(conflictKey)) {
-      continue;
+    if ("shortcut" in binding) {
+      const key = shortcutConflictKey(binding.shortcut, platform);
+      if (claimed.has(`s|${key}`) || claimed.has(`l|${key}`)) continue;
+      claimed.add(`s|${key}`);
+    } else {
+      const leaderKey = shortcutConflictKey(binding.chord[0], platform);
+      const chordKey = chordConflictKey(binding.chord, platform);
+      if (claimed.has(`c|${chordKey}`) || claimed.has(`s|${leaderKey}`)) continue;
+      claimed.add(`c|${chordKey}`);
+      claimed.add(`l|${leaderKey}`);
     }
-
-    claimedShortcuts.add(conflictKey);
     if (binding.command === command) {
-      return binding.shortcut;
+      return binding;
     }
   }
 
@@ -234,6 +259,148 @@ function matchesCommandShortcut(
   return resolveShortcutCommand(event, keybindings, options) === command;
 }
 
+// A chord is two keydowns, but every window-level listener resolves each
+// event on its own with its own `when` context. The leader press records the
+// pending chord here. The first listener to see the next key snapshots it
+// onto the event and clears the live state, so the remaining listeners still
+// resolve that same key as the chord's second step.
+const CHORD_TIMEOUT_MS = 1500;
+
+interface PendingChord {
+  readonly leaderKey: string;
+  readonly label: string;
+}
+
+let pendingChord: PendingChord | null = null;
+let pendingChordTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingChordListeners = new Set<() => void>();
+const pendingChordAtArrival = new WeakMap<object, PendingChord | null>();
+
+function setPendingChord(next: PendingChord | null): void {
+  const labelChanged = pendingChord?.label !== next?.label;
+  pendingChord = next;
+  if (pendingChordTimer !== null) clearTimeout(pendingChordTimer);
+  pendingChordTimer = next === null ? null : setTimeout(cancelPendingChord, CHORD_TIMEOUT_MS);
+  if (labelChanged) for (const listener of pendingChordListeners) listener();
+}
+
+export function cancelPendingChord(): void {
+  setPendingChord(null);
+}
+
+/** Label of the leader shortcut while a chord waits for its second key, else null. */
+export function getPendingChordLabel(): string | null {
+  return pendingChord?.label ?? null;
+}
+
+export function subscribePendingChord(listener: () => void): () => void {
+  pendingChordListeners.add(listener);
+  return () => pendingChordListeners.delete(listener);
+}
+
+// The Settings recorder reads raw keypresses, so chords must not react to them.
+function isKeybindingCaptureTarget(event: ShortcutEventLike): boolean {
+  const target = event.target as { closest?: (selector: string) => unknown } | null | undefined;
+  return (
+    typeof target?.closest === "function" && target.closest("[data-keybinding-capture]") !== null
+  );
+}
+
+// Listeners pass only the context they know, so a chord's `when` is judged again
+// here with the focus state every listener can read from the document. The
+// terminal owns the keyboard and cannot be told to hold a key back, so a chord
+// never starts there; plain shortcuts on the leader key still apply.
+function chordStartContext(
+  event: ShortcutEventLike,
+  context: ShortcutMatchContext,
+  explicit: Partial<ShortcutMatchContext> | undefined,
+): ShortcutMatchContext | null {
+  if (context.terminalFocus || isKeybindingCaptureTarget(event)) return null;
+  const hasDocument = typeof document !== "undefined";
+  if (hasDocument && isTerminalFocused()) return null;
+  return {
+    ...context,
+    editableFocus:
+      explicit?.editableFocus ??
+      (hasDocument && typeof Element !== "undefined" && isEditableFocused(event.target ?? null)),
+    previewFocus: explicit?.previewFocus ?? (hasDocument && isPreviewFocused()),
+  };
+}
+
+const MODIFIER_ONLY_KEYS: ReadonlySet<string> = new Set([
+  "Shift",
+  "Control",
+  "Alt",
+  "AltGraph",
+  "Meta",
+  "CapsLock",
+]);
+
+function isModifierOnlyKey(key: string): boolean {
+  return MODIFIER_ONLY_KEYS.has(key);
+}
+
+function isKeydownLike(event: ShortcutEventLike): boolean {
+  return event.type === undefined || event.type === "keydown";
+}
+
+function pendingChordForEvent(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  platform: string,
+): PendingChord | null {
+  // React handlers receive a wrapper; key on the native event the other listeners share.
+  const eventKey: object = (event as { nativeEvent?: object }).nativeEvent ?? event;
+  if (pendingChordAtArrival.has(eventKey)) return pendingChordAtArrival.get(eventKey) ?? null;
+
+  // Most keys arrive with no chord pending; skip the DOM checks for those.
+  const counts =
+    pendingChord !== null &&
+    isKeydownLike(event) &&
+    !event.repeat &&
+    !isModifierOnlyKey(event.key) &&
+    !isKeybindingCaptureTarget(event);
+  const pending = counts ? pendingChord : null;
+  pendingChordAtArrival.set(eventKey, pending);
+  if (pending === null) return null;
+
+  cancelPendingChord();
+  // A key no chord of this leader can take, in any context, is swallowed so
+  // it neither types into a field nor fires something the user never meant.
+  const expected = keybindings.some(
+    (binding) =>
+      "chord" in binding &&
+      shortcutConflictKey(binding.chord[0], platform) === pending.leaderKey &&
+      matchesShortcut(event, binding.chord[1], platform),
+  );
+  if (!expected) {
+    event.preventDefault?.();
+    event.stopPropagation?.();
+  }
+  return pending;
+}
+
+function beginChord(event: ShortcutEventLike, leader: KeybindingShortcut, platform: string): void {
+  if (!isKeydownLike(event)) return;
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  const leaderKey = shortcutConflictKey(leader, platform);
+  if (pendingChord?.leaderKey === leaderKey) return;
+  setPendingChord({ leaderKey, label: formatShortcutLabel(leader, platform) });
+}
+
+/**
+ * Whether this key is the second step of a pending chord. Handlers that react
+ * to raw keys (type-to-focus, Enter to send) must leave such a key alone.
+ */
+export function isChordFollowUp(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return pendingChordForEvent(event, keybindings, resolvePlatform(options)) !== null;
+}
+
 export function resolveShortcutCommand(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
@@ -241,11 +408,28 @@ export function resolveShortcutCommand(
 ): KeybindingCommand | null {
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
+  const pending = pendingChordForEvent(event, keybindings, platform);
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
+
+    if ("chord" in binding) {
+      const [leader, next] = binding.chord;
+      if (pending) {
+        if (shortcutConflictKey(leader, platform) !== pending.leaderKey) continue;
+        if (!matchesShortcut(event, next, platform)) continue;
+        return binding.command;
+      }
+      if (!matchesShortcut(event, leader, platform)) continue;
+      const startContext = chordStartContext(event, context, options?.context);
+      if (!startContext || !matchesWhenClause(binding.whenAst, startContext)) continue;
+      beginChord(event, leader, platform);
+      return null;
+    }
+
+    if (pending) continue;
     if (!matchesShortcut(event, binding.shortcut, platform)) continue;
     return binding.command;
   }
@@ -287,6 +471,15 @@ export function formatShortcutLabel(
   return parts.join("+");
 }
 
+/** `⌘G X` for a chord, `⌘K` for a plain shortcut. */
+export function formatBindingLabel(
+  binding: ResolvedKeybindingRule,
+  platform = navigator.platform,
+): string {
+  if ("shortcut" in binding) return formatShortcutLabel(binding.shortcut, platform);
+  return binding.chord.map((step) => formatShortcutLabel(step, platform)).join(" ");
+}
+
 export function shortcutLabelForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand | null,
@@ -298,8 +491,8 @@ export function shortcutLabelForCommand(
       ? ({ platform: options } satisfies ResolvedShortcutLabelOptions)
       : options;
   const platform = resolvePlatform(resolvedOptions);
-  const shortcut = findEffectiveShortcutForCommand(keybindings, command, resolvedOptions);
-  return shortcut ? formatShortcutLabel(shortcut, platform) : null;
+  const binding = findEffectiveBindingForCommand(keybindings, command, resolvedOptions);
+  return binding ? formatBindingLabel(binding, platform) : null;
 }
 
 export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {
@@ -345,9 +538,9 @@ export function shouldShowThreadJumpHintsForModifiers(
   const platform = resolvePlatform(options);
 
   for (const command of THREAD_JUMP_KEYBINDING_COMMANDS) {
-    const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
-    if (!shortcut) continue;
-    if (matchesShortcutModifiers(modifiers, shortcut, platform)) {
+    const binding = findEffectiveBindingForCommand(keybindings, command, options);
+    if (!binding || !("shortcut" in binding)) continue;
+    if (matchesShortcutModifiers(modifiers, binding.shortcut, platform)) {
       return true;
     }
   }
