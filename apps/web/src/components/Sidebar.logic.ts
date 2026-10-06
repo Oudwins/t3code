@@ -1078,25 +1078,14 @@ export function isThreadWokeUnseen(input: {
   return Number.isNaN(lastVisitedMs) || lastVisitedMs < wokeAtMs;
 }
 
-/** Whether the thread is waiting on the user: blocked on an approval or
-    question, failed or rate limited, unread after finishing, or freshly woken.
-    Threads still working, or waiting on background work, never qualify. */
-export function threadNeedsAttention(
-  thread: SidebarThreadStatusInput &
-    ThreadStatusInput &
-    Pick<SidebarThreadSummary, "settledOverride">,
-  options: { readonly lastVisitedAt: string | undefined; readonly wokeAt: string | null },
-): boolean {
-  const kind = resolveSidebarV2TopStatus({
-    status: resolveSidebarThreadStatus(thread),
-    isUnread: hasUnseenCompletion({ ...thread, lastVisitedAt: options.lastVisitedAt }),
-    isWoke: isThreadWokeUnseen({
-      wokeAt: options.wokeAt,
-      lastVisitedAt: options.lastVisitedAt,
-      settledOverride: thread.settledOverride,
-    }),
-  });
-  return kind !== null && kind !== "working" && kind !== "waiting";
+/** Whether the next move is the user's: anything that has stopped working,
+    whether or not they have already read it. Threads still working, or waiting
+    on background work, never qualify. Unread state is deliberately ignored: the
+    thread you were watching when it finished is read, and is still the one to
+    jump back to. */
+export function threadNeedsAttention(thread: SidebarThreadStatusInput): boolean {
+  const status = resolveSidebarThreadStatus(thread);
+  return status !== "working" && status !== "waiting";
 }
 
 /** First VALID timestamp wins: `a ?? b` falls through on null, but a present-

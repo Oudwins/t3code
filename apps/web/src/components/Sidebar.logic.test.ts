@@ -962,51 +962,31 @@ describe("threadNeedsAttention", () => {
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
   const resting = {
-    hasActionableProposedPlan: false,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
-    interactionMode: "default" as const,
-    latestRun: makeLatestRun(),
     runtime: null,
-    settledOverride: null,
   };
-  const visitedBeforeCompletion = "2026-03-09T10:04:00.000Z";
-  const visitedAfterCompletion = "2026-03-09T10:06:00.000Z";
 
-  it("flags a finished thread only while its completion is unread", () => {
-    expect(
-      threadNeedsAttention(resting, { lastVisitedAt: visitedBeforeCompletion, wokeAt: null }),
-    ).toBe(true);
-    expect(
-      threadNeedsAttention(resting, { lastVisitedAt: visitedAfterCompletion, wokeAt: null }),
-    ).toBe(false);
+  it("flags a finished thread whether or not its completion was read", () => {
+    expect(threadNeedsAttention({ ...resting, runtime: { ...runtime, status: "completed" } })).toBe(
+      true,
+    );
+    expect(threadNeedsAttention(resting)).toBe(true);
   });
 
-  it("flags threads blocked on the user even when already read", () => {
-    const options = { lastVisitedAt: visitedAfterCompletion, wokeAt: null };
-    expect(threadNeedsAttention({ ...resting, hasPendingApprovals: true }, options)).toBe(true);
-    expect(threadNeedsAttention({ ...resting, hasPendingUserInput: true }, options)).toBe(true);
-    expect(
-      threadNeedsAttention({ ...resting, runtime: { ...runtime, status: "failed" } }, options),
-    ).toBe(true);
+  it("flags threads blocked on the user", () => {
+    expect(threadNeedsAttention({ ...resting, hasPendingApprovals: true })).toBe(true);
+    expect(threadNeedsAttention({ ...resting, hasPendingUserInput: true })).toBe(true);
+    expect(threadNeedsAttention({ ...resting, runtime: { ...runtime, status: "failed" } })).toBe(
+      true,
+    );
   });
 
   it("never flags a thread that is still working or waiting on background work", () => {
-    const options = { lastVisitedAt: visitedBeforeCompletion, wokeAt: null };
-    expect(threadNeedsAttention({ ...resting, runtime }, options)).toBe(false);
-    expect(
-      threadNeedsAttention({ ...resting, runtime: { ...runtime, status: "idle" } }, options),
-    ).toBe(false);
-  });
-
-  it("flags a woken thread until it is visited after the wake", () => {
-    const wokeAt = "2026-03-09T11:00:00.000Z";
-    expect(threadNeedsAttention(resting, { lastVisitedAt: visitedAfterCompletion, wokeAt })).toBe(
-      true,
+    expect(threadNeedsAttention({ ...resting, runtime })).toBe(false);
+    expect(threadNeedsAttention({ ...resting, runtime: { ...runtime, status: "idle" } })).toBe(
+      false,
     );
-    expect(
-      threadNeedsAttention(resting, { lastVisitedAt: "2026-03-09T11:30:00.000Z", wokeAt }),
-    ).toBe(false);
   });
 });
 

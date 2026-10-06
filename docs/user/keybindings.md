@@ -54,10 +54,11 @@ list of wake times; type to filter it, press Enter to pick one, or choose **Cust
 for a date or duration. A thread waiting on an approval or question cannot be snoozed.
 
 `mod+shift+[` and `mod+shift+]` open the previous and next thread in the sidebar.
-`mod+alt+[` and `mod+alt+]` skip to the previous and next thread that needs you:
-blocked on an approval or question, failed, finished but unread, or just woken from a
-snooze. Working, snoozed, and settled threads are skipped, and the search wraps at
-either end. These two need the default sidebar rather than the legacy one.
+`mod+alt+[` and `mod+alt+]` skip to the previous and next thread that needs you: any
+thread that has stopped working, whether it is blocked on an approval or question,
+failed, or simply finished, and whether or not you have read it. Working, snoozed, and
+settled threads are skipped, and the search wraps at either end. These two need the
+default sidebar rather than the legacy one.
 
 Change them in Settings under **Thread: Settle**, **Thread: Snooze**, **Thread: Previous
 Needing Attention**, and **Thread: Next Needing Attention**.
