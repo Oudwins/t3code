@@ -52,6 +52,19 @@ to override its environment defaults. Worktree directories keep their original n
 If generation fails, or a custom name is invalid or already taken, the temporary
 branch name remains.
 
+## Worktree setup from Cursor
+
+A project with no actions of its own and a `.cursor/worktrees.json` in its repository runs that
+file's setup commands in each new worktree, in place of the environment's default setup action.
+Use `setup-worktree`, or `setup-worktree-unix` and `setup-worktree-windows` to differ per OS; the
+OS-specific key wins. A key holds either a list of commands or the path of a script relative to
+the file. The worktree's copy is used first, then the project's main checkout.
+
+`$ROOT_WORKTREE_PATH` points at the main checkout, as in Cursor. Commands run one per line in your
+terminal's shell, so POSIX syntax needs a POSIX shell, and the agent starts without waiting for
+them. Give the project any action of its own to stop using the file. The setup command shows in
+the new thread's setup progress, but not in the project's Actions list.
+
 ## Scheduled tasks on mobile
 
 Open **Settings → Scheduled tasks** to create recurring tasks or manage existing
