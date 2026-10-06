@@ -94,7 +94,7 @@ export function shortcutKeyFromEvent(event: Pick<ShortcutEventLike, "key" | "cod
   return physicalKey ?? layoutKey;
 }
 
-function resolveEventKeys(event: ShortcutEventLike): Set<string> {
+export function resolveEventKeys(event: ShortcutEventLike): Set<string> {
   const layoutKey = normalizeEventKey(event.key);
   const keys = new Set([layoutKey]);
   // The physical-position fallback exists for layouts that type non-Latin

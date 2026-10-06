@@ -833,6 +833,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         // Hold the height from when the search started; results scroll instead of resizing.
         style={isSearching ? { height: searchHeight } : undefined}
         data-model-picker-content="true"
+        data-list-navigation=""
       >
         {/* Sidebar */}
         {showSidebar && (
