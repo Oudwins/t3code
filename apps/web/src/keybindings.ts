@@ -319,6 +319,14 @@ export function threadTraversalDirectionFromCommand(
   return null;
 }
 
+export function threadAttentionTraversalDirectionFromCommand(
+  command: string | null,
+): "previous" | "next" | null {
+  if (command === "thread.previousAttention") return "previous";
+  if (command === "thread.nextAttention") return "next";
+  return null;
+}
+
 export function shouldShowThreadJumpHintsForModifiers(
   modifiers: ShortcutModifierStateLike,
   keybindings: ResolvedKeybindingsConfig,

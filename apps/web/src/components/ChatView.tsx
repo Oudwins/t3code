@@ -86,8 +86,16 @@ import {
 } from "@t3tools/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
-import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
+import {
+  canSnooze,
+  effectiveSnoozed,
+  threadWokeAt,
+} from "@t3tools/client-runtime/state/thread-settled";
+import {
+  ThreadSnoozeBlockedError,
+  useAcknowledgeThreadWoke,
+  useThreadActions,
+} from "../hooks/useThreadActions";
 import {
   deriveProviderSubagentStatus,
   deriveReportedModelSelection,
@@ -298,6 +306,7 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { ThreadSnoozePicker, type SnoozeChoice } from "./ThreadSnoozePicker";
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,
@@ -1527,7 +1536,7 @@ export default function ChatView(props: ChatViewProps) {
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
-  const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
+  const { settleThread, snoozeThread, pinThread, confirmAndUnpinThread } = useThreadActions();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -6990,6 +6999,25 @@ export default function ChatView(props: ChatViewProps) {
       setUnsnoozingThreadKey((current) => (current === threadKey ? null : current));
     }
   }, [activeThreadRef, activeThreadShell, unsnoozeThreadMutation, updateThreadMetadata]);
+  // The thread the snooze hotkey opened the picker for; a pick snoozes that
+  // thread even if the route moves while the picker is open.
+  const [snoozePickerTarget, setSnoozePickerTarget] = useState<ScopedThreadRef | null>(null);
+  const handleSnoozeChoice = useCallback(
+    async (choice: SnoozeChoice) => {
+      if (snoozePickerTarget === null) return;
+      const result = await snoozeThread(snoozePickerTarget, choice.snoozedUntil);
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to snooze thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    },
+    [snoozePickerTarget, snoozeThread],
+  );
   const [isRestoringThreadBranch, setIsRestoringThreadBranch] = useState(false);
   const [branchRestoreConfirmOpen, setBranchRestoreConfirmOpen] = useState(false);
   // Once revealed for a given mismatch, the banner stays mounted until the
@@ -7647,6 +7675,28 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.snooze") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat || !isServerThread || !activeThreadRef || !supportsSnooze) return;
+        if (activeThreadSnoozed) {
+          void handleUnsnoozeActiveThread();
+          return;
+        }
+        if (activeThreadShell && !canSnooze(activeThreadShell, { now: new Date().toISOString() })) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Can't snooze thread",
+              description: new ThreadSnoozeBlockedError(activeThreadRef).message,
+            }),
+          );
+          return;
+        }
+        setSnoozePickerTarget(activeThreadRef);
+        return;
+      }
+
       if (command === "thread.pin") {
         event.preventDefault();
         event.stopPropagation();
@@ -7855,6 +7905,10 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef,
     activeThreadPinned,
     activeThreadSettled,
+    activeThreadShell,
+    activeThreadSnoozed,
+    handleUnsnoozeActiveThread,
+    supportsSnooze,
     canInterruptRunningThread,
     terminalUiState.terminalOpen,
     terminalUiState.activeTerminalId,
@@ -11600,6 +11654,13 @@ export default function ChatView(props: ChatViewProps) {
         </AlertDialogPopup>
       </AlertDialog>
       <LinkPullRequestDialogHost />
+      <ThreadSnoozePicker
+        open={snoozePickerTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setSnoozePickerTarget(null);
+        }}
+        onSelect={handleSnoozeChoice}
+      />
       {expandedImage && (
         <ExpandedImageDialog
           key={expandedImageKey(expandedImage)}

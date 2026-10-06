@@ -29,6 +29,7 @@ import {
   shortcutLabelForCommand,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
+  threadAttentionTraversalDirectionFromCommand,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
@@ -524,6 +525,19 @@ describe("thread navigation helpers", () => {
     assert.strictEqual(threadTraversalDirectionFromCommand("thread.next"), "next");
     assert.isNull(threadTraversalDirectionFromCommand("thread.jump.1"));
     assert.isNull(threadTraversalDirectionFromCommand(null));
+  });
+
+  it("maps attention traversal commands to directions", () => {
+    assert.strictEqual(
+      threadAttentionTraversalDirectionFromCommand("thread.previousAttention"),
+      "previous",
+    );
+    assert.strictEqual(
+      threadAttentionTraversalDirectionFromCommand("thread.nextAttention"),
+      "next",
+    );
+    assert.isNull(threadAttentionTraversalDirectionFromCommand("thread.next"));
+    assert.isNull(threadAttentionTraversalDirectionFromCommand(null));
   });
 
   it("shows jump hints only when configured modifiers match", () => {

@@ -39,6 +39,22 @@ on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
 Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
 in Settings.
 
+## Triage threads
+
+With a thread open, `mod+shift+s` settles it and `mod+alt+s` snoozes it. Both toggle:
+the same shortcut un-settles a settled thread or wakes a snoozed one. Snooze opens a
+list of wake times; type to filter it, press Enter to pick one, or choose **Custom…**
+for a date or duration. A thread waiting on an approval or question cannot be snoozed.
+
+`mod+shift+[` and `mod+shift+]` open the previous and next thread in the sidebar.
+`mod+alt+[` and `mod+alt+]` skip to the previous and next thread that needs you:
+blocked on an approval or question, failed, finished but unread, or just woken from a
+snooze. Working, snoozed, and settled threads are skipped, and the search wraps at
+either end. These two need the default sidebar rather than the legacy one.
+
+Change them in Settings under **Thread: Settle**, **Thread: Snooze**, **Thread: Previous
+Needing Attention**, and **Thread: Next Needing Attention**.
+
 ## Copy pull request references
 
 With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`

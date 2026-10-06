@@ -24,10 +24,12 @@ import {
   isContextMenuPointerDown,
   isSidebarSubagentThread,
   isSidebarThreadWorking,
+  isThreadWokeUnseen,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
   reduceSidebarProjectScopeMenuState,
+  resolveAdjacentAttentionThreadId,
   resolveAdjacentThreadId,
   resolveProjectStatusIndicator,
   resolveSidebarSweepKeys,
@@ -54,6 +56,7 @@ import {
   sortSidebarV2ProjectGroups,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
+  threadNeedsAttention,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
   type SidebarListItem,
   type SidebarListMarker,
@@ -852,6 +855,183 @@ describe("resolveAdjacentThreadId", () => {
         direction: "previous",
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveAdjacentAttentionThreadId", () => {
+  const threadIds = ["a", "b", "c", "d"];
+  const flagged =
+    (...ids: string[]) =>
+    (id: string) =>
+      ids.includes(id);
+
+  it("skips threads that do not need attention", () => {
+    const input = { threadIds, currentThreadId: "b", needsAttention: flagged("a", "d") };
+    expect(resolveAdjacentAttentionThreadId({ ...input, direction: "next" })).toBe("d");
+    expect(resolveAdjacentAttentionThreadId({ ...input, direction: "previous" })).toBe("a");
+  });
+
+  it("finds neighbours when the current thread was already read", () => {
+    const input = { threadIds, currentThreadId: "c", needsAttention: flagged("b", "d") };
+    expect(resolveAdjacentAttentionThreadId({ ...input, direction: "next" })).toBe("d");
+    expect(resolveAdjacentAttentionThreadId({ ...input, direction: "previous" })).toBe("b");
+  });
+
+  it("wraps past either end of the list", () => {
+    const needsAttention = flagged("a", "d");
+    expect(
+      resolveAdjacentAttentionThreadId({
+        threadIds,
+        currentThreadId: "d",
+        direction: "next",
+        needsAttention,
+      }),
+    ).toBe("a");
+    expect(
+      resolveAdjacentAttentionThreadId({
+        threadIds,
+        currentThreadId: "a",
+        direction: "previous",
+        needsAttention,
+      }),
+    ).toBe("d");
+  });
+
+  it("starts at the matching edge when the current thread is not in the list", () => {
+    const needsAttention = flagged("b", "c");
+    for (const currentThreadId of [null, "elsewhere"]) {
+      expect(
+        resolveAdjacentAttentionThreadId({
+          threadIds,
+          currentThreadId,
+          direction: "next",
+          needsAttention,
+        }),
+      ).toBe("b");
+      expect(
+        resolveAdjacentAttentionThreadId({
+          threadIds,
+          currentThreadId,
+          direction: "previous",
+          needsAttention,
+        }),
+      ).toBe("c");
+    }
+  });
+
+  it("never returns the current thread", () => {
+    for (const direction of ["next", "previous"] as const) {
+      expect(
+        resolveAdjacentAttentionThreadId({
+          threadIds,
+          currentThreadId: "b",
+          direction,
+          needsAttention: flagged("b"),
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("returns null when nothing needs attention", () => {
+    expect(
+      resolveAdjacentAttentionThreadId({
+        threadIds,
+        currentThreadId: "b",
+        direction: "next",
+        needsAttention: flagged(),
+      }),
+    ).toBeNull();
+    expect(
+      resolveAdjacentAttentionThreadId({
+        threadIds: [],
+        currentThreadId: null,
+        direction: "previous",
+        needsAttention: flagged("a"),
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("threadNeedsAttention", () => {
+  const runtime = {
+    status: "running" as const,
+    activeRunId: null,
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    providerName: "Codex",
+    lastError: null,
+    updatedAt: "2026-03-09T10:00:00.000Z",
+  };
+  const resting = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestRun: makeLatestRun(),
+    runtime: null,
+    settledOverride: null,
+  };
+  const visitedBeforeCompletion = "2026-03-09T10:04:00.000Z";
+  const visitedAfterCompletion = "2026-03-09T10:06:00.000Z";
+
+  it("flags a finished thread only while its completion is unread", () => {
+    expect(
+      threadNeedsAttention(resting, { lastVisitedAt: visitedBeforeCompletion, wokeAt: null }),
+    ).toBe(true);
+    expect(
+      threadNeedsAttention(resting, { lastVisitedAt: visitedAfterCompletion, wokeAt: null }),
+    ).toBe(false);
+  });
+
+  it("flags threads blocked on the user even when already read", () => {
+    const options = { lastVisitedAt: visitedAfterCompletion, wokeAt: null };
+    expect(threadNeedsAttention({ ...resting, hasPendingApprovals: true }, options)).toBe(true);
+    expect(threadNeedsAttention({ ...resting, hasPendingUserInput: true }, options)).toBe(true);
+    expect(
+      threadNeedsAttention({ ...resting, runtime: { ...runtime, status: "failed" } }, options),
+    ).toBe(true);
+  });
+
+  it("never flags a thread that is still working or waiting on background work", () => {
+    const options = { lastVisitedAt: visitedBeforeCompletion, wokeAt: null };
+    expect(threadNeedsAttention({ ...resting, runtime }, options)).toBe(false);
+    expect(
+      threadNeedsAttention({ ...resting, runtime: { ...runtime, status: "idle" } }, options),
+    ).toBe(false);
+  });
+
+  it("flags a woken thread until it is visited after the wake", () => {
+    const wokeAt = "2026-03-09T11:00:00.000Z";
+    expect(threadNeedsAttention(resting, { lastVisitedAt: visitedAfterCompletion, wokeAt })).toBe(
+      true,
+    );
+    expect(
+      threadNeedsAttention(resting, { lastVisitedAt: "2026-03-09T11:30:00.000Z", wokeAt }),
+    ).toBe(false);
+  });
+});
+
+describe("isThreadWokeUnseen", () => {
+  const wokeAt = "2026-03-09T11:00:00.000Z";
+
+  it("clears once the thread is visited after the wake", () => {
+    const base = { wokeAt, settledOverride: null } as const;
+    expect(isThreadWokeUnseen({ ...base, lastVisitedAt: "2026-03-09T10:00:00.000Z" })).toBe(true);
+    expect(isThreadWokeUnseen({ ...base, lastVisitedAt: "2026-03-09T12:00:00.000Z" })).toBe(false);
+  });
+
+  it("treats a missing or unparseable visit as never visited", () => {
+    const base = { wokeAt, settledOverride: null } as const;
+    expect(isThreadWokeUnseen({ ...base, lastVisitedAt: undefined })).toBe(true);
+    expect(isThreadWokeUnseen({ ...base, lastVisitedAt: "not a date" })).toBe(true);
+  });
+
+  it("ignores threads that never woke or were settled since", () => {
+    expect(
+      isThreadWokeUnseen({ wokeAt: null, lastVisitedAt: undefined, settledOverride: null }),
+    ).toBe(false);
+    expect(
+      isThreadWokeUnseen({ wokeAt, lastVisitedAt: undefined, settledOverride: "settled" }),
+    ).toBe(false);
   });
 });
 

@@ -891,6 +891,33 @@ export function resolveAdjacentThreadId<T>(input: {
   return currentIndex < threadIds.length - 1 ? (threadIds[currentIndex + 1] ?? null) : null;
 }
 
+/**
+ * The nearest other thread in `direction` that passes `needsAttention`,
+ * wrapping at either end. Unlike plain traversal the current thread need not
+ * be in the list: reading a thread clears what flagged it, so the one you just
+ * opened is usually no longer a candidate itself. From an unknown position the
+ * walk starts at the matching edge.
+ */
+export function resolveAdjacentAttentionThreadId<T>(input: {
+  threadIds: readonly T[];
+  currentThreadId: T | null;
+  direction: ThreadTraversalDirection;
+  needsAttention: (threadId: T) => boolean;
+}): T | null {
+  const { currentThreadId, direction, needsAttention, threadIds } = input;
+  const count = threadIds.length;
+  const currentIndex = currentThreadId === null ? -1 : threadIds.indexOf(currentThreadId);
+  const step = direction === "next" ? 1 : -1;
+  const origin = currentIndex === -1 ? (direction === "next" ? -1 : count) : currentIndex;
+
+  for (let offset = 1; offset <= count; offset += 1) {
+    const candidate = threadIds[(((origin + step * offset) % count) + count) % count];
+    if (candidate === undefined || candidate === currentThreadId) continue;
+    if (needsAttention(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function isContextMenuPointerDown(input: {
   button: number;
   ctrlKey: boolean;
@@ -1034,6 +1061,42 @@ export function resolveSidebarV2TopStatus(input: {
 
 export function shouldShowSidebarV2Duration(status: SidebarThreadStatus): boolean {
   return status === "working";
+}
+
+/** A woken thread keeps its Woke pill until the user visits it after the wake.
+    An unparseable visit counts as never-visited, so corrupt local data cannot
+    eat the wake signal. */
+export function isThreadWokeUnseen(input: {
+  readonly wokeAt: string | null;
+  readonly lastVisitedAt: string | undefined;
+  readonly settledOverride: SidebarThreadSummary["settledOverride"];
+}): boolean {
+  if (input.wokeAt === null || input.settledOverride === "settled") return false;
+  const wokeAtMs = Date.parse(input.wokeAt);
+  if (Number.isNaN(wokeAtMs)) return false;
+  const lastVisitedMs = input.lastVisitedAt === undefined ? NaN : Date.parse(input.lastVisitedAt);
+  return Number.isNaN(lastVisitedMs) || lastVisitedMs < wokeAtMs;
+}
+
+/** Whether the thread is waiting on the user: blocked on an approval or
+    question, failed or rate limited, unread after finishing, or freshly woken.
+    Threads still working, or waiting on background work, never qualify. */
+export function threadNeedsAttention(
+  thread: SidebarThreadStatusInput &
+    ThreadStatusInput &
+    Pick<SidebarThreadSummary, "settledOverride">,
+  options: { readonly lastVisitedAt: string | undefined; readonly wokeAt: string | null },
+): boolean {
+  const kind = resolveSidebarV2TopStatus({
+    status: resolveSidebarThreadStatus(thread),
+    isUnread: hasUnseenCompletion({ ...thread, lastVisitedAt: options.lastVisitedAt }),
+    isWoke: isThreadWokeUnseen({
+      wokeAt: options.wokeAt,
+      lastVisitedAt: options.lastVisitedAt,
+      settledOverride: thread.settledOverride,
+    }),
+  });
+  return kind !== null && kind !== "working" && kind !== "waiting";
 }
 
 /** First VALID timestamp wins: `a ?? b` falls through on null, but a present-

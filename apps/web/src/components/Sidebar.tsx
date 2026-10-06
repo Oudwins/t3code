@@ -109,6 +109,7 @@ import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
   shouldShowThreadJumpHintsForModifiers,
+  threadAttentionTraversalDirectionFromCommand,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
@@ -164,7 +165,7 @@ import {
   resolveActiveThreadRouteRef,
   resolveThreadRouteTarget,
 } from "../threadRoutes";
-import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
+import { formatRelativeTimeLabel } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
@@ -184,10 +185,12 @@ import {
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
   isSidebarThreadWorking,
+  isThreadWokeUnseen,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
+  resolveAdjacentAttentionThreadId,
   resolveAdjacentThreadId,
   resolveSidebarSweepKeys,
   resolveSidebarDropTarget,
@@ -210,6 +213,7 @@ import {
   sortSidebarV2ProjectGroups,
   sortThreadsForSidebar,
   sortWorkingThreadsBySend,
+  threadNeedsAttention,
   useThreadJumpHintVisibility,
   useRetainedValue,
   useSidebarRowSubscriptionLease,
@@ -1234,14 +1238,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // an explicit act, so the pill clears only when the user re-engages:
   // reading a completion-triggered wake, clicking the pill, sending a
   // message, settling, archiving, or a change request state that settles the
-  // thread. Timer wakes survive a mere visit. An unparseable visit timestamp
-  // counts as never-visited, so corrupt local data cannot eat the wake signal.
-  const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
-  const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
-  const isWoke =
-    wokeAtDate !== null &&
-    (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
-    thread.settledOverride !== "settled";
+  // thread. Timer wakes survive a mere visit.
+  const isWoke = isThreadWokeUnseen({
+    wokeAt: props.wokeAt,
+    lastVisitedAt,
+    settledOverride: thread.settledOverride,
+  });
   // Background work always recedes when it is not selected: an unread parent
   // completion must not pull a still-working thread back into the foreground.
   // Ready and action-required rows keep their unread and wake prominence.
@@ -4745,6 +4747,38 @@ export default function Sidebar() {
             threadIds: orderedThreadKeys,
             currentThreadId: routeThreadKey,
             direction: traversalDirection,
+          }),
+        );
+        return;
+      }
+      const attentionDirection = threadAttentionTraversalDirectionFromCommand(command);
+      if (attentionDirection !== null) {
+        // Settled and snoozed threads are parked on purpose. A snoozed thread
+        // that needs you again has already left the snoozed shelf.
+        const now = new Date().toISOString();
+        const localVisits = useUiStateStore.getState().threadLastVisitedAtById;
+        navigateToThreadKey(
+          resolveAdjacentAttentionThreadId({
+            threadIds: orderedThreadKeys,
+            currentThreadId: routeThreadKey,
+            direction: attentionDirection,
+            needsAttention: (threadKey) => {
+              const thread = threadByKey.get(threadKey);
+              if (
+                !thread ||
+                settledThreadKeysRef.current.has(threadKey) ||
+                snoozedThreadKeysRef.current.has(threadKey)
+              ) {
+                return false;
+              }
+              return threadNeedsAttention(thread, {
+                lastVisitedAt: resolveThreadLastVisitedAt(
+                  thread.lastVisitedAt,
+                  localVisits[threadKey],
+                ),
+                wokeAt: threadWokeAt(thread, { now }),
+              });
+            },
           }),
         );
         return;
