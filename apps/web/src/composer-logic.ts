@@ -9,7 +9,7 @@ import {
   type ComposerPromptSegment,
 } from "./composer-editor-mentions";
 
-import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
+import { isChordFollowUp, resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
@@ -49,8 +49,10 @@ export function composerSubmissionIntentForKey(input: {
   const { event } = input;
   if (input.isMobileViewport || event.isComposing || event.keyCode === 229 || event.repeat)
     return null;
+  const platformOptions = input.platform === undefined ? {} : { platform: input.platform };
+  if (isChordFollowUp(event, input.keybindings, platformOptions)) return null;
   const command = resolveShortcutCommand(event, input.keybindings, {
-    ...(input.platform === undefined ? {} : { platform: input.platform }),
+    ...platformOptions,
     context: {
       composerFocus: true,
       draftThreadRoute: input.isDraftThread,

@@ -188,11 +188,30 @@ export type KeybindingWhenNode =
   | { type: "and"; left: KeybindingWhenNode; right: KeybindingWhenNode }
   | { type: "or"; left: KeybindingWhenNode; right: KeybindingWhenNode };
 
-export const ResolvedKeybindingRule = Schema.Struct({
+export const ResolvedShortcutKeybindingRule = Schema.Struct({
   command: KeybindingCommand,
   shortcut: KeybindingShortcut,
   whenAst: Schema.optional(KeybindingWhenNode),
 }).annotate({ parseOptions: { onExcessProperty: "ignore" } });
+export type ResolvedShortcutKeybindingRule = typeof ResolvedShortcutKeybindingRule.Type;
+
+/**
+ * A chord is a leader shortcut (always carries a modifier) followed by one
+ * more key. It has no `shortcut` field on purpose: clients that predate chords
+ * fail to decode the rule and drop it, instead of firing the command on the
+ * leader press alone.
+ */
+export const ResolvedChordKeybindingRule = Schema.Struct({
+  command: KeybindingCommand,
+  chord: Schema.Tuple([KeybindingShortcut, KeybindingShortcut]),
+  whenAst: Schema.optional(KeybindingWhenNode),
+}).annotate({ parseOptions: { onExcessProperty: "ignore" } });
+export type ResolvedChordKeybindingRule = typeof ResolvedChordKeybindingRule.Type;
+
+export const ResolvedKeybindingRule = Schema.Union([
+  ResolvedShortcutKeybindingRule,
+  ResolvedChordKeybindingRule,
+]);
 export type ResolvedKeybindingRule = typeof ResolvedKeybindingRule.Type;
 
 /**

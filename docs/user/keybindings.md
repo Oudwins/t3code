@@ -116,6 +116,29 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 `mod` means Command on macOS and Control elsewhere. Other modifiers are
 `cmd` / `meta`, `ctrl` / `control`, `alt` / `option`, and `shift`.
 
+## Chords
+
+A chord runs a command from two keys in a row: a shortcut with a modifier, then one
+more key. Separate the steps with a space:
+
+```json
+{ "key": "mod+g n", "command": "thread.next", "when": "!terminalFocus" }
+```
+
+Press `mod+g`, release it, then press `n`. While T3 Code waits, a hint at the top
+of the window shows the first key. `Esc`, any key the chord does not use, or about
+a second and a half without a key cancels it. A cancelled chord swallows the key
+you pressed, so it never types into the composer.
+
+In **Settings → Keybindings**, click a shortcut and press the first key, then press
+the second. A modified first key followed by a plain key records a chord.
+
+The first step must include `mod`, `ctrl`, `cmd`, or `alt`, so it can never be typed
+text. The second step is usually a plain key but may carry modifiers, such as
+`mod+k mod+s`. `Esc` cannot be a second step. Chords work in the web and desktop apps
+and never start while the terminal has focus. When a chord's first key matches a
+plain shortcut, [rule order](#precedence) decides which one runs.
+
 ## When conditions
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,

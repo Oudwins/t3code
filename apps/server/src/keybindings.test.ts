@@ -128,6 +128,126 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }),
   );
 
+  it.effect("compiles a chord rule into its leader and follow-up key", () =>
+    Effect.sync(() => {
+      const compiled = Keybindings.compileResolvedKeybindingRule({
+        key: "mod+g  x",
+        command: "terminal.toggle",
+        when: "!terminalFocus",
+      });
+
+      assert.deepEqual(compiled, {
+        command: "terminal.toggle",
+        chord: [
+          {
+            key: "g",
+            metaKey: false,
+            ctrlKey: false,
+            shiftKey: false,
+            altKey: false,
+            modKey: true,
+          },
+          {
+            key: "x",
+            metaKey: false,
+            ctrlKey: false,
+            shiftKey: false,
+            altKey: false,
+            modKey: false,
+          },
+        ],
+        whenAst: { type: "not", node: { type: "identifier", name: "terminalFocus" } },
+      });
+    }),
+  );
+
+  it.effect("rejects chords whose leader has no modifier or that are not two steps", () =>
+    Effect.sync(() => {
+      for (const key of ["g x", "shift+g x", "mod+g", "mod+g x y", "mod+g esc"]) {
+        const compiled = Keybindings.compileResolvedKeybindingRule({
+          key,
+          command: "terminal.toggle",
+        });
+        // `mod+g` alone is a plain shortcut; everything else must be rejected outright.
+        if (key === "mod+g") assert.isNotNull(compiled);
+        else assert.isNull(compiled, key);
+      }
+    }),
+  );
+
+  it.effect("keeps tolerating spaces around the plus in a plain shortcut", () =>
+    Effect.sync(() => {
+      for (const key of ["mod + k", "mod +k", "mod+ k"]) {
+        const compiled = Keybindings.compileResolvedKeybindingRule({
+          key,
+          command: "terminal.toggle",
+        });
+        assert.isTrue(compiled !== null && "shortcut" in compiled, key);
+      }
+      assert.isNull(
+        Keybindings.compileResolvedKeybindingRule({ key: "mod + g x", command: "terminal.toggle" }),
+      );
+    }),
+  );
+
+  it.effect("encodes a resolved chord back to its key string", () =>
+    Effect.gen(function* () {
+      const compiled = Keybindings.compileResolvedKeybindingRule({
+        key: "mod+alt+g shift+x",
+        command: "terminal.toggle",
+      });
+      if (!compiled) return assert.fail("Expected the chord to compile");
+      const encoded = yield* encodeResolvedKeybindingFromConfig(compiled);
+      assert.equal(encoded.key, "mod+alt+g shift+x");
+    }),
+  );
+
+  it.effect("persists and reloads a chord rule", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, []);
+
+      const resolved = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        return yield* keybindings.upsertKeybindingRule({
+          key: "mod+g x",
+          command: "terminal.toggle",
+        });
+      });
+
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), [
+        { key: "mod+g x", command: "terminal.toggle" },
+      ]);
+      assert.isTrue(
+        resolved.some((entry) => "chord" in entry && entry.command === "terminal.toggle"),
+      );
+
+      const reloaded = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        return yield* keybindings.loadConfigState;
+      });
+      assert.deepEqual(reloaded.issues, []);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("does not backfill a default that would shadow a custom chord's leader", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+j x", command: "script.custom-action.run" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(persisted.some((entry) => entry.command === "terminal.toggle"));
+      assert.isTrue(persisted.some((entry) => entry.key === "mod+j x"));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
   it.effect("rejects invalid rules", () =>
     Effect.sync(() => {
       assert.isNull(

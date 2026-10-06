@@ -8,6 +8,8 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_RESOLVED_KEYBINDINGS,
+  isChordLeaderShortcut,
+  parseKeybindingShortcut,
   parseKeybindingWhenExpression,
 } from "@t3tools/shared/keybindings";
 
@@ -93,6 +95,13 @@ export function shortcutToKeybindingInput(shortcut: KeybindingShortcut): string 
   return parts.join("+");
 }
 
+/** `mod+g x` for a chord, `mod+k` for a plain shortcut: the string a config rule's `key` holds. */
+export function bindingToKeybindingInput(binding: ResolvedKeybindingRule): string {
+  return "shortcut" in binding
+    ? shortcutToKeybindingInput(binding.shortcut)
+    : binding.chord.map(shortcutToKeybindingInput).join(" ");
+}
+
 export function whenAstToExpression(node: KeybindingWhenNode | undefined): string {
   if (!node) return "";
   switch (node.type) {
@@ -142,12 +151,12 @@ function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
     return "Project";
   }
 
-  const bindingKey = shortcutToKeybindingInput(binding.shortcut);
+  const bindingKey = bindingToKeybindingInput(binding);
   const bindingWhen = whenAstToExpression(binding.whenAst);
   const isDefault = DEFAULT_RESOLVED_KEYBINDINGS.some(
     (entry) =>
       entry.command === binding.command &&
-      shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
+      bindingToKeybindingInput(entry) === bindingKey &&
       whenAstToExpression(entry.whenAst) === bindingWhen,
   );
 
@@ -157,14 +166,14 @@ function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
 function defaultBindingForBinding(
   binding: ResolvedKeybindingRule,
 ): ResolvedKeybindingRule | undefined {
-  const bindingKey = shortcutToKeybindingInput(binding.shortcut);
+  const bindingKey = bindingToKeybindingInput(binding);
   const bindingWhen = whenAstToExpression(binding.whenAst);
 
   return (
     DEFAULT_RESOLVED_KEYBINDINGS.find(
       (entry) =>
         entry.command === binding.command &&
-        shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
+        bindingToKeybindingInput(entry) === bindingKey &&
         whenAstToExpression(entry.whenAst) === bindingWhen,
     ) ??
     DEFAULT_RESOLVED_KEYBINDINGS.find(
@@ -177,6 +186,14 @@ function defaultBindingForBinding(
 
 function keybindingRowId(command: KeybindingCommand, key: string, when: string): string {
   return `${command}\u0000${key}\u0000${when}`;
+}
+
+/** Equal keys collide; so do a chord's leader press and a plain shortcut on that same key. */
+function keysConflict(left: string, right: string): boolean {
+  if (left === right) return true;
+  const leftSteps = left.split(/\s+/);
+  const rightSteps = right.split(/\s+/);
+  return leftSteps.length !== rightSteps.length && leftSteps[0] === rightSteps[0];
 }
 
 function conflictsWithWhen(leftWhen: string, rightWhen: string): boolean {
@@ -192,7 +209,7 @@ export function keybindingConflictLabels(
   for (const candidate of rows) {
     if (
       candidate.id !== input.rowId &&
-      candidate.key === input.key &&
+      keysConflict(candidate.key, input.key) &&
       conflictsWithWhen(candidate.when, input.when)
     ) {
       conflicts.push(commandLabel(candidate.command));
@@ -208,7 +225,7 @@ export function buildKeybindingRows(
   const normalizedQuery = query.trim().toLowerCase();
   const rows = keybindings.map((binding, index) => {
     const defaultBinding = defaultBindingForBinding(binding);
-    const key = shortcutToKeybindingInput(binding.shortcut);
+    const key = bindingToKeybindingInput(binding);
     const when = whenAstToExpression(binding.whenAst);
     return {
       id: `${keybindingRowId(binding.command, key, when)}\u0000${index}`,
@@ -216,7 +233,7 @@ export function buildKeybindingRows(
       key,
       when,
       source: sourceForBinding(binding),
-      defaultKey: defaultBinding ? shortcutToKeybindingInput(defaultBinding.shortcut) : null,
+      defaultKey: defaultBinding ? bindingToKeybindingInput(defaultBinding) : null,
       defaultWhen: whenAstToExpression(defaultBinding?.whenAst),
       binding,
       conflicts: [],
@@ -391,4 +408,21 @@ export function keybindingFromKeyboardEvent(
   if (event.shiftKey) parts.push("shift");
   parts.push(keyToken);
   return parts.join("+");
+}
+
+/**
+ * Folds one recorded keypress into the draft. A modified key becomes the
+ * draft and arms it as a chord leader; the next plain key then completes the
+ * chord (`mod+g` then `x` gives `mod+g x`). Any other key starts over.
+ */
+export function recordKeybindingKeypress(
+  draft: { readonly keyDraft: string; readonly chordArmed: boolean },
+  step: string,
+): { readonly keyDraft: string; readonly chordArmed: boolean } {
+  const shortcut = parseKeybindingShortcut(step);
+  const isLeader = shortcut !== null && isChordLeaderShortcut(shortcut);
+  if (draft.chordArmed && shortcut !== null && !isLeader) {
+    return { keyDraft: `${draft.keyDraft} ${step}`, chordArmed: false };
+  }
+  return { keyDraft: step, chordArmed: isLeader };
 }

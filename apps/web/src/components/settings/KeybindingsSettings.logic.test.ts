@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import {
+  compileResolvedKeybindingsConfig,
+  DEFAULT_RESOLVED_KEYBINDINGS,
+} from "@t3tools/shared/keybindings";
 
 import {
   buildKeybindingRows,
@@ -10,6 +13,7 @@ import {
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
+  recordKeybindingKeypress,
   shortcutToKeybindingInput,
   unknownWhenVariables,
   whenAstToExpression,
@@ -408,5 +412,59 @@ describe("KeybindingsSettings.logic", () => {
         when: "",
       }),
     ).toEqual(["Chat: New Local"]);
+  });
+});
+
+describe("KeybindingsSettings.logic chords", () => {
+  it("lists a chord as one row keyed by both steps", () => {
+    const rows = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([{ key: "mod+g x", command: "thread.next" }]),
+      "",
+    );
+    expect(rows).toEqual([expect.objectContaining({ command: "thread.next", key: "mod+g x" })]);
+  });
+
+  it("records a plain key after a modified key as the chord's second step", () => {
+    const leader = recordKeybindingKeypress({ keyDraft: "", chordArmed: false }, "mod+g");
+    expect(leader).toEqual({ keyDraft: "mod+g", chordArmed: true });
+    expect(recordKeybindingKeypress(leader, "x")).toEqual({
+      keyDraft: "mod+g x",
+      chordArmed: false,
+    });
+    expect(recordKeybindingKeypress(leader, "shift+x")).toEqual({
+      keyDraft: "mod+g shift+x",
+      chordArmed: false,
+    });
+  });
+
+  it("starts over when another modified key follows, and never chords from a plain key", () => {
+    expect(recordKeybindingKeypress({ keyDraft: "mod+g", chordArmed: true }, "mod+k")).toEqual({
+      keyDraft: "mod+k",
+      chordArmed: true,
+    });
+    expect(recordKeybindingKeypress({ keyDraft: "", chordArmed: false }, "x")).toEqual({
+      keyDraft: "x",
+      chordArmed: false,
+    });
+    expect(recordKeybindingKeypress({ keyDraft: "x", chordArmed: false }, "y")).toEqual({
+      keyDraft: "y",
+      chordArmed: false,
+    });
+  });
+
+  it("reports a chord leader and a plain shortcut on the same key as a conflict", () => {
+    const rows = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([
+        { key: "mod+g", command: "thread.previous" },
+        { key: "mod+g x", command: "thread.next" },
+        { key: "mod+g y", command: "thread.pin" },
+      ]),
+      "",
+    );
+    const plain = rows.find((row) => row.command === "thread.previous");
+    const chord = rows.find((row) => row.command === "thread.next");
+    expect(plain?.conflicts).toEqual(["Thread: Next", "Thread: Pin"]);
+    // Two chords that share a leader but differ in the second key coexist.
+    expect(chord?.conflicts).toEqual(["Thread: Previous"]);
   });
 });

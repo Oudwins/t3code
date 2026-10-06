@@ -35,7 +35,7 @@ import {
 
 import { isElectron } from "../../env";
 import { useOpenInPreferredEditor } from "../../editorPreferences";
-import { formatShortcutLabel } from "../../keybindings";
+import { formatBindingLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -58,6 +58,7 @@ import {
   isKnownWhenVariable,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  recordKeybindingKeypress,
   parseWhenExpressionDraft,
   type KeybindingCommandOption,
   type KeybindingRow,
@@ -71,17 +72,32 @@ import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
 
-function KeybindingPill({ value }: { value: string }) {
-  // Keys dedupe repeated parts; a literal "+" in a shortcut splits into empty strings.
+/** Pairs each part with a React key; repeats get a suffix so a duplicated key still renders. */
+function keyedParts(parts: ReadonlyArray<string>) {
   const seenParts = new Map<string, number>();
-  const parts = value.split("+").map((part) => {
+  return parts.map((part) => {
     const seen = seenParts.get(part) ?? 0;
     seenParts.set(part, seen + 1);
     return { part, key: seen === 0 ? part : `${part}-${seen}` };
   });
+}
+
+function KeybindingPill({ value }: { value: string }) {
+  // A chord is its steps separated by spaces; each step renders as its own key group.
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {keyedParts(value.split(/\s+/)).map(({ part, key }) => (
+        <KeybindingStepPill key={key} value={part} />
+      ))}
+    </span>
+  );
+}
+
+function KeybindingStepPill({ value }: { value: string }) {
+  // A literal "+" in a shortcut splits into empty strings.
   return (
     <KbdGroup>
-      {parts.map(({ part, key }) => (
+      {keyedParts(value.split("+")).map(({ part, key }) => (
         <Kbd key={key}>
           {part === "mod"
             ? navigator.platform.toLowerCase().includes("mac")
@@ -711,6 +727,8 @@ type KeybindingRowDraftState = {
   keyDraft: string;
   whenDraft: KeybindingWhenNode | undefined;
   isRecording: boolean;
+  /** The draft is a modified key, so the next plain key completes a chord. */
+  chordArmed: boolean;
   isWhenDraftValid: boolean;
 };
 
@@ -719,6 +737,7 @@ function createKeybindingRowDraft(row: KeybindingRow): KeybindingRowDraftState {
     keyDraft: row.key,
     whenDraft: row.binding.whenAst,
     isRecording: false,
+    chordArmed: false,
     isWhenDraftValid: true,
   };
 }
@@ -749,7 +768,7 @@ function useKeybindingRowEditor({
   onSave: (input: ServerUpsertKeybindingInput) => void;
 }) {
   const [draft, setDraft] = useReducer(keybindingRowDraftReducer, row, createKeybindingRowDraft);
-  const { keyDraft, whenDraft, isRecording, isWhenDraftValid } = draft;
+  const { keyDraft, whenDraft, isRecording, chordArmed, isWhenDraftValid } = draft;
   const whenDraftExpression = whenAstToExpression(whenDraft);
   const isDirty = keyDraft !== row.key || whenDraftExpression !== row.when;
   const conflictLabels = keybindingConflictLabels(allRows, {
@@ -771,19 +790,22 @@ function useKeybindingRowEditor({
     // Tab is recorded like any key while recording; after that it moves focus on.
     if (event.key === "Tab" && !isRecording) return;
     event.preventDefault();
+    // Holding the second key down must not replace the chord with a plain key.
+    if (event.repeat) return;
     if (event.key === "Escape") {
-      setDraft({ keyDraft: row.key, isRecording: false });
+      setDraft({ keyDraft: row.key, isRecording: false, chordArmed: false });
       return;
     }
-    const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
-    if (!next) return;
-    setDraft({ keyDraft: next, isRecording: false });
+    const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
+    if (!step) return;
+    setDraft({ ...recordKeybindingKeypress({ keyDraft, chordArmed }, step), isRecording: false });
   };
 
   return {
     keyDraft,
     whenDraft,
     isRecording,
+    chordArmed,
     isWhenDraftValid,
     whenDraftExpression,
     isDirty,
@@ -822,9 +844,18 @@ function KeybindingKeyControl({
   isSaving: boolean;
   pillClassName?: string | undefined;
 }) {
-  const { keyDraft, isRecording, isDirty, isWhenDraftValid, setDraft, save, captureKeybinding } =
-    editor;
-  const showPill = !isRecording && keyDraft === row.key && row.key.length > 0 && !isDirty;
+  const {
+    keyDraft,
+    isRecording,
+    chordArmed,
+    isDirty,
+    isWhenDraftValid,
+    setDraft,
+    save,
+    captureKeybinding,
+  } = editor;
+  const showPill =
+    !isRecording && !chordArmed && keyDraft === row.key && row.key.length > 0 && !isDirty;
 
   return (
     <>
@@ -841,7 +872,7 @@ function KeybindingKeyControl({
         <button
           type="button"
           onClick={() => setDraft({ isRecording: true })}
-          aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${formatShortcutLabel(row.binding.shortcut)}`}
+          aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${formatBindingLabel(row.binding)}`}
           className={cn(
             "inline-flex h-8 cursor-pointer items-center rounded-md border border-transparent px-1.5 sm:h-7 outline-none transition-colors hover:border-border/70 hover:bg-accent focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/24",
             pillClassName,
@@ -854,14 +885,19 @@ function KeybindingKeyControl({
           data-keybinding-capture=""
           autoFocus={isRecording}
           aria-label={`Keybinding for ${commandLabel(row.command)}`}
-          value={isRecording ? "" : keyDraft}
+          value={isRecording ? "" : chordArmed ? `${keyDraft} …` : keyDraft}
           placeholder={isRecording ? "Press shortcut" : "Unassigned"}
           size="sm"
           font="mono"
           className="w-44"
-          onFocus={() => setDraft({ isRecording: true })}
-          onBlur={() => setDraft({ isRecording: false })}
-          onChange={(event) => setDraft({ keyDraft: event.currentTarget.value })}
+          onFocus={() => setDraft({ isRecording: true, chordArmed: false })}
+          onBlur={() => setDraft({ isRecording: false, chordArmed: false })}
+          onChange={(event) =>
+            setDraft({
+              keyDraft: event.currentTarget.value.replace(/\s*…$/, ""),
+              chordArmed: false,
+            })
+          }
           onKeyDown={captureKeybinding}
         />
       )}
@@ -1062,9 +1098,10 @@ function useNewKeybindingDraft({
     keyDraft: "",
     whenDraft: undefined,
     isRecording: false,
+    chordArmed: false,
     isWhenDraftValid: true,
   });
-  const { keyDraft, whenDraft, isRecording, isWhenDraftValid } = draft;
+  const { keyDraft, whenDraft, isRecording, chordArmed, isWhenDraftValid } = draft;
   const whenDraftExpression = whenAstToExpression(whenDraft);
   const conflictLabels = keybindingConflictLabels(allRows, {
     rowId: "new",
@@ -1087,13 +1124,15 @@ function useNewKeybindingDraft({
     // Tab is recorded like any key while recording; after that it moves focus on.
     if (event.key === "Tab" && !isRecording) return;
     event.preventDefault();
+    // Holding the second key down must not replace the chord with a plain key.
+    if (event.repeat) return;
     if (event.key === "Escape") {
-      setDraft({ keyDraft: "", isRecording: false });
+      setDraft({ keyDraft: "", isRecording: false, chordArmed: false });
       return;
     }
-    const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
-    if (!next) return;
-    setDraft({ keyDraft: next, isRecording: false });
+    const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
+    if (!step) return;
+    setDraft({ ...recordKeybindingKeypress({ keyDraft, chordArmed }, step), isRecording: false });
   };
 
   return {
@@ -1103,6 +1142,7 @@ function useNewKeybindingDraft({
     whenDraft,
     whenDraftExpression,
     isRecording,
+    chordArmed,
     conflictLabels,
     commandLabelText,
     canSave,
@@ -1165,14 +1205,19 @@ function NewKeybindingKeyInput({
       data-keybinding-capture=""
       autoFocus={autoFocus}
       aria-label={`Keybinding for ${draft.commandLabelText}`}
-      value={draft.isRecording ? "" : draft.keyDraft}
+      value={draft.isRecording ? "" : draft.chordArmed ? `${draft.keyDraft} …` : draft.keyDraft}
       placeholder={draft.isRecording ? "Press shortcut" : "Unassigned"}
       size="sm"
       font="mono"
       className={className}
-      onFocus={() => draft.setDraft({ isRecording: true })}
-      onBlur={() => draft.setDraft({ isRecording: false })}
-      onChange={(event) => draft.setDraft({ keyDraft: event.currentTarget.value })}
+      onFocus={() => draft.setDraft({ isRecording: true, chordArmed: false })}
+      onBlur={() => draft.setDraft({ isRecording: false, chordArmed: false })}
+      onChange={(event) =>
+        draft.setDraft({
+          keyDraft: event.currentTarget.value.replace(/\s*…$/, ""),
+          chordArmed: false,
+        })
+      }
       onKeyDown={draft.captureKeybinding}
     />
   );
