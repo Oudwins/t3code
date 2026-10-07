@@ -124,8 +124,9 @@ answer. Both sections list the thread you last sent work to first. Pinned thread
 pinned section. Each device keeps its own choice.
 
 A thread with checks still running on its pull request shows as waiting even when its agent has
-finished, so it is not marked ready until the checks settle. policy-bot's approval status never
-settles on its own, so it is ignored.
+finished, so it is not marked ready until the checks settle. The same holds while the agent is
+watching the pull request and the required checks have not yet passed. policy-bot's approval
+status never settles on its own, so it is ignored.
 
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.
