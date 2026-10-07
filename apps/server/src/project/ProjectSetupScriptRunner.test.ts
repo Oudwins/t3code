@@ -123,7 +123,7 @@ it.effect("resolves setup scripts through the standalone project service", () =>
   }).pipe(Effect.provide(layer));
 });
 
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const SETUP_SCRIPT = {
   id: "setup",
