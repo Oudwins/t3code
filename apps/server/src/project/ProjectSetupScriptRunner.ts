@@ -2,6 +2,7 @@ import { ProjectId, type ProjectScript } from "@t3tools/contracts";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   projectScriptRuntimeEnv,
+  projectScriptsInheritDefaults,
   resolveProjectScripts,
   setupProjectScript,
 } from "@t3tools/shared/projectScripts";
@@ -17,6 +18,7 @@ import * as Schema from "effect/Schema";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as CursorWorktreeSetup from "./CursorWorktreeSetup.ts";
 import * as ProjectService from "./ProjectService.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
@@ -201,10 +203,9 @@ export const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const terminalManager = yield* TerminalManager.TerminalManager;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
-  const completionShell = resolveCompletionShell(
-    yield* HostProcessPlatform,
-    yield* HostProcessEnvironment,
-  );
+  const platform = yield* HostProcessPlatform;
+  const completionShell = resolveCompletionShell(platform, yield* HostProcessEnvironment);
+  const loadCursorSetupScript = yield* CursorWorktreeSetup.makeCursorSetupLoader;
 
   /**
    * Watches the setup terminal for the completion sentinel. Terminal output is
@@ -347,7 +348,19 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    const script = setupProjectScript(resolveProjectScripts(settings, project));
+    // A project with no actions of its own follows the repository's Cursor
+    // worktree config when it has one, ahead of the environment defaults.
+    const cursorScript = projectScriptsInheritDefaults(settings, project)
+      ? Option.getOrNull(
+          yield* loadCursorSetupScript({
+            worktreePath: input.worktreePath,
+            projectRoot: project.workspaceRoot,
+            platform,
+            shell: completionShell,
+          }),
+        )
+      : null;
+    const script = cursorScript ?? setupProjectScript(resolveProjectScripts(settings, project));
     if (!script) {
       return {
         status: "no-script",
@@ -360,6 +373,8 @@ export const make = Effect.gen(function* () {
       ...projectScriptRuntimeEnv({
         project: { cwd: project.workspaceRoot },
         worktreePath: input.worktreePath,
+        // The variable Cursor's own setup commands use to reach the main checkout.
+        ...(cursorScript ? { extraEnv: { ROOT_WORKTREE_PATH: project.workspaceRoot } } : {}),
       }),
       // Setup can run before a client attaches. Truecolor probes in tools such
       // as Vite+ wait for terminal replies that nobody can send at that point.
