@@ -472,7 +472,24 @@ layer("GitHubPullRequestCli.layer", (it) => {
         updatedAt: "2026-08-24T12:34:56.000Z",
         mergedAt: null,
         closedAt: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        commits: {
+          nodes: [
+            {
+              commit: {
+                statusCheckRollup: {
+                  contexts: {
+                    // policy-bot would hold the thread pending until someone approves.
+                    nodes: [
+                      { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+                      { context: "policy-bot: main", state: "PENDING" },
+                    ],
+                    pageInfo: { hasNextPage: false },
+                  },
+                },
+              },
+            },
+          ],
+        },
       });
       mockedExecute.mockReturnValueOnce(
         Effect.succeed(

@@ -305,6 +305,34 @@ describe("pull request detail decoding", () => {
     expect(pullRequestCoreGraphQlQuery("github.example.com")).not.toContain("isRequired");
   });
 
+  it("ignores policy-bot, which stays pending until a person approves", () => {
+    const raw = JSON.parse(detailJson) as Record<string, unknown>;
+    const detail = (statusCheckRollup: ReadonlyArray<Record<string, unknown>>) =>
+      expectSuccess(decodePullRequestDetailJson(JSON.stringify({ ...raw, statusCheckRollup })));
+    const ci = { name: "build", status: "COMPLETED", conclusion: "SUCCESS" };
+    const policyBot = {
+      __typename: "StatusContext",
+      context: "policy-bot: main",
+      state: "PENDING",
+    };
+
+    const waitingOnApproval = detail([ci, policyBot]);
+    expect(waitingOnApproval.checksState).toBe("passing");
+    expect(waitingOnApproval.checks.map((check) => check.name)).toEqual(["build"]);
+    // Only the gate itself is ignored: CI still running keeps the pull request pending.
+    expect(detail([{ name: "build", status: "IN_PROGRESS" }, policyBot]).checksState).toBe(
+      "pending",
+    );
+    // A repository whose only check is policy-bot runs no CI at all.
+    expect(detail([policyBot]).checksState).toBeNull();
+    // A check merely mentioning the bot, or named like it, is still a check.
+    expect(
+      detail([ci, { name: "policy-botany", status: "IN_PROGRESS" }]).checks.map(
+        (check) => check.name,
+      ),
+    ).toEqual(["build", "policy-botany"]);
+  });
+
   it("keeps a workflow waiting for approval out of the passing state", () => {
     const raw = JSON.parse(detailJson) as Record<string, unknown>;
     const detail = expectSuccess(
@@ -1933,7 +1961,20 @@ describe("batched pull request summaries", () => {
               mergedAt: "2026-08-24T00:00:00Z",
               closedAt: "2026-08-24T00:00:00Z",
               updatedAt: "2026-08-24T00:00:00Z",
-              commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+              commits: {
+                nodes: [
+                  {
+                    commit: {
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: [{ name: "test", status: "COMPLETED", conclusion: "FAILURE" }],
+                          pageInfo: { hasNextPage: false },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
             },
           },
           s1: { pullRequest: null },
@@ -1956,6 +1997,55 @@ describe("batched pull request summaries", () => {
     });
     // The document did not ask about stacks, so the summary does not claim an answer.
     expect(decoded.success.get(0)).not.toHaveProperty("stack");
+  });
+
+  it("rolls checks up from their names so policy-bot cannot hold a pull request pending", () => {
+    expect(
+      buildPullRequestSummariesGraphQlQuery([{ repository: "acme/web", number: 7 }]),
+    ).toContain("contexts(first: 100)");
+    const pullRequest = (contexts: ReadonlyArray<unknown>, hasNextPage = false) => ({
+      pullRequest: {
+        number: 7,
+        title: "Gated",
+        url: "https://github.com/acme/web/pull/7",
+        headRefName: "feat/seven",
+        baseRefName: "main",
+        state: "OPEN",
+        updatedAt: "2026-08-24T00:00:00Z",
+        commits: {
+          nodes: [
+            {
+              commit: {
+                statusCheckRollup: { contexts: { nodes: contexts, pageInfo: { hasNextPage } } },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const policyBot = { context: "policy-bot: main", state: "PENDING" };
+    const decoded = expectSuccess(
+      decodePullRequestSummariesJson(
+        JSON.stringify({
+          data: {
+            s0: pullRequest([
+              { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+              policyBot,
+            ]),
+            s1: pullRequest([{ name: "build", status: "IN_PROGRESS" }, policyBot]),
+            s2: pullRequest([policyBot]),
+            // More checks than the page holds cannot be rolled up, so the caller reads it whole.
+            s3: pullRequest([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }], true),
+          },
+        }),
+      ),
+    );
+    expect([0, 1, 2].map((index) => decoded.get(index)?.checksState)).toEqual([
+      "passing",
+      "pending",
+      null,
+    ]);
+    expect(decoded.has(3)).toBe(false);
   });
 
   it("reads stack membership only where the document asked for it", () => {

@@ -97,6 +97,38 @@ const RawCheckSchema = Schema.Struct({
   isRequired: Schema.optional(Schema.NullOr(Schema.Boolean)),
 });
 
+/** One entry of a GraphQL `statusCheckRollup.contexts` page, which names its workflow one level down. */
+const RawContextNodeSchema = Schema.Struct({
+  ...RawCheckSchema.fields,
+  checkSuite: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        workflowRun: Schema.NullOr(
+          Schema.Struct({
+            workflow: Schema.NullOr(Schema.Struct({ name: Schema.String })),
+          }),
+        ),
+      }),
+    ),
+  ),
+});
+
+const RawContextsRollupSchema = Schema.Struct({
+  contexts: Schema.Struct({
+    nodes: Schema.Array(RawContextNodeSchema),
+    pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+  }),
+});
+
+function contextNodesToChecks(
+  nodes: ReadonlyArray<Schema.Schema.Type<typeof RawContextNodeSchema>> | undefined,
+): ReadonlyArray<Schema.Schema.Type<typeof RawCheckSchema>> {
+  return (nodes ?? []).map((node) => ({
+    ...node,
+    workflowName: node.checkSuite?.workflowRun?.workflow?.name ?? null,
+  }));
+}
+
 const RawListItemSchema = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
@@ -626,29 +658,7 @@ const RawCoreSchema = Schema.Struct({
           nodes: Schema.Array(
             Schema.Struct({
               commit: Schema.Struct({
-                statusCheckRollup: Schema.NullOr(
-                  Schema.Struct({
-                    contexts: Schema.Struct({
-                      nodes: Schema.Array(
-                        Schema.Struct({
-                          ...RawCheckSchema.fields,
-                          checkSuite: Schema.optional(
-                            Schema.NullOr(
-                              Schema.Struct({
-                                workflowRun: Schema.NullOr(
-                                  Schema.Struct({
-                                    workflow: Schema.NullOr(Schema.Struct({ name: Schema.String })),
-                                  }),
-                                ),
-                              }),
-                            ),
-                          ),
-                        }),
-                      ),
-                      pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
-                    }),
-                  }),
-                ),
+                statusCheckRollup: Schema.NullOr(RawContextsRollupSchema),
               }),
             }),
           ),
@@ -1457,6 +1467,14 @@ function isNamelessCheck(raw: Schema.Schema.Type<typeof RawCheckSchema>): boolea
 }
 
 /**
+ * Checks that wait on a person rather than on CI, so they never finish by themselves. policy-bot
+ * posts `policy-bot: <base branch>` and holds it pending until its approval rules are met, which
+ * would keep every pull request in a repository that runs it "still running". They are dropped
+ * before anything is counted or listed, so the rollup, the checks list, and the sync agree.
+ */
+const IGNORED_CHECK_NAME = /^policy-bot(?::|$)/i;
+
+/**
  * The rollup as the deduper reads it: a check, the workflow that owns it, and when the run last
  * had something to say. A queued run reports a completion time it has not reached, so the start
  * stands in for it rather than sorting the newest run to the bottom.
@@ -1470,7 +1488,7 @@ function toCheckEntries(
 }> {
   return (raw ?? []).flatMap((check) => {
     const name = trimmed(check.name) ?? trimmed(check.context);
-    if (name === null) return [];
+    if (name === null || IGNORED_CHECK_NAME.test(name)) return [];
     return [
       {
         check: {
@@ -1858,19 +1876,25 @@ export function decodePullRequestStatsJson(
   return Result.succeed(stats);
 }
 
-/**
- * The fields a linked thread keeps current, for many pull requests in one aliased read. Same
- * shape as the search row where the two overlap: the checks arrive as GitHub's one-word rollup
- * rather than the whole check list `gh pr view` hands back, which is what keeps a batch cheap.
- */
 const STACK_MEMBERSHIP_SELECTION = "stack { number size baseRefName } stackEntry { position }";
 
+/**
+ * The fields a linked thread keeps current, for many pull requests in one aliased read. The
+ * checks come as just the columns the rollup counts, not GitHub's one-word verdict: that verdict
+ * cannot leave out a check that never finishes (see `IGNORED_CHECK_NAME`), and a thread decides
+ * whether it is waiting on it. The links, timestamps and descriptions the detail view shows are
+ * left out, which is what keeps a batch cheap.
+ */
 const PULL_REQUEST_SUMMARY_SELECTION =
   "number title url state isDraft mergeable reviewDecision additions deletions changedFiles " +
   "updatedAt mergedAt closedAt headRefName baseRefName " +
   "author { __typename login avatarUrl ... on User { name } } " +
   "latestReviews(first: 20) { nodes { state author { login } } } " +
-  "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }";
+  "commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { " +
+  "nodes { ... on StatusContext { context state } " +
+  "... on CheckRun { name status conclusion startedAt completedAt " +
+  "checkSuite { workflowRun { workflow { name } } } } } " +
+  "pageInfo { hasNextPage } } } } } }";
 
 /**
  * Summaries for pull requests anywhere on one host, one aliased lookup each. Checked and written
@@ -1896,6 +1920,29 @@ export function buildPullRequestSummariesGraphQlQuery(
 
 const RawSummarySchema = Schema.Struct({
   ...RawSearchItemSchema.fields,
+  commits: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        nodes: Schema.optional(
+          Schema.NullOr(
+            Schema.Array(
+              Schema.NullOr(
+                Schema.Struct({
+                  commit: Schema.optional(
+                    Schema.NullOr(
+                      Schema.Struct({
+                        statusCheckRollup: Schema.optional(Schema.NullOr(RawContextsRollupSchema)),
+                      }),
+                    ),
+                  ),
+                }),
+              ),
+            ),
+          ),
+        ),
+      }),
+    ),
+  ),
   changedFiles: Schema.optional(Schema.NullOr(Schema.Int)),
   additions: Schema.optional(Schema.NullOr(Schema.Int)),
   deletions: Schema.optional(Schema.NullOr(Schema.Int)),
@@ -1939,8 +1986,9 @@ export interface GitHubPullRequestSummary {
 }
 
 /**
- * Summaries by the position they were asked in. A pull request GitHub answered nothing for, or
- * one whose fields no longer decode, is absent rather than failing the rest of the batch.
+ * Summaries by the position they were asked in. A pull request GitHub answered nothing for, one
+ * whose fields no longer decode, or one with more checks than a page holds is absent rather than
+ * failing the rest of the batch: the caller reads each of those on its own, whole.
  */
 export function decodePullRequestSummariesJson(
   raw: string,
@@ -1954,6 +2002,8 @@ export function decodePullRequestSummariesJson(
     const entry = decodeSummaryEntry(value.pullRequest);
     if (!Exit.isSuccess(entry)) continue;
     const pr = entry.value;
+    const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup;
+    if (rollup?.contexts.pageInfo.hasNextPage === true) continue;
     summaries.set(Number(index), {
       number: pr.number,
       title: pr.title,
@@ -1973,13 +2023,7 @@ export function decodePullRequestSummariesJson(
         pr.reviewDecision,
         (pr.latestReviews?.nodes ?? []).flatMap((review) => (review === null ? [] : [review])),
       ),
-      // One enum for the head commit, dressed as a single check like the search row's.
-      checksState: rollupChecksState(
-        (pr.commits?.nodes ?? []).flatMap((commitNode) => {
-          const state = trimmed(commitNode?.commit?.statusCheckRollup?.state);
-          return state === null ? [] : [{ state }];
-        }),
-      ),
+      checksState: rollupChecksState(contextNodesToChecks(rollup?.contexts.nodes)),
       mergeability: toMergeability(pr.mergeable),
       ...(pr.stack === undefined ? {} : { stack: toStackMembership(pr) ?? null }),
     });
@@ -2008,11 +2052,7 @@ export function decodePullRequestCoreJson(
         requestedReviewer === null ? [] : [requestedReviewer],
       ),
       labels: pr.labels.nodes,
-      statusCheckRollup:
-        contexts?.nodes.map((check) => ({
-          ...check,
-          workflowName: check.checkSuite?.workflowRun?.workflow?.name ?? null,
-        })) ?? [],
+      statusCheckRollup: contextNodesToChecks(contexts?.nodes),
     }),
     viewerAccess: {
       canWrite: toCanWrite(repository.viewerPermission),
