@@ -94,7 +94,7 @@ export function storageCleanupThreadIdle(thread: OrchestrationV2ThreadShell, now
 }
 
 /** Settled and archived threads are the ones the user has moved on from. */
-export function storageCleanupThreadFinished(
+function storageCleanupThreadFinished(
   thread: Pick<OrchestrationV2ThreadShell, "archivedAt" | "settledOverride">,
 ): boolean {
   return thread.archivedAt !== null || thread.settledOverride === "settled";
