@@ -147,6 +147,8 @@ export function makeReplayServerConfig(
       staticDir: undefined,
       devUrl: undefined,
       devAllowedOrigins: [],
+      projectParentDirs: [],
+      projectDirs: [],
       noBrowser: false,
       startupPresentation: "browser",
       tailscaleServeEnabled: false,

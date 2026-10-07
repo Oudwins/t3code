@@ -77,6 +77,8 @@ const makeConfig = (baseDir: string) =>
       staticDir: undefined,
       devUrl: undefined,
       devAllowedOrigins: [],
+      projectParentDirs: [],
+      projectDirs: [],
       noBrowser: true,
       startupPresentation: "browser",
       desktopBootstrapToken: undefined,

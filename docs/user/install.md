@@ -96,6 +96,23 @@ Pass a path, such as `t3 app ../my-project`, to open another directory. It requi
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 
+## Add projects from folders
+
+Set these on the machine that runs the server, and your code folders become projects without
+adding each one by hand:
+
+| Variable                    | Becomes a project                                      |
+| --------------------------- | ------------------------------------------------------ |
+| `CODE_PROJECTS_PARENT_DIRS` | Each Git repository directly inside the listed folders |
+| `CODE_PROJECTS`             | Each listed folder                                     |
+
+Separate several folders with `:` (`;` on Windows). A leading `~` is your home folder, as in
+`export CODE_PROJECTS_PARENT_DIRS="$HOME/code:~/work"`. The server checks at startup and every
+30 seconds after, so a repository you clone later shows up on its own. Hidden folders are skipped.
+A project you delete stays gone until the server restarts, then it comes back. On macOS and Linux
+the desktop app reads these from your login shell, so set them in your shell profile and restart
+the app.
+
 ## Mobile app
 
 Install T3 Code from the

@@ -1,3 +1,4 @@
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as NetService from "@t3tools/shared/Net";
 import {
   OtlpHeadersFromString,
@@ -24,6 +25,7 @@ import * as CliError from "effect/unstable/cli/CliError";
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
+import { expandHomePath as expandHomePathSync } from "../pathExpansion.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 
 const modeFlag = Flag.Literals("mode", ServerConfig.RuntimeMode.literals).pipe(
@@ -93,6 +95,22 @@ export const traceMaxFilesConfig = Config.Int("T3CODE_TRACE_MAX_FILES").pipe(
   Config.withDefault(10),
 );
 
+// A list of paths separated like PATH is, with a leading `~` expanded.
+const pathListConfig = (name: string) =>
+  Config.String(name).pipe(
+    Config.withDefault(""),
+    Config.mapEffect((value) =>
+      Effect.gen(function* () {
+        const platform = yield* HostProcessPlatform;
+        return value
+          .split(platform === "win32" ? ";" : ":")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0)
+          .map(expandHomePathSync);
+      }),
+    ),
+  );
+
 const EnvServerConfig = Config.all({
   logLevel: Config.LogLevel("T3CODE_LOG_LEVEL").pipe(Config.withDefault("Info")),
   traceMinLevel: Config.LogLevel("T3CODE_TRACE_MIN_LEVEL").pipe(Config.withDefault("Info")),
@@ -140,6 +158,8 @@ const EnvServerConfig = Config.all({
         .filter((entry) => entry.length > 0),
     ),
   ),
+  projectParentDirs: pathListConfig("CODE_PROJECTS_PARENT_DIRS"),
+  projectDirs: pathListConfig("CODE_PROJECTS"),
   noBrowser: Config.Boolean("T3CODE_NO_BROWSER").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -461,6 +481,8 @@ export const resolveServerConfig = (
       devUrl,
       ...(devAuthToken === undefined ? {} : { devAuthToken }),
       devAllowedOrigins: env.devAllowedOrigins,
+      projectParentDirs: env.projectParentDirs,
+      projectDirs: env.projectDirs,
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,
