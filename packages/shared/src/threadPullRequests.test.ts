@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import {
   legacyLinkedPullRequestOf,
   legacyThreadPullRequestKey,
+  threadHasRunningChecks,
   threadPullRequestSearchTerms,
   resolveThreadCurrentPullRequest,
   resolveThreadPullRequestChains,
@@ -60,6 +61,55 @@ function link(
     ...input,
   };
 }
+
+describe("threadHasRunningChecks", () => {
+  const watch = (passed: boolean): ThreadPullRequestLink["watch"] => ({
+    startedAt: "2026-01-01T00:00:00.000Z",
+    headSha: "abc123",
+    failedChecks: [],
+    passed,
+    remarksThrough: "2026-01-01T00:00:00.000Z",
+    remarkIds: [],
+    conflicting: false,
+    wakes: 0,
+  });
+
+  it("counts checks the host reports as running", () => {
+    expect(
+      threadHasRunningChecks([link(1, { snapshot: snapshot({ checksState: "pending" }) })]),
+    ).toBe(true);
+    expect(
+      threadHasRunningChecks([link(1, { snapshot: snapshot({ checksState: "passing" }) })]),
+    ).toBe(false);
+  });
+
+  it("counts a watched pull request whose checks have not passed, however the snapshot reads", () => {
+    // The agent just reran a failed check; the snapshot still holds the earlier result.
+    const stale = snapshot({ checksState: "failing" });
+    expect(threadHasRunningChecks([link(1, { snapshot: stale, watch: watch(false) })])).toBe(true);
+    expect(threadHasRunningChecks([link(1, { snapshot: stale })])).toBe(false);
+  });
+
+  it("stops counting a watch once the required checks passed", () => {
+    const passing = snapshot({ checksState: "passing" });
+    expect(threadHasRunningChecks([link(1, { snapshot: passing, watch: watch(true) })])).toBe(
+      false,
+    );
+  });
+
+  it("ignores watches on pull requests that are closed, merged, or dismissed", () => {
+    for (const state of ["closed", "merged"] as const) {
+      expect(
+        threadHasRunningChecks([link(1, { snapshot: snapshot({ state }), watch: watch(false) })]),
+      ).toBe(false);
+    }
+    expect(
+      threadHasRunningChecks([
+        link(1, { source: "stack-dismissed", snapshot: snapshot(), watch: watch(false) }),
+      ]),
+    ).toBe(false);
+  });
+});
 
 describe("threadPullRequestKeysEqual", () => {
   it("recovers Forgejo ports from old stored URLs and keeps separate servers distinct", () => {

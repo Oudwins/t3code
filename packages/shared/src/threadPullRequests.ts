@@ -84,10 +84,17 @@ export function visibleThreadPullRequests(
   return links.filter((link) => link.source !== "stack-dismissed");
 }
 
-/** True while a visible, open linked pull request still has checks running. */
+/**
+ * True while a visible, open linked pull request still has checks coming: the host reports
+ * them running, or a watch on it has not seen the required checks pass yet. The watch counts
+ * because the host snapshot lags a minute behind, so a check the agent just reran still reads
+ * as its earlier result while the wake is already on its way.
+ */
 export function threadHasRunningChecks(links: ReadonlyArray<ThreadPullRequestLink>): boolean {
   return visibleThreadPullRequests(links).some(
-    (link) => link.snapshot?.state === "open" && link.snapshot.checksState === "pending",
+    (link) =>
+      link.snapshot?.state === "open" &&
+      (link.snapshot.checksState === "pending" || (link.watch !== undefined && !link.watch.passed)),
   );
 }
 
