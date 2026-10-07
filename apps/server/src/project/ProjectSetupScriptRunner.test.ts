@@ -6,6 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -122,6 +123,8 @@ it.effect("resolves setup scripts through the standalone project service", () =>
   }).pipe(Effect.provide(layer));
 });
 
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+
 const SETUP_SCRIPT = {
   id: "setup",
   name: "Setup",
@@ -204,7 +207,7 @@ const runWithCursorFile = (input: {
 it.effect("runs the Cursor worktree config ahead of the environment default", () =>
   Effect.gen(function* () {
     const { result, open, write } = yield* runWithCursorFile({
-      cursorFile: JSON.stringify({
+      cursorFile: encodeJson({
         "setup-worktree": ["cp $ROOT_WORKTREE_PATH/.env .env", "pnpm i"],
       }),
       settings: { defaultProjectScripts: [SETUP_SCRIPT] },
@@ -222,7 +225,7 @@ it.effect("runs the Cursor worktree config ahead of the environment default", ()
 it.effect("falls back to the environment default when the Cursor file has no setup", () =>
   Effect.gen(function* () {
     const { result, open } = yield* runWithCursorFile({
-      cursorFile: JSON.stringify({ "setup-worktree": [] }),
+      cursorFile: encodeJson({ "setup-worktree": [] }),
       settings: { defaultProjectScripts: [SETUP_SCRIPT] },
     });
 
@@ -237,7 +240,7 @@ it.effect("ignores the Cursor worktree config when the project has its own actio
   Effect.gen(function* () {
     const projectId = ProjectId.make("project:cursor-setup");
     const { result } = yield* runWithCursorFile({
-      cursorFile: JSON.stringify({ "setup-worktree": ["echo from cursor"] }),
+      cursorFile: encodeJson({ "setup-worktree": ["echo from cursor"] }),
       settings: {
         defaultProjectScripts: [SETUP_SCRIPT],
         projectSettingsOverrides: { [projectId]: { defaultProjectScripts: [] } },
