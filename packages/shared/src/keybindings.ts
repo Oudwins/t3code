@@ -321,7 +321,7 @@ export function isChordLeaderShortcut(shortcut: KeybindingShortcut): boolean {
  * followed by one more shortcut. Null for anything else, including a single
  * shortcut. Escape cannot be the second step because it cancels a pending chord.
  */
-export function parseKeybindingChord(
+function parseKeybindingChord(
   value: string,
 ): readonly [KeybindingShortcut, KeybindingShortcut] | null {
   const steps = value.trim().split(/\s+/);
