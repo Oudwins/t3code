@@ -545,6 +545,7 @@ import {
   shouldRefocusComposerOnWindowFocus,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { useBranchToolbarHandleContext } from "../branchToolbarHandleContext";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
   awaitAttachmentUploads,
@@ -1786,7 +1787,8 @@ export default function ChatView(props: ChatViewProps) {
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
-  const branchToolbarRef = useRef<BranchToolbarHandle>(null);
+  const localBranchToolbarRef = useRef<BranchToolbarHandle | null>(null);
+  const branchToolbarRef = useBranchToolbarHandleContext() ?? localBranchToolbarRef;
   const pasteAsTextShortcutUntilRef = useRef(0);
   const [restingComposerControlsHost, setRestingComposerControlsHost] =
     useState<HTMLDivElement | null>(null);

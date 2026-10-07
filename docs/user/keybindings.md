@@ -29,6 +29,8 @@ workspace, and `mod+shift+g` for the Git branch. `mod+shift+x` opens the command
 palette on the workspace choices (the current checkout, a new worktree, and the
 previous worktree when available), so you can type to filter them.
 Use `mod+shift+l` to reuse the previous worktree directly.
+**Change model** and **Select workspace** are also in the command palette
+(`Cmd/Ctrl+Alt+K`), next to their shortcuts.
 
 In the model picker, press Left in an empty search field or Shift+Tab to reach
 the provider list. Use Up/Down to move and Enter to choose. Right returns to
@@ -53,6 +55,8 @@ With a thread open, `mod+shift+s` settles it and `mod+alt+s` snoozes it. Both to
 the same shortcut un-settles a settled thread or wakes a snoozed one. Snooze opens a
 list of wake times; type to filter it, press Enter to pick one, or choose **Custom…**
 for a date or duration. A thread waiting on an approval or question cannot be snoozed.
+The command palette (`Cmd/Ctrl+Alt+K`) has the same actions: **Settle thread**,
+**Un-settle thread**, **Snooze thread**, and **Wake thread**.
 
 `mod+shift+[` and `mod+shift+]` open the previous and next thread in the sidebar.
 `mod+alt+[` and `mod+alt+]` skip to the previous and next thread that needs you: any

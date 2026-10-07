@@ -65,6 +65,8 @@ import { cn } from "~/lib/utils";
 
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
+  /** False when the workspace is fixed (existing thread, no git, forced new worktree). */
+  canPickWorkspace: boolean;
   openWorkspacePicker: () => void;
   usePreviousWorktree: () => void;
 }
@@ -606,6 +608,7 @@ export const BranchToolbar = memo(function BranchToolbar({
     ref,
     () => ({
       openBranchPicker: () => branchSelectorRef.current?.open(),
+      canPickWorkspace,
       openWorkspacePicker,
       usePreviousWorktree: () => {
         if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
@@ -614,6 +617,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       },
     }),
     [
+      canPickWorkspace,
       canUsePreviousWorktree,
       onComposerFocusRequest,
       onUsePreviousWorktree,
