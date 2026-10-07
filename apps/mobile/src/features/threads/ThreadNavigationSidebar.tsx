@@ -61,6 +61,7 @@ import {
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
+  ThreadListV2WaitingShelfHeader,
   ThreadListV2WorkingShelfHeader,
 } from "./thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "./thread-provider-instance";
@@ -295,9 +296,11 @@ function ThreadNavigationSidebarPane(
     snoozedShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
+    waitingShelfExpanded,
     toggleSettledShelf,
     toggleSnoozedShelf,
     toggleWorkingShelf,
+    toggleWaitingShelf,
   } = useThreadListV2ShelfPreferences();
   // The queued-start and snooze helpers need a clock while the pane stays open.
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16));
@@ -381,6 +384,7 @@ function ThreadNavigationSidebarPane(
       now: new Date().toISOString(),
       workingShelfEnabled,
       workingShelfExpanded,
+      waitingShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
       snoozedShelfExpanded,
       settledShelfExpanded,
@@ -389,6 +393,7 @@ function ThreadNavigationSidebarPane(
   }, [
     workingShelfEnabled,
     workingShelfExpanded,
+    waitingShelfExpanded,
     pendingOrder,
     queuedThreadKeys,
     nowMinute,
@@ -443,6 +448,9 @@ function ThreadNavigationSidebarPane(
       workingCount: threadListV2Layout.workingCount,
       workingShelfExpanded,
       workingShelfHeaderIndex: threadListV2Layout.workingShelfHeaderIndex,
+      waitingCount: threadListV2Layout.waitingCount,
+      waitingShelfExpanded,
+      waitingShelfHeaderIndex: threadListV2Layout.waitingShelfHeaderIndex,
       snoozedCount: threadListV2Layout.snoozedCount,
       snoozedShelfExpanded,
       snoozedShelfHeaderIndex: threadListV2Layout.snoozedShelfHeaderIndex,
@@ -476,6 +484,7 @@ function ThreadNavigationSidebarPane(
     snoozedShelfExpanded,
     snoozeEnvironmentIds,
     threadListV2Layout,
+    waitingShelfExpanded,
     workingShelfExpanded,
   ]);
   const listMenuActions = useMemo<MenuAction[]>(
@@ -762,6 +771,16 @@ function ThreadNavigationSidebarPane(
               pane="sidebar"
             />
           );
+        case "v2-waiting-shelf":
+          return (
+            <ThreadListV2WaitingShelfHeader
+              count={item.count}
+              disabled={item.disabled}
+              expanded={item.expanded}
+              onToggle={toggleWaitingShelf}
+              pane="sidebar"
+            />
+          );
         case "v2-snoozed-shelf":
           return (
             <ThreadListV2SnoozedShelfHeader
@@ -830,6 +849,7 @@ function ThreadNavigationSidebarPane(
       snoozeThread,
       toggleSettledShelf,
       toggleSnoozedShelf,
+      toggleWaitingShelf,
       toggleWorkingShelf,
       unpinThread,
       unsettleThread,

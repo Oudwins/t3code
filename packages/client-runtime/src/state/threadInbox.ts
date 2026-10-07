@@ -1,3 +1,5 @@
+import { threadHasRunningChecks } from "@t3tools/shared/threadPullRequests";
+
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { toSortableTimestamp } from "./threadSort.ts";
 
@@ -14,12 +16,8 @@ type WorkingThreadInput = Pick<
   | "runtime"
 >;
 
-/** Threads busy with work that does not need the user fold into the Working
-    section: a running run, or one stopped with background work that will wake
-    it. Approvals, questions, plan prompts, and failures stay in the inbox. */
-export function isThreadWorking(thread: WorkingThreadInput): boolean {
-  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return false;
-  if (!threadRuntimeIsActive(thread.runtime) && thread.runtime?.status !== "idle") return false;
+function needsUser(thread: WorkingThreadInput): boolean {
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return true;
   // A plan prompt outranks lingering background work: the user has to act on it.
   const run = thread.latestRun;
   const runSettled =
@@ -30,7 +28,29 @@ export function isThreadWorking(thread: WorkingThreadInput): boolean {
     run.status !== "running" &&
     run.status !== "waiting" &&
     thread.runtime?.activeRunId !== run.runId;
-  return !(thread.interactionMode === "plan" && thread.hasActionableProposedPlan && runSettled);
+  return thread.interactionMode === "plan" && thread.hasActionableProposedPlan && runSettled;
+}
+
+/** Threads busy with work that does not need the user fold into the Working
+    section: a running run, or one stopped with background work that will wake
+    it. Approvals, questions, plan prompts, and failures stay in the inbox. */
+export function isThreadWorking(thread: WorkingThreadInput): boolean {
+  if (!threadRuntimeIsActive(thread.runtime) && thread.runtime?.status !== "idle") return false;
+  return !needsUser(thread);
+}
+
+type WaitingThreadInput = WorkingThreadInput & Pick<EnvironmentThreadShell, "pullRequests">;
+
+/** Threads that have stopped but will come back without the user: background
+    work that wakes the agent, or checks still running on a linked pull
+    request. Anything the user has to act on stays in the inbox. Clients that
+    only have a Working section keep folding the background-work case there
+    through `isThreadWorking`. */
+export function isThreadWaiting(thread: WaitingThreadInput): boolean {
+  if (threadRuntimeIsActive(thread.runtime) || needsUser(thread)) return false;
+  if (thread.runtime?.status === "idle") return true;
+  if (thread.runtime?.status === "failed") return false;
+  return threadHasRunningChecks(thread.pullRequests);
 }
 
 type InboxThreadInput = Pick<
@@ -101,19 +121,22 @@ function sortNewestFirst<T extends Pick<EnvironmentThreadShell, "id" | "environm
 }
 
 /**
- * Remembers when this client saw each thread leave the Working section. Keep
- * one at module scope so the inbox order survives routes that unmount the
- * list. Call `observe` with every thread shell on each list rebuild, or with
- * null to reset while the beta is off. The first call only takes a baseline,
- * so mounting never reshuffles the inbox.
+ * Remembers when this client saw each thread leave the Working section, or
+ * whichever shelves `isOffInbox` names. Keep one at module scope so the inbox
+ * order survives routes that unmount the list. Call `observe` with every
+ * thread shell on each list rebuild, or with null to reset while the beta is
+ * off. The first call only takes a baseline, so mounting never reshuffles the
+ * inbox.
  */
-export function createInboxReturnTracker() {
+export function createInboxReturnTracker<
+  T extends WorkingThreadInput & InboxThreadInput = WorkingThreadInput & InboxThreadInput,
+>(isOffInbox: (thread: T) => boolean = isThreadWorking) {
   const keyOf = (thread: Pick<EnvironmentThreadShell, "environmentId" | "id">) =>
     `${thread.environmentId}:${thread.id}`;
   let lastWorkingKeys: ReadonlySet<string> | null = null;
   const returns = new Map<string, number>();
   return {
-    observe(threads: ReadonlyArray<WorkingThreadInput & InboxThreadInput> | null): void {
+    observe(threads: ReadonlyArray<T> | null): void {
       if (threads === null) {
         lastWorkingKeys = null;
         returns.clear();
@@ -124,7 +147,7 @@ export function createInboxReturnTracker() {
       for (const thread of threads) {
         const key = keyOf(thread);
         present.add(key);
-        if (isThreadWorking(thread)) working.add(key);
+        if (isOffInbox(thread)) working.add(key);
       }
       // Drop deleted threads so the map stays bounded by the live thread list.
       for (const key of returns.keys()) {

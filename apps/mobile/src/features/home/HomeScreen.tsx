@@ -44,6 +44,7 @@ import {
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
+  ThreadListV2WaitingShelfHeader,
   ThreadListV2WorkingShelfHeader,
 } from "../threads/thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider-instance";
@@ -470,9 +471,11 @@ export function HomeScreen(props: HomeScreenProps) {
     snoozedShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
+    waitingShelfExpanded,
     toggleSettledShelf,
     toggleSnoozedShelf,
     toggleWorkingShelf,
+    toggleWaitingShelf,
   } = useThreadListV2ShelfPreferences();
   // The queued-start and snooze helpers need a clock while the list stays open.
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16));
@@ -560,6 +563,7 @@ export function HomeScreen(props: HomeScreenProps) {
       now: new Date().toISOString(),
       workingShelfEnabled,
       workingShelfExpanded,
+      waitingShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
       snoozedShelfExpanded,
       settledShelfExpanded,
@@ -568,6 +572,7 @@ export function HomeScreen(props: HomeScreenProps) {
   }, [
     workingShelfEnabled,
     workingShelfExpanded,
+    waitingShelfExpanded,
     pendingOrder,
     queuedThreadKeys,
     nowMinute,
@@ -625,6 +630,9 @@ export function HomeScreen(props: HomeScreenProps) {
         workingCount: threadListV2Layout.workingCount,
         workingShelfExpanded,
         workingShelfHeaderIndex: threadListV2Layout.workingShelfHeaderIndex,
+        waitingCount: threadListV2Layout.waitingCount,
+        waitingShelfExpanded,
+        waitingShelfHeaderIndex: threadListV2Layout.waitingShelfHeaderIndex,
         snoozedCount: threadListV2Layout.snoozedCount,
         snoozedShelfExpanded,
         snoozedShelfHeaderIndex: threadListV2Layout.snoozedShelfHeaderIndex,
@@ -647,6 +655,7 @@ export function HomeScreen(props: HomeScreenProps) {
       snoozeEnvironmentIds,
       threadListV2Layout,
       v2PendingTasks,
+      waitingShelfExpanded,
       workingShelfExpanded,
     ],
   );
@@ -689,6 +698,16 @@ export function HomeScreen(props: HomeScreenProps) {
             disabled={item.disabled}
             expanded={item.expanded}
             onToggle={toggleWorkingShelf}
+          />
+        );
+      }
+      if (item.type === "v2-waiting-shelf") {
+        return (
+          <ThreadListV2WaitingShelfHeader
+            count={item.count}
+            disabled={item.disabled}
+            expanded={item.expanded}
+            onToggle={toggleWaitingShelf}
           />
         );
       }
@@ -812,6 +831,7 @@ export function HomeScreen(props: HomeScreenProps) {
       titleRegenerationEnvironmentIds,
       toggleSettledShelf,
       toggleSnoozedShelf,
+      toggleWaitingShelf,
       toggleWorkingShelf,
       v2ProjectTitleByProjectKey,
       props.searchQuery,

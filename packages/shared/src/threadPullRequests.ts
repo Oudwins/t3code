@@ -84,6 +84,13 @@ export function visibleThreadPullRequests(
   return links.filter((link) => link.source !== "stack-dismissed");
 }
 
+/** True while a visible, open linked pull request still has checks running. */
+export function threadHasRunningChecks(links: ReadonlyArray<ThreadPullRequestLink>): boolean {
+  return visibleThreadPullRequests(links).some(
+    (link) => link.snapshot?.state === "open" && link.snapshot.checksState === "pending",
+  );
+}
+
 function isOpen(link: ThreadPullRequestLink): boolean {
   // Unsynced links are treated as open: they were just linked, and hiding them
   // behind a terminal PR until the first sync would make the link look lost.
