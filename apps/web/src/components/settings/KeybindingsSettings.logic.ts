@@ -96,7 +96,7 @@ export function shortcutToKeybindingInput(shortcut: KeybindingShortcut): string 
 }
 
 /** `mod+g x` for a chord, `mod+k` for a plain shortcut: the string a config rule's `key` holds. */
-export function bindingToKeybindingInput(binding: ResolvedKeybindingRule): string {
+function bindingToKeybindingInput(binding: ResolvedKeybindingRule): string {
   return "shortcut" in binding
     ? shortcutToKeybindingInput(binding.shortcut)
     : binding.chord.map(shortcutToKeybindingInput).join(" ");
