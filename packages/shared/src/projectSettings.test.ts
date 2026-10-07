@@ -326,6 +326,7 @@ describe("resolveWorktreeCleanup", () => {
       worktreeOnDelete: false,
       worktreeOnMerge: false,
       worktreeUnchanged: false,
+      worktreeForce: false,
     });
     expect(resolveWorktreeCleanup(off, otherProjectId)).toEqual(inherited);
     const custom = applyServerSettingsPatch(off, {
@@ -344,6 +345,37 @@ describe("resolveWorktreeCleanup", () => {
     });
     expect(resolveWorktreeCleanup(reset, projectId)).toEqual(inherited);
   });
+  it("inherits forced removal from the machine, clears it when a project is off, and lets a project opt out", () => {
+    const machine = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      storageCleanup: { worktreeOnDelete: true },
+    });
+    expect(resolveWorktreeCleanup(machine, projectId).worktreeForce).toBe(true);
+    expect(
+      resolveWorktreeCleanup(
+        applyServerSettingsPatch(machine, { storageCleanup: { worktreeForce: false } }),
+        projectId,
+      ).worktreeForce,
+    ).toBe(false);
+    const off = applyServerSettingsPatch(machine, {
+      projectSettingsOverrides: { [projectId]: { worktreeCleanup: { mode: "off" } } },
+    });
+    expect(resolveWorktreeCleanup(off, projectId).worktreeForce).toBe(false);
+    expect(resolveWorktreeCleanup(off, otherProjectId).worktreeForce).toBe(true);
+    const custom = applyServerSettingsPatch(off, {
+      projectSettingsOverrides: {
+        [projectId]: {
+          worktreeCleanup: {
+            mode: "custom",
+            rules: { ...resolveWorktreeCleanup(machine, projectId), worktreeForce: false },
+          },
+        },
+      },
+    });
+    expect(resolveWorktreeCleanup(custom, projectId)).toMatchObject({
+      worktreeOnDelete: true,
+      worktreeForce: false,
+    });
+  });
   it("completes partial machine custom rules and preserves them across edits", () => {
     const initial = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnDelete: true },
@@ -359,6 +391,7 @@ describe("resolveWorktreeCleanup", () => {
       worktreeOnDelete: true,
       worktreeOnMerge: true,
       worktreeUnchanged: false,
+      worktreeForce: true,
     });
     expect(
       resolveWorktreeCleanup(applyServerSettingsPatch(edited, { worktreeCleanup: null }), null)

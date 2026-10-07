@@ -112,16 +112,23 @@ manually. Custom applies separate worktree rules to the selected project or chec
 captures and log retention remain machine-wide.
 
 Worktrees can be removed after a chosen number of inactive days, after merging, or when they
-have no commits beyond the default branch. Only T3-managed worktrees are eligible. Active
-sessions, shared worktrees, uncommitted changes, and ignored files other than `node_modules`
-prevent removal. Branches and thread history stay; starting another turn recreates the checkout.
-Merge cleanup requires the commits to be included in the remote default branch, so squash merges
-may need the inactivity rule instead.
+have no commits beyond the default branch. Only T3-managed worktrees are eligible. Running
+threads and shared worktrees prevent removal. Branches and thread history stay; starting another
+turn recreates the checkout. Merge cleanup requires the commits to be included in the remote
+default branch, so squash merges may need the inactivity rule instead.
 
-Enable **Delete worktrees with deleted threads** to remove safe worktrees after their last
-thread is deleted, including archived threads and worktrees left by earlier deletions. The
-server waits for sessions and terminals to stop and retries skipped worktrees after restart.
-Existing prompts for deleting a worktree manually remain available when this policy is off.
+**Delete even when in use** is on by default. For settled, archived, and deleted threads, a
+worktree that matches a rule is removed despite uncommitted changes, ignored files, open
+terminals, or live sessions. T3 closes those terminals and sessions first, and uncommitted work
+in the worktree is permanently lost; committed work stays on the branch. Threads that are still
+open keep any worktree with uncommitted changes, ignored files other than `node_modules`, open
+terminals, or live sessions, and so does every thread when this setting is off.
+
+Enable **Delete worktrees with deleted threads** to remove worktrees after their last thread is
+deleted, including archived threads and worktrees left by earlier deletions. With **Delete even
+when in use** off, the server waits for sessions and terminals to stop, keeps worktrees with
+local changes, and retries skipped worktrees after restart. Existing prompts for deleting a
+worktree manually remain available when this policy is off.
 
 Browser captures and rotated logs have separate retention periods. Expired capture links stop
 working. Current logs, message attachments, and browser profiles are kept.

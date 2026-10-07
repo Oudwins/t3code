@@ -56,6 +56,7 @@ describe("storage cleanup settings", () => {
       worktreeOnMerge: false,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
+      worktreeForce: true,
       browserArtifactsAfterDays: null,
       logsAfterDays: null,
     });
@@ -83,6 +84,27 @@ describe("storage cleanup settings", () => {
         },
       }),
     ).toThrow();
+  });
+
+  it("keeps stored cleanup rules that predate forced removal and turns it on", () => {
+    const rules = {
+      worktreeAfterDays: 8,
+      worktreeOnMerge: true,
+      worktreeOnDelete: false,
+      worktreeUnchanged: false,
+    };
+    expect(decodeServerSettings({ worktreeCleanup: { mode: "custom", rules } })).toMatchObject({
+      worktreeCleanup: { mode: "custom", rules: { ...rules, worktreeForce: true } },
+    });
+    expect(
+      Object.values(
+        decodeServerSettings({
+          projectSettingsOverrides: {
+            project: { worktreeCleanup: { mode: "custom", rules } },
+          },
+        }).projectSettingsOverrides,
+      )[0]?.worktreeCleanup,
+    ).toEqual({ mode: "custom", rules: { ...rules, worktreeForce: true } });
   });
 
   it.each([0, -1, 1.5, 3651])("rejects invalid retention %s", (days) => {

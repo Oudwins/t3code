@@ -31,6 +31,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
+import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import { threadHasQueuedTurnStart } from "./orchestration-v2/ThreadSettlementService.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
@@ -92,6 +93,13 @@ export function storageCleanupThreadIdle(thread: OrchestrationV2ThreadShell, now
   );
 }
 
+/** Settled and archived threads are the ones the user has moved on from. */
+function storageCleanupThreadFinished(
+  thread: Pick<OrchestrationV2ThreadShell, "archivedAt" | "settledOverride">,
+): boolean {
+  return thread.archivedAt !== null || thread.settledOverride === "settled";
+}
+
 /** PR metadata refreshes must not reset the inactivity clock. */
 export function storageCleanupActivityAt(thread: OrchestrationV2ThreadShell): number {
   return Math.max(
@@ -115,6 +123,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const terminals = yield* TerminalManager.TerminalManager;
+  const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const liveTerminals = new Map<string, Map<string, TerminalSummary>>();
@@ -134,10 +143,10 @@ export const make = Effect.gen(function* () {
       !path.isAbsolute(relative)
     );
   };
-  const hasTerminal = (worktreePath: string) =>
+  const liveTerminalsIn = (worktreePath: string) =>
     [...liveTerminals.values()]
       .flatMap((entries) => [...entries.values()])
-      .some((terminal) => {
+      .filter((terminal) => {
         if (terminal.status !== "starting" && terminal.status !== "running") return false;
         const cwd = path.resolve(terminal.cwd);
         return (
@@ -147,6 +156,7 @@ export const make = Effect.gen(function* () {
           inside(worktreePath, cwd)
         );
       });
+  const hasTerminal = (worktreePath: string) => liveTerminalsIn(worktreePath).length > 0;
 
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
     const active = yield* projections.getShellSnapshot();
@@ -170,6 +180,25 @@ export const make = Effect.gen(function* () {
     }
     return false;
   });
+
+  // Ignored files can contain secrets or local datasets. Dependency installs
+  // are reproducible; every other ignored path prevents automatic removal.
+  const hasIrreplaceableIgnoredFiles = Effect.fn("StorageCleanup.hasIrreplaceableIgnoredFiles")(
+    function* (worktreePath: string) {
+      const ignored = yield* git.execute({
+        operation: "StorageCleanup.ignoredFiles",
+        cwd: worktreePath,
+        args: ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+        maxOutputBytes: 64 * 1024,
+      });
+      return (
+        ignored.stdoutTruncated ||
+        ignored.stdout
+          .split("\0")
+          .some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
+      );
+    },
+  );
 
   const cleanWorktrees = Effect.fn("StorageCleanup.cleanWorktrees")(function* (
     serverSettings: ServerSettings,
@@ -212,13 +241,18 @@ export const make = Effect.gen(function* () {
       if (!worktreeCleanupEnabled(settings)) continue;
       const worktreePath = path.resolve(thread.worktreePath!);
       const deleted = "workspaceRoot" in thread;
+      // Force removal drops the in-use gates: uncommitted changes, ignored files,
+      // open terminals and live sessions. It only applies once the user is done
+      // with the thread. Thread activity, shared checkouts and the managed-worktree
+      // checks still apply.
+      const force = settings.worktreeForce && (deleted || storageCleanupThreadFinished(thread));
       const project = deleted
         ? { workspaceRoot: thread.workspaceRoot }
         : snapshot.projects.find((entry) => entry.id === thread.projectId);
       if (
         project === undefined ||
         (!deleted && !storageCleanupThreadIdle(thread, now)) ||
-        hasTerminal(worktreePath)
+        (!force && hasTerminal(worktreePath))
       )
         continue;
       yield* Effect.gen(function* () {
@@ -228,24 +262,14 @@ export const make = Effect.gen(function* () {
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
         const status = yield* git.statusDetailsLocal(worktreePath);
-        if (!status.isRepo || status.branch !== thread.branch || status.hasWorkingTreeChanges)
-          return;
-        const head = yield* git.resolveCommit({ cwd: worktreePath, revision: "HEAD" });
-        const ignored = yield* git.execute({
-          operation: "StorageCleanup.ignoredFiles",
-          cwd: worktreePath,
-          args: ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
-          maxOutputBytes: 64 * 1024,
-        });
-        // Ignored files can contain secrets or local datasets. Dependency installs
-        // are reproducible; every other ignored path prevents automatic removal.
         if (
-          ignored.stdoutTruncated ||
-          ignored.stdout
-            .split("\0")
-            .some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
+          !status.isRepo ||
+          status.branch !== thread.branch ||
+          (!force && status.hasWorkingTreeChanges)
         )
           return;
+        const head = yield* git.resolveCommit({ cwd: worktreePath, revision: "HEAD" });
+        if (!force && (yield* hasIrreplaceableIgnoredFiles(worktreePath))) return;
         const old =
           !deleted &&
           settings.worktreeAfterDays !== null &&
@@ -296,7 +320,7 @@ export const make = Effect.gen(function* () {
           (entry) =>
             entry.worktreePath !== null && path.resolve(entry.worktreePath) === worktreePath,
         );
-        if (hasTerminal(worktreePath)) return;
+        if (!force && hasTerminal(worktreePath)) return;
         if (deleted) {
           if (
             latest.length > 0 ||
@@ -315,6 +339,7 @@ export const make = Effect.gen(function* () {
           latest.length !== 1 ||
           latest[0]!.id !== thread.id ||
           !storageCleanupThreadIdle(latest[0]!, now) ||
+          (force && !storageCleanupThreadFinished(latest[0]!)) ||
           storageCleanupActivityAt(latest[0]!) !== storageCleanupActivityAt(thread)
         )
           return;
@@ -323,21 +348,18 @@ export const make = Effect.gen(function* () {
           SELECT payload_json FROM orchestration_v2_projection_provider_sessions
           WHERE status != 'stopped'
         `;
-        const sessions = yield* Effect.forEach(sessionRows, (row) =>
+        const liveSessions = (yield* Effect.forEach(sessionRows, (row) =>
           decodeCleanupSession(row.payload_json),
-        );
-        if (
-          sessions.some((session) => {
-            const cwd = path.resolve(session.cwd);
-            return cwd === worktreePath || inside(worktreePath, cwd);
-          })
-        )
-          return;
+        )).filter((session) => {
+          const cwd = path.resolve(session.cwd);
+          return cwd === worktreePath || inside(worktreePath, cwd);
+        });
+        if (!force && liveSessions.length > 0) return;
         const finalStatus = yield* git.statusDetailsLocal(worktreePath);
         if (
           !finalStatus.isRepo ||
           finalStatus.branch !== thread.branch ||
-          finalStatus.hasWorkingTreeChanges
+          (!force && finalStatus.hasWorkingTreeChanges)
         )
           return;
         if (
@@ -345,19 +367,7 @@ export const make = Effect.gen(function* () {
           head.commitSha
         )
           return;
-        const finalIgnored = yield* git.execute({
-          operation: "StorageCleanup.ignoredFiles",
-          cwd: worktreePath,
-          args: ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
-          maxOutputBytes: 64 * 1024,
-        });
-        if (
-          finalIgnored.stdoutTruncated ||
-          finalIgnored.stdout
-            .split("\0")
-            .some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
-        )
-          return;
+        if (!force && (yield* hasIrreplaceableIgnoredFiles(worktreePath))) return;
         const current = resolveWorktreeCleanup(
           yield* settingsService.getSettings,
           thread.projectId,
@@ -369,13 +379,30 @@ export const make = Effect.gen(function* () {
           )
         )
           return;
-        yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: false });
+        if (force) {
+          yield* Effect.forEach(
+            liveTerminalsIn(worktreePath),
+            (terminal) =>
+              terminals.close({ threadId: terminal.threadId, terminalId: terminal.terminalId }),
+            { discard: true },
+          );
+          yield* Effect.forEach(liveSessions, (session) => providerSessions.close(session.id), {
+            discard: true,
+          });
+        }
+        yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderTurnStartService recreates the checkout
         // from that branch when the thread is resumed.
-        yield* Effect.logInfo("storage cleanup removed worktree", { threadId: thread.id });
+        yield* Effect.logInfo("storage cleanup removed worktree", {
+          threadId: thread.id,
+          force,
+        });
       }).pipe(
-        (effect) => withWorkspaceLease(worktreePath, effect),
+        // Closing a terminal waits on the thread lock that Terminal open holds while
+        // it waits for this lease, so a forced removal, which closes them, runs
+        // without it.
+        (effect) => (force ? effect : withWorkspaceLease(worktreePath, effect)),
         Effect.catch((error) =>
           Effect.logDebug("storage cleanup skipped worktree", { threadId: thread.id, error }),
         ),
