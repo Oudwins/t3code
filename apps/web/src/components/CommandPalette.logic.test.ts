@@ -282,6 +282,11 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: { kind: "new-thread-in" },
     });
+    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenWorkspace", options: [] })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "workspace", options: [] },
+    });
   });
 
   it("preserves the mode on close and resets it on open", () => {

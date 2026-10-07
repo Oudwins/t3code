@@ -191,7 +191,6 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
               panel={displayMode === "panel"}
               className="min-w-0 shrink"
               aria-label="Workspace"
-              data-composer-shortcut="composer.workspace"
               data-composer-context-control
               onMouseDownCapture={stopContextMenuMouseDown}
               onContextMenu={handleWorkspaceContextMenu}

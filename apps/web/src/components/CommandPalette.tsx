@@ -51,8 +51,10 @@ import {
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
+  FolderGitIcon,
   FolderIcon,
   FolderPlusIcon,
+  HistoryIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -462,6 +464,13 @@ function notifyThemeSaveFailure(): void {
   );
 }
 
+const WORKSPACE_OPTION_ICONS = {
+  checkout: <FolderIcon className={ITEM_ICON_CLASS} />,
+  worktree: <FolderGitIcon className={ITEM_ICON_CLASS} />,
+  "new-worktree": <FolderGit2Icon className={ITEM_ICON_CLASS} />,
+  "previous-worktree": <HistoryIcon className={ITEM_ICON_CLASS} />,
+} as const;
+
 function projectFavicon(project: Project) {
   return <ProjectFavicon project={project} className="size-4" />;
 }
@@ -598,6 +607,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openNewThreadIn();
         } else if (detail.open === "add-project") {
           openAddProject();
+        } else if (detail.workspace !== undefined) {
+          dispatch({ _tag: "OpenWorkspace", options: detail.workspace });
         } else if (detail.query !== undefined) {
           dispatch({
             _tag: "OpenSearch",
@@ -2210,6 +2221,50 @@ function OpenCommandPaletteDialog(props: {
     pushPaletteView({
       addonIcon: <PaletteIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "themes", label: "Change theme", items: [] }],
+    });
+  }, [browseNavigation, clearOpenIntent, openIntent, pushPaletteView]);
+
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "workspace") return;
+    clearOpenIntent();
+    browseNavigation.invalidate();
+    cloneLookupGeneration.current += 1;
+    setIsRemoteProjectLookingUp(false);
+    setAddProjectCloneFlow(null);
+    setNewProjectFlow(null);
+    setViewStack([]);
+    pushPaletteView({
+      addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
+      groups: [
+        {
+          value: "workspaces",
+          label: "Select workspace",
+          items: enumerateCommandPaletteItems(
+            openIntent.options.map((option): CommandPaletteActionItem => ({
+              kind: "action",
+              value: `workspace:${option.id}`,
+              searchTerms: [
+                option.label,
+                "workspace",
+                "worktree",
+                "checkout",
+                ...(option.description ? [option.description] : []),
+              ],
+              title: option.label,
+              ...(option.description ? { description: option.description } : {}),
+              icon: WORKSPACE_OPTION_ICONS[option.icon],
+              ...(option.selected
+                ? {
+                    titleTrailingContent: (
+                      <span className="text-xs text-muted-foreground/70">Current</span>
+                    ),
+                  }
+                : {}),
+              run: async () => option.select(),
+            })),
+          ),
+        },
+      ],
     });
   }, [browseNavigation, clearOpenIntent, openIntent, pushPaletteView]);
 

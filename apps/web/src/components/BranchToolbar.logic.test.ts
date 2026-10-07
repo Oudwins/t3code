@@ -1,6 +1,7 @@
 import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  buildWorkspacePaletteOptions,
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   resolveEnvironmentOptionLabel,
@@ -108,6 +109,54 @@ describe("resolvePreviousWorktreeLabel", () => {
     expect(resolvePreviousWorktreeLabel({ branch: null, worktreePath: "/wt" })).toBe(
       "Previous worktree",
     );
+  });
+});
+
+describe("buildWorkspacePaletteOptions", () => {
+  it("lists the dropdown choices and marks the current one", () => {
+    const options = buildWorkspacePaletteOptions({
+      activeWorktreePath: null,
+      effectiveEnvMode: "local",
+      previousWorktree: null,
+      select: () => {},
+    });
+
+    expect(options.map(({ id, label, selected }) => ({ id, label, selected }))).toEqual([
+      { id: "local", label: "Current checkout", selected: true },
+      { id: "worktree", label: "New worktree", selected: false },
+    ]);
+  });
+
+  it("offers the previous worktree with its branch and reports the chosen id", () => {
+    const select = vi.fn();
+    const options = buildWorkspacePaletteOptions({
+      activeWorktreePath: "/wt/current",
+      effectiveEnvMode: "local",
+      previousWorktree: { branch: "t3/fix-thing", worktreePath: "/wt/previous" },
+      select,
+    });
+
+    expect(options.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: "local", label: "Current worktree" },
+      { id: "worktree", label: "New worktree" },
+      { id: "previous-worktree", label: "Previous worktree" },
+    ]);
+    expect(options[2]?.description).toBe("t3/fix-thing");
+
+    options[1]?.select();
+    options[2]?.select();
+    expect(select.mock.calls).toEqual([["worktree"], ["previous-worktree"]]);
+  });
+
+  it("marks a new worktree as current when one is being created", () => {
+    const options = buildWorkspacePaletteOptions({
+      activeWorktreePath: null,
+      effectiveEnvMode: "worktree",
+      previousWorktree: null,
+      select: () => {},
+    });
+
+    expect(options.find((option) => option.selected)?.id).toBe("worktree");
   });
 });
 
