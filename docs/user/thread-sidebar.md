@@ -139,6 +139,10 @@ sending an answer or restarting the agent. Settling also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A terminal that
 runs a command, such as a dev server, stays open.
 
+Settling the thread you have open takes you to the latest thread in the same project that
+is not working, waiting, snoozed, or settled. When there is none, it opens a new thread in
+that project. Snoozing the open thread moves you the same way.
+
 On web and desktop, press a thread's **Settle** button and drag up or down to
 settle every thread in that section between it and the one you release on.
 The **Un-settle** and **Wake** buttons work the same way in their sections.
