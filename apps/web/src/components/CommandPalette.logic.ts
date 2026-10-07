@@ -53,12 +53,21 @@ export function browseInputEndPaddingClass(input: {
 }
 
 /**
- * The global search overlay hosts three mutually exclusive surfaces: the
- * command palette (⌘K), the project file picker (⌘P), and project content
- * search (⇧⌘F). One reducer owns open/mode state so the surfaces can never
- * stack and re-triggering a mode's shortcut toggles it closed.
+ * The global search overlay hosts four mutually exclusive surfaces: thread
+ * search (⌘K), the command palette (⌥⌘K), the project file picker (⌘P), and
+ * project content search (⇧⌘F). One reducer owns open/mode state so the
+ * surfaces can never stack and re-triggering a mode's shortcut toggles it
+ * closed.
  */
-export type SearchOverlayMode = "command" | "files" | "content";
+export type SearchOverlayMode = "threads" | "command" | "files" | "content";
+
+/**
+ * Files and content search are reached from the palette's actions, so Escape
+ * steps back to it. Thread search is a top-level entry point; Escape closes it.
+ */
+export function escapeReturnsToCommandPalette(mode: SearchOverlayMode): boolean {
+  return mode === "files" || mode === "content";
+}
 
 export type CommandPaletteOpenIntent =
   | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }

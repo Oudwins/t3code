@@ -257,6 +257,50 @@ describe("thread undo shortcut", () => {
   });
 });
 
+describe("thread search and command palette shortcuts", () => {
+  it("opens thread search on Cmd+K and the command palette on Cmd+Alt+K", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "k", metaKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+      }),
+      "threadSearch.toggle",
+    );
+    assert.equal(
+      resolveShortcutCommand(
+        event({ key: "k", metaKey: true, altKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        {
+          platform: "MacIntel",
+        },
+      ),
+      "commandPalette.toggle",
+    );
+    assert.equal(
+      resolveShortcutCommand(
+        event({ key: "k", ctrlKey: true, altKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        {
+          platform: "Linux",
+        },
+      ),
+      "commandPalette.toggle",
+    );
+  });
+
+  it("leaves Cmd+Shift+K to copying a pull request number", () => {
+    assert.equal(
+      resolveShortcutCommand(
+        event({ key: "k", metaKey: true, shiftKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        {
+          platform: "MacIntel",
+        },
+      ),
+      "pullRequest.copyNumber",
+    );
+  });
+});
+
 describe("copy thread reference shortcut", () => {
   it("resolves Cmd+Shift+C on macOS and Ctrl+Shift+C elsewhere", () => {
     assert.equal(

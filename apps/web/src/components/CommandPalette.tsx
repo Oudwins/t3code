@@ -160,6 +160,7 @@ import {
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
   enumerateCommandPaletteItems,
+  escapeReturnsToCommandPalette,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -432,6 +433,7 @@ function errorMessage(error: unknown): string {
 }
 
 const OVERLAY_MODE_BY_COMMAND = {
+  "threadSearch.toggle": "threads",
   "commandPalette.toggle": "command",
   "filePicker.toggle": "files",
   "projectSearch.toggle": "content",
@@ -499,7 +501,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (!state.open || state.mode === "command") return;
+    if (!state.open || !escapeReturnsToCommandPalette(state.mode)) return;
     const onEscapeKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.isComposing || event.key !== "Escape") return;
       event.preventDefault();
@@ -614,7 +616,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       <CommandDialog
         open={state.open}
         onOpenChange={(open, eventDetails) => {
-          if (!open && eventDetails.reason === "escape-key" && state.mode !== "command") {
+          if (
+            !open &&
+            eventDetails.reason === "escape-key" &&
+            escapeReturnsToCommandPalette(state.mode)
+          ) {
             eventDetails.cancel();
             toggleMode("command");
             return;
@@ -654,7 +660,9 @@ function CommandPaletteDialog(props: {
           ? "File picker"
           : props.mode === "content"
             ? "Search project contents"
-            : "Command palette"
+            : props.mode === "threads"
+              ? "Thread search"
+              : "Command palette"
       }
       className={cn("overflow-hidden", props.mode === "content" && "h-105")}
       data-command-palette="true"
@@ -674,6 +682,7 @@ function CommandPaletteDialog(props: {
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
       ) : (
         <OpenCommandPaletteDialog
+          threadsOnly={props.mode === "threads"}
           openIntent={props.openIntent}
           setOpen={props.setOpen}
           openOverlayMode={props.openOverlayMode}
@@ -685,6 +694,8 @@ function CommandPaletteDialog(props: {
 }
 
 function OpenCommandPaletteDialog(props: {
+  /** Thread search: Recent Threads and thread results only, no actions, projects, or settings. */
+  readonly threadsOnly: boolean;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
@@ -692,7 +703,7 @@ function OpenCommandPaletteDialog(props: {
 }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
+  const { clearOpenIntent, openIntent, openOverlayMode, setOpen, threadsOnly } = props;
   const [query, setQuery] = useState(openIntent?.kind === "search" ? openIntent.query : "");
   const [linkedThreadSearch, setLinkedThreadSearch] = useState(
     openIntent?.kind === "search" ? openIntent : null,
@@ -1512,6 +1523,10 @@ function OpenCommandPaletteDialog(props: {
     browseNavigation.invalidate();
     clearTypedHighlight();
     setQuery(nextQuery);
+    // `>` is the palette's actions-only prefix. Typing it here hands the query over to the palette.
+    if (threadsOnly && nextQuery.startsWith(">")) {
+      openOverlayMode("command");
+    }
     if (nextQuery === "" && currentView?.initialQuery) {
       popView();
     }
@@ -2292,10 +2307,12 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
-  const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
-    deferredQuery,
-    availableSettingsSearchItems,
+  const rootGroups = buildRootGroups({
+    actionItems: threadsOnly ? [] : actionItems,
+    recentThreadItems,
+  });
+  const settingsSearchItems: CommandPaletteActionItem[] = (
+    threadsOnly ? [] : searchSettings(deferredQuery, availableSettingsSearchItems)
   ).map((item) => ({
     kind: "action",
     value: `setting:${item.id}`,
@@ -2333,7 +2350,7 @@ function OpenCommandPaletteDialog(props: {
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
-    projectSearchItems: projectSearchItems,
+    projectSearchItems: threadsOnly ? [] : projectSearchItems,
     settingsSearchItems,
     threadSearchItems:
       linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query
@@ -2962,7 +2979,7 @@ function OpenCommandPaletteDialog(props: {
     newProjectFlow !== null
       ? "Project name"
       : (remoteProjectInputPlaceholder(addProjectCloneFlow) ??
-        getCommandPaletteInputPlaceholder(paletteMode));
+        (threadsOnly ? "Search threads..." : getCommandPaletteInputPlaceholder(paletteMode)));
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
   const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
   const canSubmitBrowsePath =
@@ -3404,7 +3421,7 @@ function OpenCommandPaletteDialog(props: {
   return (
     <CommandPaletteContent
       key={`${viewStack.length}-${browseGeneration}-${isBrowsing}-${newProjectFlow ? "new-project" : (addProjectCloneFlow?.step ?? "none")}`}
-      aria-label="Command palette"
+      aria-label={threadsOnly ? "Thread search" : "Command palette"}
       autoHighlight={autoHighlightsFirstRow ? "always" : false}
       footerActionLabel={footerActionLabel}
       footerTrailing={footerTrailing}
