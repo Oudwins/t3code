@@ -200,7 +200,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete worktrees with deleted threads"
               status={ruleStatus("worktreeOnDelete")}
-              description="Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept."
+              description="Remove worktrees when active or archived threads are deleted. Worktrees with local changes are kept unless deleting in-use worktrees is on."
               serverScoped={!isProjectScope}
               control={
                 <Switch
@@ -246,6 +246,19 @@ export function StorageSettingsPanel() {
                   aria-label="Delete unchanged worktrees"
                   checked={settings.worktreeUnchanged}
                   onCheckedChange={(worktreeUnchanged) => updateWorktree({ worktreeUnchanged })}
+                />
+              }
+            />
+            <SettingsRow
+              title="Delete even when in use"
+              status={ruleStatus("worktreeForce")}
+              description="For settled, archived, and deleted threads, also remove worktrees with uncommitted changes, ignored files, open terminals, or live sessions. Terminals and sessions are closed and uncommitted work is permanently lost."
+              serverScoped={!isProjectScope}
+              control={
+                <Switch
+                  aria-label="Delete even when in use"
+                  checked={settings.worktreeForce}
+                  onCheckedChange={(worktreeForce) => updateWorktree({ worktreeForce })}
                 />
               }
             />

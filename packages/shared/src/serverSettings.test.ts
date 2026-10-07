@@ -37,6 +37,7 @@ describe("serverSettings helpers", () => {
       worktreeOnMerge: true,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
+      worktreeForce: true,
       browserArtifactsAfterDays: null,
       logsAfterDays: 30,
     });
