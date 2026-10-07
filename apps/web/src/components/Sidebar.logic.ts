@@ -1,3 +1,4 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
@@ -19,7 +20,9 @@ import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
 } from "@t3tools/client-runtime/state/thread-settled";
+import { isThreadWaiting, isThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
 import {
+  getLatestThreadForProject,
   getThreadSortTimestamp,
   sortThreads,
   toSortableTimestamp,
@@ -43,6 +46,38 @@ export function shouldNavigateAfterThreadPark(input: {
     (input.action === "settle"
       ? input.thread.settledOverride === "settled"
       : effectiveSnoozed(input.thread, { now: input.now }))
+  );
+}
+
+/**
+ * Where the reader lands after parking (settling or snoozing) the thread they
+ * have open: the project's latest thread that still wants them. Parked,
+ * working, and waiting threads are skipped. Null means open a fresh draft in
+ * the project instead.
+ */
+export function resolveThreadAfterPark(input: {
+  readonly threads: readonly SidebarThreadSummary[];
+  readonly parkedThread: Pick<SidebarThreadSummary, "id" | "environmentId" | "projectId">;
+  /** Threads parking in the same batch, which leave the inbox together. */
+  readonly coParkingKeys?: ReadonlySet<string> | undefined;
+  readonly sortOrder: SidebarThreadSortOrder;
+  readonly now: string;
+}): SidebarThreadSummary | null {
+  const { parkedThread } = input;
+  const parkedKeys = new Set(input.coParkingKeys);
+  parkedKeys.add(scopedThreadKey(scopeThreadRef(parkedThread.environmentId, parkedThread.id)));
+  return getLatestThreadForProject(
+    filterSidebarV2VisibleThreads(input.threads, null).filter(
+      (thread) =>
+        thread.environmentId === parkedThread.environmentId &&
+        !parkedKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) &&
+        thread.settledOverride !== "settled" &&
+        !effectiveSnoozed(thread, { now: input.now }) &&
+        !isThreadWorking(thread) &&
+        !isThreadWaiting(thread),
+    ),
+    parkedThread.projectId,
+    input.sortOrder,
   );
 }
 

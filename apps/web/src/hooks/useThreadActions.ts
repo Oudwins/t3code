@@ -15,7 +15,12 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef } from "react";
 
-import { getFallbackThreadIdAfterDelete, pinOrderKeyBetween } from "../components/Sidebar.logic";
+import {
+  getFallbackThreadIdAfterDelete,
+  pinOrderKeyBetween,
+  resolveThreadAfterPark,
+  shouldNavigateAfterThreadPark,
+} from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { terminalEnvironment } from "../state/terminal";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -321,6 +326,70 @@ export function useThreadActions() {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteRef(currentRouteParams);
   }, [router]);
+
+  // Parking the thread you're looking at (settle or snooze) moves you on to the
+  // project's latest thread that still wants you, or a fresh draft when none
+  // does. Plan BEFORE the command runs and call the returned function once it
+  // succeeds; it only navigates while the parked thread is still open, so a
+  // navigation made during the await wins. Background parks get null.
+  const planNavigationAfterPark = useCallback(
+    (
+      target: ScopedThreadRef,
+      action: "settle" | "snooze",
+      coParkingKeys?: ReadonlySet<string>,
+    ): (() => Promise<void>) | null => {
+      const threadKey = scopedThreadKey(target);
+      const routeThreadRef = getCurrentRouteThreadRef();
+      if (!routeThreadRef || scopedThreadKey(routeThreadRef) !== threadKey) return null;
+      const parkedThread = readThreadShell(target);
+      if (!parkedThread) return null;
+      const nextThread = resolveThreadAfterPark({
+        threads: readThreadShells(),
+        parkedThread,
+        coParkingKeys,
+        sortOrder: sidebarThreadSortOrder,
+        now: new Date().toISOString(),
+      });
+      const navigate: () => Promise<unknown> = nextThread
+        ? () =>
+            router.navigate({
+              to: "/$environmentId/$threadId",
+              params: buildThreadRouteParams(
+                scopeThreadRef(nextThread.environmentId, nextThread.id),
+              ),
+            })
+        : () =>
+            handleNewThreadRef.current(
+              scopeProjectRef(parkedThread.environmentId, parkedThread.projectId),
+            );
+      return async () => {
+        const currentRouteThreadRef = getCurrentRouteThreadRef();
+        if (
+          !shouldNavigateAfterThreadPark({
+            threadKey,
+            currentThreadKey: currentRouteThreadRef ? scopedThreadKey(currentRouteThreadRef) : null,
+            action,
+            now: new Date().toISOString(),
+            thread: readThreadShell(target),
+          })
+        ) {
+          return;
+        }
+        const result = await settlePromise(navigate);
+        if (result._tag === "Failure") {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not open the next thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      };
+    },
+    [getCurrentRouteThreadRef, router, sidebarThreadSortOrder],
+  );
 
   const unarchiveThread = useCallback(
     async (target: ScopedThreadRef, opts: { navigate?: boolean } = {}) => {
@@ -722,7 +791,7 @@ export function useThreadActions() {
   );
 
   const settleThread = useCallback(
-    async (target: ScopedThreadRef) => {
+    async (target: ScopedThreadRef, opts: { coSettlingKeys?: ReadonlySet<string> } = {}) => {
       // Version skew: never send the command to a server that predates it —
       // the raw protocol rejection would read as a random failure.
       if (!readEnvironmentSupportsSettlement(target.environmentId)) {
@@ -749,6 +818,7 @@ export function useThreadActions() {
       ThreadUndo.invalidate("pin", scopedThreadKey(target));
       ThreadUndo.invalidate("snooze", scopedThreadKey(target));
       const action = ThreadUndo.begin("settle", scopedThreadKey(target));
+      const navigateAfterSettle = planNavigationAfterPark(target, "settle", opts.coSettlingKeys);
       const result = await settleThreadMutation({
         environmentId: target.environmentId,
         input: { threadId: target.threadId },
@@ -783,11 +853,13 @@ export function useThreadActions() {
         },
         failureTitle: "Failed to undo settle",
       });
+      await navigateAfterSettle?.();
       return result;
     },
     [
       markThreadVisited,
       pinThread,
+      planNavigationAfterPark,
       resolveThreadTarget,
       settleThreadMutation,
       snoozeThreadMutation,
@@ -881,7 +953,11 @@ export function useThreadActions() {
   );
 
   const snoozeThread = useCallback(
-    async (target: ScopedThreadRef, snoozedUntil: string) => {
+    async (
+      target: ScopedThreadRef,
+      snoozedUntil: string,
+      opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
+    ) => {
       // Version skew: never send the command to a server that predates it.
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
         return AsyncResult.failure(
@@ -908,6 +984,7 @@ export function useThreadActions() {
         );
       }
       const action = ThreadUndo.begin("snooze", scopedThreadKey(target));
+      const navigateAfterSnooze = planNavigationAfterPark(target, "snooze", opts.coSnoozingKeys);
       const result = await snoozeThreadMutation({
         environmentId: target.environmentId,
         input: { threadId: target.threadId, snoozedUntil },
@@ -923,9 +1000,10 @@ export function useThreadActions() {
         undo: () => unsnoozeThread(target),
         failureTitle: "Failed to wake thread",
       });
+      await navigateAfterSnooze?.();
       return result;
     },
-    [resolveThreadTarget, snoozeThreadMutation, unsnoozeThread],
+    [planNavigationAfterPark, resolveThreadTarget, snoozeThreadMutation, unsnoozeThread],
   );
 
   const confirmAndDeleteThread = useCallback(

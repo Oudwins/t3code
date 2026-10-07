@@ -38,6 +38,7 @@ import {
   resolveSidebarRowAccessibility,
   resolveSidebarThreadStatus,
   resolveSidebarV2TopStatus,
+  resolveThreadAfterPark,
   resolveThreadLastVisitedAt,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -2255,6 +2256,71 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+describe("resolveThreadAfterPark", () => {
+  const environmentId = EnvironmentId.make("environment-park");
+  const projectId = ProjectId.make("project-park");
+  const now = "2026-09-12T10:00:00.000Z";
+  const runtimeAt = (status: "running" | "idle") => ({
+    status,
+    activeRunId: null,
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    providerName: "Codex",
+    lastError: null,
+    updatedAt: now,
+  });
+  // Later createdAt means a later thread under the created_at sort order.
+  const candidate = (id: string, hourOfCreation: number, overrides: ThreadFixtureOverrides = {}) =>
+    makeThreadFixture({
+      id: ThreadId.make(id),
+      environmentId,
+      projectId,
+      createdAt: `2026-09-12T0${hourOfCreation}:00:00.000Z`,
+      ...overrides,
+    });
+  const parked = candidate("parked", 9);
+  const resolve = (threads: ReturnType<typeof candidate>[], coParkingKeys?: Set<string>) =>
+    resolveThreadAfterPark({
+      threads: [parked, ...threads],
+      parkedThread: parked,
+      coParkingKeys,
+      sortOrder: "created_at",
+      now,
+    })?.id ?? null;
+
+  it("lands on the project's latest thread that still wants the reader", () => {
+    const older = candidate("older", 1);
+    const latest = candidate("latest", 5);
+    const otherProject = candidate("other-project", 8, { projectId: ProjectId.make("elsewhere") });
+
+    expect(resolve([older, latest, otherProject])).toBe("latest");
+  });
+
+  it("skips settled, snoozed, working, and waiting threads", () => {
+    const eligible = candidate("eligible", 1);
+    const blocked = [
+      candidate("settled", 6, { settledOverride: "settled" }),
+      candidate("snoozed", 5, { snoozedUntil: "2099-01-01T00:00:00.000Z" }),
+      candidate("working", 4, { runtime: runtimeAt("running") }),
+      candidate("waiting", 3, { runtime: runtimeAt("idle") }),
+    ];
+
+    expect(isSidebarThreadWorking(blocked[2]!)).toBe(true);
+    expect(resolve([eligible, ...blocked])).toBe("eligible");
+  });
+
+  it("does not land on threads parking in the same batch", () => {
+    const sibling = candidate("sibling", 6);
+    const remaining = candidate("remaining", 2);
+
+    expect(resolve([sibling, remaining], new Set([`${environmentId}:sibling`]))).toBe("remaining");
+  });
+
+  it("opens a fresh draft when nothing is left to land on", () => {
+    expect(resolve([candidate("settled", 5, { settledOverride: "settled" })])).toBeNull();
+    expect(resolve([])).toBeNull();
+  });
 });
 
 describe("unseen completion with background work", () => {
