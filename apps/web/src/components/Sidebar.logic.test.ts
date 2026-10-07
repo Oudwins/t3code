@@ -1089,6 +1089,31 @@ describe("resolveSidebarThreadStatus", () => {
     ).toBe("working");
   });
 
+  it("reports waiting for a ready thread whose linked pull request has checks running", () => {
+    const link = (checksState: "pending" | "passing" | "failing", state = "open" as const) =>
+      ({
+        snapshot: { state, checksState },
+        source: "agent",
+      }) as never;
+    expect(resolveSidebarThreadStatus({ ...idle, pullRequests: [link("pending")] })).toBe(
+      "waiting",
+    );
+    expect(resolveSidebarThreadStatus({ ...idle, pullRequests: [link("passing")] })).toBe("ready");
+    expect(
+      resolveSidebarThreadStatus({ ...idle, pullRequests: [link("pending", "merged" as never)] }),
+    ).toBe("ready");
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        hasPendingUserInput: true,
+        pullRequests: [link("pending")],
+      }),
+    ).toBe("input");
+    expect(resolveSidebarThreadStatus({ ...idle, runtime, pullRequests: [link("pending")] })).toBe(
+      "working",
+    );
+  });
+
   it("keeps usage-limit stops Limited and visible until the thread recovers", () => {
     const limited = {
       ...runtime,
@@ -2372,7 +2397,7 @@ describe("Working shelf (beta)", () => {
       key,
       section,
     });
-    // Pinned p1 | Active a1 a2 | Working w1 | Settled s1
+    // Pinned p1 | Active a1 a2 | Working w1 | Waiting t1 | Settled s1
     const items: readonly SidebarListItem[] = [
       marker("pinned-header"),
       row("p1", "pinned"),
@@ -2381,6 +2406,8 @@ describe("Working shelf (beta)", () => {
       row("a2", "active"),
       marker("working-header"),
       row("w1", "working"),
+      marker("waiting-header"),
+      row("t1", "waiting"),
       marker("settled-header"),
       row("s1", "settled"),
     ];
@@ -2393,6 +2420,11 @@ describe("Working shelf (beta)", () => {
         activeOrder: ["a1", "a2", "p1"],
       });
       expect(resolveSidebarDropVerb("active", "working")).toBeNull();
+    });
+
+    it("never drops into the Waiting shelf either", () => {
+      expect(resolveSidebarDropTarget(items, "a1", "t1")).toBeNull();
+      expect(resolveSidebarDropVerb("active", "waiting")).toBeNull();
     });
 
     it("only changes lifecycle when the inbox is time-ordered", () => {

@@ -110,7 +110,30 @@ describe("resolveThreadListV2SnoozeMenuSelection", () => {
   });
 });
 
+const pullRequestWithChecks = (checksState: "pending" | "passing", state = "open" as const) =>
+  ({
+    ...linkedPullRequest,
+    source: "agent",
+    linkedAt: NOW,
+    stack: null,
+    snapshot: { state, checksState },
+  }) as never;
+
 describe("resolveThreadListV2Status", () => {
+  it("reports waiting while a linked pull request has checks running", () => {
+    const thread = (checksState: "pending" | "passing") =>
+      makeThread({
+        id: ThreadId.make("ci"),
+        title: "ci",
+        pullRequests: [pullRequestWithChecks(checksState)],
+      });
+    expect(resolveThreadListV2Status(thread("pending"))).toBe("waiting");
+    expect(resolveThreadListV2Status(thread("passing"))).toBe("ready");
+    expect(resolveThreadListV2Status({ ...thread("pending"), hasPendingUserInput: true })).toBe(
+      "input",
+    );
+  });
+
   it("distinguishes usage limits from ordinary failures and clears the label after recovery", () => {
     const thread = makeThread({
       id: ThreadId.make("limited"),
@@ -2226,6 +2249,71 @@ describe("Working section beta", () => {
     const off = build({ workingShelfEnabled: false });
     expect(ids(off)).toContain("working");
     expect(off.workingCount).toBe(0);
+  });
+
+  describe("Waiting shelf", () => {
+    const idle = { ...running, status: "idle" as const };
+    const waitingThreads = [
+      ...threads,
+      makeThread({ id: ThreadId.make("parked"), title: "parked", runtime: idle }),
+      makeThread({
+        id: ThreadId.make("ci-pending"),
+        title: "ci-pending",
+        pullRequests: [pullRequestWithChecks("pending")],
+      }),
+      makeThread({
+        id: ThreadId.make("ci-passing"),
+        title: "ci-passing",
+        pullRequests: [pullRequestWithChecks("passing")],
+      }),
+    ];
+    const buildWaiting = (input: Partial<Parameters<typeof buildThreadListV2Items>[0]> = {}) =>
+      build({ threads: waitingThreads, ...input });
+
+    it("folds parked and CI-pending threads into a shelf of their own, apart from Working", () => {
+      const layout = buildWaiting();
+      expect(layout.workingCount).toBe(1);
+      expect(layout.waitingCount).toBe(2);
+      expect(ids(layout)).toContain("ci-passing");
+      expect(ids(layout)).not.toContain("parked");
+      expect(ids(layout)).not.toContain("ci-pending");
+      expect(layout.waitingShelfHeaderIndex).toBe(ids(layout).length);
+      expect(layout.workingShelfHeaderIndex).toBe(ids(layout).length);
+
+      const expanded = buildWaiting({ waitingShelfExpanded: true });
+      expect(ids(expanded).slice(-2).toSorted()).toEqual(["ci-pending", "parked"]);
+      expect(ids(buildWaiting({ selectedThreadKey: `${environmentId}:parked` })).at(-1)).toBe(
+        "parked",
+      );
+    });
+
+    it("leaves waiting threads in the inbox while the beta is off", () => {
+      const layout = buildWaiting({ workingShelfEnabled: false });
+      expect(layout.waitingCount).toBe(0);
+      expect(ids(layout)).toContain("parked");
+      expect(ids(layout)).toContain("ci-pending");
+    });
+
+    it("places the shelf after Working and before Snoozed", () => {
+      const layout = buildWaiting({ workingShelfExpanded: true, waitingShelfExpanded: true });
+      const items = buildThreadListV2ListItems({
+        items: layout.items,
+        pendingTasks: [],
+        workingCount: layout.workingCount,
+        workingShelfExpanded: true,
+        workingShelfHeaderIndex: layout.workingShelfHeaderIndex,
+        waitingCount: layout.waitingCount,
+        waitingShelfExpanded: true,
+        waitingShelfHeaderIndex: layout.waitingShelfHeaderIndex,
+      });
+      const kinds = items.map((item) =>
+        item.type === "v2-thread" ? item.item.thread.id : item.type,
+      );
+      const working = kinds.indexOf("v2-working-shelf");
+      const waiting = kinds.indexOf("v2-waiting-shelf");
+      expect(kinds.slice(working, waiting)).toEqual(["v2-working-shelf", "working"]);
+      expect(kinds.slice(waiting + 1).toSorted()).toEqual(["ci-pending", "parked"]);
+    });
   });
 
   it("shows working rows as cards when expanded, or only the selected one when collapsed", () => {

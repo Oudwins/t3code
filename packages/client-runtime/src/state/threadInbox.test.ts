@@ -1,7 +1,12 @@
 import { EnvironmentId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createInboxReturnTracker, sortWorkingThreadsBySend } from "./threadInbox.ts";
+import {
+  createInboxReturnTracker,
+  isThreadWaiting,
+  isThreadWorking,
+  sortWorkingThreadsBySend,
+} from "./threadInbox.ts";
 
 const environmentId = EnvironmentId.make("environment-1");
 
@@ -29,7 +34,70 @@ function thread(id: string, working: boolean) {
   };
 }
 
+const runtimeAt = (status: "running" | "idle" | "failed" | "completed") => ({
+  status,
+  activeRunId: null,
+  providerInstanceId: ProviderInstanceId.make("codex"),
+  providerName: "Codex",
+  lastError: null,
+  updatedAt: "2026-06-01T00:00:00.000Z",
+});
+
+const pullRequest = (checksState: "pending" | "passing", state: "open" | "merged" = "open") =>
+  ({ source: "agent", snapshot: { state, checksState } }) as never;
+
+describe("isThreadWaiting", () => {
+  const base = { ...thread("a", false), pullRequests: [] as never[] };
+
+  it("covers a stopped thread with background work, and not a running one", () => {
+    expect(isThreadWaiting({ ...base, runtime: runtimeAt("idle") })).toBe(true);
+    expect(isThreadWaiting({ ...base, runtime: runtimeAt("running") })).toBe(false);
+  });
+
+  it("covers a finished thread while its linked pull request has checks running", () => {
+    const pending = { ...base, pullRequests: [pullRequest("pending")] };
+    expect(isThreadWaiting({ ...pending, runtime: runtimeAt("completed") })).toBe(true);
+    expect(isThreadWaiting({ ...pending, runtime: null })).toBe(true);
+    expect(isThreadWaiting({ ...base, pullRequests: [pullRequest("passing")] })).toBe(false);
+    expect(isThreadWaiting({ ...pending, pullRequests: [pullRequest("pending", "merged")] })).toBe(
+      false,
+    );
+  });
+
+  it("leaves anything the user has to act on in the inbox", () => {
+    const pending = { ...base, pullRequests: [pullRequest("pending")] };
+    expect(isThreadWaiting({ ...pending, runtime: runtimeAt("failed") })).toBe(false);
+    expect(isThreadWaiting({ ...pending, hasPendingApprovals: true })).toBe(false);
+    expect(isThreadWaiting({ ...pending, hasPendingUserInput: true })).toBe(false);
+    expect(
+      isThreadWaiting({
+        ...pending,
+        interactionMode: "plan",
+        hasActionableProposedPlan: true,
+        latestRun: { runId: RunId.make("run-1"), status: "completed" } as never,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not change what the Working section folds", () => {
+    expect(isThreadWorking({ ...base, runtime: runtimeAt("idle") })).toBe(true);
+    const pending = { ...base, pullRequests: [pullRequest("pending")], runtime: null };
+    expect(isThreadWorking(pending)).toBe(false);
+  });
+});
+
 describe("createInboxReturnTracker", () => {
+  it("stamps a thread when it leaves the shelves the predicate names", () => {
+    const waiting = (id: string, isWaiting: boolean) => ({
+      ...thread(id, false),
+      pullRequests: isWaiting ? [pullRequest("pending")] : [pullRequest("passing")],
+    });
+    const tracker = createInboxReturnTracker<ReturnType<typeof waiting>>(isThreadWaiting);
+    tracker.observe([waiting("a", true)]);
+    tracker.observe([waiting("a", false)]);
+    expect(tracker.returnedAt(waiting("a", false))).toBeDefined();
+  });
+
   it("stamps a thread when it stops working, but never on the first observation", () => {
     const tracker = createInboxReturnTracker();
     tracker.observe([thread("a", true), thread("b", false)]);

@@ -115,11 +115,16 @@ open.
 ### Fold working threads (beta)
 
 Turn on **Settings → General → Working section (beta)** on web and desktop, or **Settings →
-Thread behavior → Working section** on iOS and Android, to move threads that are working or
-monitoring into a collapsed **Working** section below the active list. A thread returns to the top
-of the active list when it finishes, fails, or needs an approval or answer. The Working section
-lists the thread you last sent work to first. Pinned threads stay in the pinned section. Each
-device keeps its own choice.
+Thread behavior → Working section** on iOS and Android, to move threads that are busy into two
+collapsed sections below the active list. **Working** holds threads whose agent is running.
+**Waiting** holds threads whose agent has stopped but will come back without you: it is waiting
+on a subagent or monitor, or checks are still running on the thread's linked pull request. A
+thread returns to the top of the active list when it finishes, fails, or needs an approval or
+answer. Both sections list the thread you last sent work to first. Pinned threads stay in the
+pinned section. Each device keeps its own choice.
+
+A thread with checks still running on its pull request shows as waiting even when its agent has
+finished, so it is not marked ready until the checks settle.
 
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.
