@@ -25,6 +25,7 @@ import {
   getFilesystemBrowsePath,
 } from "@t3tools/client-runtime/state/filesystem";
 import {
+  type AtomCommandResult,
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
@@ -45,6 +46,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  BotIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -85,6 +87,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { useClientSettings } from "../hooks/useSettings";
@@ -127,6 +130,7 @@ import {
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
+import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -211,8 +215,16 @@ import { Button } from "./ui/button";
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import {
+  BranchToolbarHandleContext,
+  useBranchToolbarHandleContext,
+} from "../branchToolbarHandleContext";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
+import type { BranchToolbarHandle } from "./BranchToolbar";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
+import { buildThreadStateActionItems } from "./CommandPalette.threadActions";
+import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import { resolveSnoozePresets } from "./Sidebar.snooze";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import {
@@ -493,6 +505,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme, appearanceMode, setAppearanceMode } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
+  const branchToolbarHandleRef = useRef<BranchToolbarHandle | null>(null);
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -624,33 +637,35 @@ export function CommandPalette({ children }: { children: ReactNode }) {
 
   return (
     <ComposerHandleContext value={composerHandleRef}>
-      <CommandDialog
-        open={state.open}
-        onOpenChange={(open, eventDetails) => {
-          if (
-            !open &&
-            eventDetails.reason === "escape-key" &&
-            escapeReturnsToCommandPalette(state.mode)
-          ) {
-            eventDetails.cancel();
-            toggleMode("command");
-            return;
-          }
-          setOpen(open);
-        }}
-      >
-        {/* Block background focus calls for the entire time the palette is open. */}
-        <div className="contents" inert={state.open}>
-          {children}
-        </div>
-        <CommandPaletteDialog
-          mode={state.mode}
-          openIntent={state.openIntent}
-          setOpen={setOpen}
-          openOverlayMode={toggleMode}
-          clearOpenIntent={clearOpenIntent}
-        />
-      </CommandDialog>
+      <BranchToolbarHandleContext value={branchToolbarHandleRef}>
+        <CommandDialog
+          open={state.open}
+          onOpenChange={(open, eventDetails) => {
+            if (
+              !open &&
+              eventDetails.reason === "escape-key" &&
+              escapeReturnsToCommandPalette(state.mode)
+            ) {
+              eventDetails.cancel();
+              toggleMode("command");
+              return;
+            }
+            setOpen(open);
+          }}
+        >
+          {/* Block background focus calls for the entire time the palette is open. */}
+          <div className="contents" inert={state.open}>
+            {children}
+          </div>
+          <CommandPaletteDialog
+            mode={state.mode}
+            openIntent={state.openIntent}
+            setOpen={setOpen}
+            openOverlayMode={toggleMode}
+            clearOpenIntent={clearOpenIntent}
+          />
+        </CommandDialog>
+      </BranchToolbarHandleContext>
     </ComposerHandleContext>
   );
 }
@@ -755,6 +770,14 @@ function OpenCommandPaletteDialog(props: {
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
+  const composerHandleRef = useComposerHandleContext();
+  const branchToolbarHandleRef = useBranchToolbarHandleContext();
+  const { settleThread, unsettleThread, snoozeThread, unsnoozeThread } = useThreadActions();
+  // Resolved once per open so an idle palette does not offer stale wake times.
+  const snoozePresets = useMemo(
+    () => resolveSnoozePresets(new Date(), clientSettings.timestampFormat),
+    [clientSettings.timestampFormat],
+  );
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -1968,6 +1991,63 @@ function OpenCommandPaletteDialog(props: {
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
+    });
+  }
+
+  if (activeThread !== null) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    const capabilities = activeThreadServerConfig?.environment.capabilities;
+    const now = new Date().toISOString();
+    const throwOnFailure = (result: AtomCommandResult<unknown, unknown>): void => {
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        throw squashAtomCommandFailure(result);
+      }
+    };
+    actionItems.push(
+      ...buildThreadStateActionItems({
+        settled:
+          capabilities?.threadSettlement === true
+            ? activeThread.settledOverride === "settled"
+            : null,
+        snoozed:
+          capabilities?.threadSnooze === true ? effectiveSnoozed(activeThread, { now }) : null,
+        canSnooze: canSnooze(activeThread, { now }),
+        snoozePresets,
+        onSettledChange: async (settled) =>
+          throwOnFailure(await (settled ? settleThread(threadRef) : unsettleThread(threadRef))),
+        onSnooze: async (snoozedUntil) =>
+          throwOnFailure(await snoozeThread(threadRef, snoozedUntil)),
+        onCustomSnooze: async () => {
+          const choice = await requestCustomSnooze();
+          if (choice) throwOnFailure(await snoozeThread(threadRef, choice.snoozedUntil));
+        },
+        onWake: async () => throwOnFailure(await unsnoozeThread(threadRef)),
+      }),
+    );
+  }
+
+  if (composerHandleRef?.current) {
+    actionItems.push({
+      kind: "action",
+      value: "action:change-model",
+      searchTerms: ["model", "change model", "switch model", "provider", "picker"],
+      title: "Change model",
+      icon: <BotIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "modelPicker.toggle",
+      run: async () => composerHandleRef.current?.openModelPicker(),
+    });
+  }
+
+  if (branchToolbarHandleRef?.current?.canPickWorkspace) {
+    actionItems.push({
+      kind: "action",
+      value: "action:select-workspace",
+      searchTerms: ["workspace", "worktree", "checkout", "local", "new worktree"],
+      title: "Select workspace",
+      icon: <FolderGit2Icon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      shortcutCommand: "composer.workspace",
+      run: async () => branchToolbarHandleRef.current?.openWorkspacePicker(),
     });
   }
 
