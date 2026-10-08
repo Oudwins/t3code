@@ -988,6 +988,8 @@ export function TerminalViewport({
 
 interface ThreadTerminalDrawerProps {
   mode?: "drawer" | "panel";
+  /** Which container a panel-mode terminal lives in, so shortcuts reach that container's actions. */
+  panelOwner?: "right-panel" | "tab";
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
   cwd: string;
@@ -1049,6 +1051,7 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
 
 export default function ThreadTerminalDrawer({
   mode = "drawer",
+  panelOwner = "right-panel",
   threadRef,
   threadId,
   cwd,
@@ -1393,7 +1396,7 @@ export default function ThreadTerminalDrawer({
     return (
       <aside
         data-thread-terminal-drawer
-        data-terminal-owner={isPanel ? "right-panel" : "drawer"}
+        data-terminal-owner={isPanel ? panelOwner : "drawer"}
         className={cn(
           "relative flex min-w-0 flex-col overflow-hidden bg-background",
           isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",
@@ -1424,7 +1427,7 @@ export default function ThreadTerminalDrawer({
   return (
     <aside
       data-thread-terminal-drawer
-      data-terminal-owner={isPanel ? "right-panel" : "drawer"}
+      data-terminal-owner={isPanel ? panelOwner : "drawer"}
       className={cn(
         "relative flex min-w-0 flex-col overflow-hidden bg-background",
         isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",
@@ -1442,7 +1445,16 @@ export default function ThreadTerminalDrawer({
       ) : null}
 
       {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
+        // A tab has no panel border to hold the toolbar, so it gets its own row instead of
+        // covering the terminal's top-right, where right-aligned prompt segments end up.
+        <div
+          className={cn(
+            "pointer-events-none z-20",
+            isPanel && panelOwner === "tab"
+              ? "flex shrink-0 justify-end pb-2"
+              : "absolute right-2 top-2",
+          )}
+        >
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${

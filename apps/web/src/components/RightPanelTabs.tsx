@@ -21,6 +21,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessageSquare,
   Plus,
   TerminalSquare,
 } from "lucide-react";
@@ -131,6 +132,8 @@ interface RightPanelTabsProps {
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
+  /** False while another launcher on screen owns the surface letter shortcuts. */
+  launcherShortcuts?: boolean;
   children: ReactNode;
 }
 
@@ -310,10 +313,11 @@ function SurfaceMenuItem(props: {
  * focused. The highlight only appears on hover or arrow use. Unavailable
  * surfaces stay visible with a one-line reason.
  */
-function RightPanelEmptyState(props: {
+export function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
-  browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  /** False while another launcher on screen owns the letter shortcuts. */
+  shortcutsEnabled?: boolean;
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
@@ -328,6 +332,8 @@ function RightPanelEmptyState(props: {
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
 }) {
+  const browserProfiles = useBrowserDefaults().profiles;
+  const shortcutsEnabled = props.shortcutsEnabled ?? true;
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
@@ -406,6 +412,7 @@ function RightPanelEmptyState(props: {
     shortcutActionsRef.current = availableActions;
   });
   useEffect(() => {
+    if (!shortcutsEnabled) return;
     const handler = (event: KeyboardEvent) => {
       const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
       if (!action) return;
@@ -418,7 +425,7 @@ function RightPanelEmptyState(props: {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+  }, [shortcutsEnabled]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -510,7 +517,7 @@ function RightPanelEmptyState(props: {
                   <span
                     className={cn(
                       "min-w-0 flex-1 truncate",
-                      action.label === "Browser" && props.browserProfiles.length > 1 && "pr-7",
+                      action.label === "Browser" && browserProfiles.length > 1 && "pr-7",
                     )}
                   >
                     {action.label}
@@ -522,7 +529,7 @@ function RightPanelEmptyState(props: {
                   default profile, the chevron picks another. Only worth showing
                   once there is something to choose between.
                 */}
-                {action.label === "Browser" && props.browserProfiles.length > 1 ? (
+                {action.label === "Browser" && browserProfiles.length > 1 ? (
                   <Menu>
                     <MenuTrigger
                       render={
@@ -537,7 +544,7 @@ function RightPanelEmptyState(props: {
                       <ChevronDown className="size-3.5" />
                     </MenuTrigger>
                     <MenuPopup align="end" side="bottom" sideOffset={6} className="max-w-56">
-                      {props.browserProfiles.map((profile) => (
+                      {browserProfiles.map((profile) => (
                         <MenuItem
                           key={profile.id}
                           onClick={() => props.onAddBrowserInProfile(profile.id)}
@@ -596,6 +603,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
+    case "new":
+      return "New tab";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -679,6 +688,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "new":
+      return <Plus className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -791,10 +802,20 @@ function PullRequestSurfaceIcon({
 type SurfaceTabStripProps = Omit<RightPanelTabsProps, "mode" | "children"> & {
   /** The strip sits in an Electron drag region, so its controls must opt out of dragging. */
   noDrag: boolean;
+  /** A tab pinned before the surfaces, for the conversation the surfaces sit beside. */
+  leadingTab?: {
+    label: string;
+    active: boolean;
+    /** The conversation wants the user while another tab is showing. */
+    attention: boolean;
+    onActivate: () => void;
+  };
+  /** When set, the add control opens an empty tab instead of offering a menu of surfaces. */
+  onNewTab?: () => void;
 };
 
 /** The tab list, add menu and overflow arrows. Hosts supply the row they sit in. */
-function SurfaceTabStrip(props: SurfaceTabStripProps) {
+export function SurfaceTabStrip(props: SurfaceTabStripProps) {
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -1070,6 +1091,37 @@ function SurfaceTabStrip(props: SurfaceTabStripProps) {
         data-right-panel-tab-list
       >
         <div className="flex h-full w-max min-w-full items-center gap-1">
+          {props.leadingTab ? (
+            <div
+              data-active-tab={props.leadingTab.active}
+              data-thread-tab
+              className={cn(
+                "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center rounded-md text-xs",
+                props.noDrag && "[-webkit-app-region:no-drag]",
+                props.leadingTab.active
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              )}
+            >
+              <button
+                type="button"
+                className="cursor-pointer flex h-full min-w-0 items-center gap-1.5 px-2"
+                onClick={props.leadingTab.onActivate}
+              >
+                <span className="relative inline-flex shrink-0">
+                  <MessageSquare className="size-3" />
+                  {props.leadingTab.attention && !props.leadingTab.active ? (
+                    <span
+                      className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-warning"
+                      role="img"
+                      aria-label="Needs your attention"
+                    />
+                  ) : null}
+                </span>
+                <span className="truncate">{props.leadingTab.label}</span>
+              </button>
+            </div>
+          ) : null}
           {props.surfaces.map((surface) => {
             const active = surface.id === props.activeSurfaceId;
             const pending = props.pendingSurfaceIds.has(surface.id);
@@ -1199,7 +1251,24 @@ function SurfaceTabStrip(props: SurfaceTabStripProps) {
               </div>
             );
           })}
-          {props.surfaces.length > 0 ? (
+          {props.onNewTab ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label="New tab"
+                    className="shrink-0"
+                    size="icon-xs"
+                    variant="ghost-muted"
+                    onClick={props.onNewTab}
+                  />
+                }
+              >
+                <Plus className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup>New tab</TooltipPopup>
+            </Tooltip>
+          ) : props.surfaces.length > 0 ? (
             <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
               <MenuTrigger
                 render={
@@ -1337,7 +1406,6 @@ function SurfaceTabStrip(props: SurfaceTabStripProps) {
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
-  const browserProfiles = useBrowserDefaults().profiles;
 
   return (
     <PreviewPanelShell
@@ -1379,7 +1447,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <RightPanelEmptyState
             onAddBrowser={props.onAddBrowser}
             onAddBrowserInProfile={props.onAddBrowserInProfile}
-            browserProfiles={browserProfiles}
+            shortcutsEnabled={props.launcherShortcuts ?? true}
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}

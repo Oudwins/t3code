@@ -12,6 +12,7 @@ import {
   selectThreadPanelOpen,
   selectThreadPanelVisibility,
   selectThreadRightPanelState,
+  threadTabsRef,
   useRightPanelStore,
 } from "./rightPanelStore";
 
@@ -1060,5 +1061,160 @@ describe("rightPanelStore", () => {
         (surface) => surface.id,
       ),
     ).toEqual(["terminal:term-1", "browser:tab-b", "browser:tab-c"]);
+  });
+});
+
+describe("main-area tabs", () => {
+  const tabsA = threadTabsRef(refA);
+  const stateOf = (ref: typeof refA) =>
+    selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref);
+  const idsOf = (ref: typeof refA) => stateOf(ref).surfaces.map((surface) => surface.id);
+
+  it("keeps tabs apart from the side panel and from other threads", () => {
+    useRightPanelStore.getState().openTerminal(tabsA, "term-2");
+    useRightPanelStore.getState().openFile(refA, "src/index.ts");
+
+    expect(idsOf(tabsA)).toEqual(["terminal:term-2"]);
+    expect(idsOf(refA)).toEqual(["file:src/index.ts"]);
+    expect(idsOf(threadTabsRef(refB))).toEqual([]);
+  });
+
+  it("opens an empty tab that the next surface replaces in place", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(tabsA, "a.ts");
+    store.openNewTab(tabsA);
+    store.activateSurface(tabsA, "file:a.ts");
+    store.openFile(tabsA, "b.ts");
+    store.activateSurface(tabsA, "new:1");
+
+    expect(idsOf(tabsA)).toEqual(["file:a.ts", "new:1", "file:b.ts"]);
+
+    store.openTerminal(tabsA, "term-2");
+
+    expect(idsOf(tabsA)).toEqual(["file:a.ts", "terminal:term-2", "file:b.ts"]);
+    expect(stateOf(tabsA).activeSurfaceId).toBe("terminal:term-2");
+  });
+
+  it("does not stack a second empty tab on top of an empty tab being shown", () => {
+    const store = useRightPanelStore.getState();
+    store.openNewTab(tabsA);
+    store.openNewTab(tabsA);
+
+    expect(idsOf(tabsA)).toEqual(["new:1"]);
+
+    store.openFile(tabsA, "a.ts");
+    store.openNewTab(tabsA);
+
+    expect(idsOf(tabsA)).toEqual(["file:a.ts", "new:1"]);
+  });
+
+  it("shows what is already open instead of duplicating it, and drops the empty tab", () => {
+    const store = useRightPanelStore.getState();
+    store.open(tabsA, "diff");
+    store.openNewTab(tabsA);
+    store.open(tabsA, "diff");
+
+    expect(idsOf(tabsA)).toEqual(["diff"]);
+    expect(stateOf(tabsA).activeSurfaceId).toBe("diff");
+  });
+
+  it("switching away from an empty tab leaves it for later", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(tabsA, "a.ts");
+    store.openNewTab(tabsA);
+    store.activateSurface(tabsA, "file:a.ts");
+
+    expect(idsOf(tabsA)).toEqual(["file:a.ts", "new:1"]);
+  });
+
+  it("returns to the conversation without forgetting the active tab", () => {
+    const store = useRightPanelStore.getState();
+    store.openTerminal(tabsA, "term-2");
+    store.openFile(tabsA, "a.ts");
+
+    store.close(tabsA);
+
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, tabsA)).toBe(
+      null,
+    );
+    expect(
+      selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, tabsA),
+    ).toEqual(expect.objectContaining({ id: "file:a.ts" }));
+
+    store.activateSurface(tabsA, "terminal:term-2");
+
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, tabsA)).toEqual(
+      expect.objectContaining({ id: "terminal:term-2" }),
+    );
+  });
+
+  it("closing the active tab moves to its neighbour, and the last one back to the conversation", () => {
+    const store = useRightPanelStore.getState();
+    store.openTerminal(tabsA, "term-2");
+    store.openFile(tabsA, "a.ts");
+    store.closeSurface(tabsA, "file:a.ts");
+
+    expect(stateOf(tabsA)).toMatchObject({ isOpen: true, activeSurfaceId: "terminal:term-2" });
+
+    store.closeSurface(tabsA, "terminal:term-2");
+
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, tabsA)).toBe(
+      null,
+    );
+    expect(stateOf(tabsA).surfaces).toEqual([]);
+  });
+
+  it("moves a browser session between the side panel and the tabs instead of showing it twice", () => {
+    const store = useRightPanelStore.getState();
+    store.openBrowser(refA, "tab-a");
+    store.openBrowser(tabsA, "tab-a");
+
+    expect(idsOf(refA)).toEqual([]);
+    expect(idsOf(tabsA)).toEqual(["browser:tab-a"]);
+
+    store.openBrowser(refA, "tab-a");
+
+    expect(idsOf(refA)).toEqual(["browser:tab-a"]);
+    expect(idsOf(tabsA)).toEqual([]);
+  });
+
+  it("reconciles tab browsers without adding sessions the user never opened there", () => {
+    const store = useRightPanelStore.getState();
+    store.openBrowser(tabsA, "tab-a");
+    store.openFile(tabsA, "a.ts");
+    store.reconcileBrowserSurfaces(tabsA, ["tab-b"], { addMissing: false });
+
+    expect(idsOf(tabsA)).toEqual(["file:a.ts"]);
+
+    store.openBrowser(tabsA, "tab-b");
+    store.reconcileBrowserSurfaces(tabsA, ["tab-b", "tab-c"], { addMissing: false });
+
+    expect(idsOf(tabsA)).toEqual(["file:a.ts", "browser:tab-b"]);
+  });
+
+  it("forgets a thread's tabs along with its side panel", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "a.ts");
+    store.openTerminal(tabsA, "term-2");
+    store.openTerminal(threadTabsRef(refB), "term-3");
+
+    store.removeThread(refA);
+
+    expect(Object.keys(useRightPanelStore.getState().byThreadKey)).toEqual(["env-1:thread-B#tabs"]);
+  });
+
+  it("restores an empty tab from persisted state", () => {
+    const persisted = {
+      byThreadKey: {
+        "env-1:thread-A#tabs": {
+          isOpen: true,
+          activeSurfaceId: "new:1",
+          surfaces: [{ id: "new:1", kind: "new" }],
+        },
+      },
+      threadPanelVisibilityByThreadKey: {},
+    };
+
+    expect(migratePersistedRightPanelState(persisted).byThreadKey).toEqual(persisted.byThreadKey);
   });
 });
