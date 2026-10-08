@@ -229,6 +229,20 @@ Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it
 finishes; the call's own result shows its status.
 
+## Work in tabs
+
+On web and desktop, a thread can have tabs beside its conversation. The first tab,
+**Thread**, is always the conversation. Add a tab with the **+** button or **New
+tab** in the command palette, then pick what it holds: a terminal, files, a
+browser (desktop only), a diff, a pull request, or a device. Tabs fill the thread's
+main area and work alongside the right panel, which you can keep open for something
+else.
+
+The conversation keeps its place while a tab covers it, but a reply that finishes
+meanwhile stays unread, and a dot on the **Thread** tab shows when it needs an
+approval or an answer. Tabs are saved on this device and come back after a restart.
+Closing a terminal tab stops its process.
+
 ## Snooze until later
 
 Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your

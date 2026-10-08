@@ -988,6 +988,8 @@ export function TerminalViewport({
 
 interface ThreadTerminalDrawerProps {
   mode?: "drawer" | "panel";
+  /** Which container a panel-mode terminal lives in, so shortcuts reach that container's actions. */
+  panelOwner?: "right-panel" | "tab";
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
   cwd: string;
@@ -1049,6 +1051,7 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
 
 export default function ThreadTerminalDrawer({
   mode = "drawer",
+  panelOwner = "right-panel",
   threadRef,
   threadId,
   cwd,
@@ -1393,7 +1396,7 @@ export default function ThreadTerminalDrawer({
     return (
       <aside
         data-thread-terminal-drawer
-        data-terminal-owner={isPanel ? "right-panel" : "drawer"}
+        data-terminal-owner={isPanel ? panelOwner : "drawer"}
         className={cn(
           "relative flex min-w-0 flex-col overflow-hidden bg-background",
           isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",
@@ -1424,7 +1427,7 @@ export default function ThreadTerminalDrawer({
   return (
     <aside
       data-thread-terminal-drawer
-      data-terminal-owner={isPanel ? "right-panel" : "drawer"}
+      data-terminal-owner={isPanel ? panelOwner : "drawer"}
       className={cn(
         "relative flex min-w-0 flex-col overflow-hidden bg-background",
         isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",

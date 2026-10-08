@@ -63,6 +63,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
+  PlusIcon,
   RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -136,6 +137,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   PULL_REQUESTS_PANEL_REF,
   selectActiveRightPanel,
+  threadTabsRef,
   useRightPanelStore,
 } from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
@@ -2024,6 +2026,22 @@ function OpenCommandPaletteDialog(props: {
         onWake: async () => throwOnFailure(await unsnoozeThread(threadRef)),
       }),
     );
+  }
+
+  const tabsTargetThreadRef = activeThread
+    ? scopeThreadRef(activeThread.environmentId, activeThread.id)
+    : activeDraftThread
+      ? scopeThreadRef(activeDraftThread.environmentId, activeDraftThread.threadId)
+      : null;
+  if (tabsTargetThreadRef !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-thread-tab",
+      searchTerms: ["tab", "new tab", "surface", "terminal", "browser", "files"],
+      title: "New tab",
+      icon: <PlusIcon className={ITEM_ICON_CLASS} />,
+      run: async () => useRightPanelStore.getState().openNewTab(threadTabsRef(tabsTargetThreadRef)),
+    });
   }
 
   if (composerHandleRef?.current) {
