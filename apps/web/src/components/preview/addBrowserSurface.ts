@@ -12,6 +12,8 @@ import { openPreviewSession } from "./openPreviewSession";
 /** Creates a new browser tab. Reopening an existing tab is a separate UI action. */
 export async function addBrowserSurface<E>(input: {
   readonly threadRef: ScopedThreadRef;
+  /** The surface group that receives the tab. Defaults to the thread's side panel. */
+  readonly groupRef?: ScopedThreadRef | undefined;
   readonly openPreview: OpenPreviewMutation<E>;
   /** Omit to use the configured default profile. */
   readonly profileId?: string | undefined;
@@ -22,6 +24,6 @@ export async function addBrowserSurface<E>(input: {
     ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
   });
   return mapAtomCommandResult(result, (snapshot) => {
-    useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId);
+    useRightPanelStore.getState().openBrowser(input.groupRef ?? input.threadRef, snapshot.tabId);
   });
 }
