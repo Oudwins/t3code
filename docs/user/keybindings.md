@@ -153,10 +153,13 @@ Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
 desktop app. Unknown keys evaluate to `false`.
 
-`mod+1` through `mod+9` jump to the first nine threads, and to models while the
-model picker is open. Those defaults use `isDesktop` so they do not steal the
-browser's tab-switch shortcuts. Remove that condition in Settings if you want
-the same jumps in a browser.
+`mod+shift+1` through `mod+shift+9` jump to the first nine threads, and `mod+1`
+through `mod+9` choose a model while the model picker is open. Both defaults use
+`isDesktop`, so a browser keeps its own tab-switch shortcuts. Remove that
+condition in Settings if you want the same jumps in a browser. On macOS the system
+screenshot shortcuts take `cmd+shift+3`, `cmd+shift+4`, and `cmd+shift+5` before T3
+Code sees them, so rebind those jumps if you need them. On the Usage page,
+`mod+shift+1` through `mod+shift+4` pick the period instead of jumping to a thread.
 
 Combine keys with `!` for not, `&&` for and, `||` for or, and parentheses:
 

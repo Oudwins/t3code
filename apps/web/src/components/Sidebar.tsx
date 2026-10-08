@@ -4759,8 +4759,7 @@ export default function Sidebar() {
   ]);
 
   // Same predicate as v1: hints show only while the held modifiers exactly
-  // match a thread-jump binding. Adding Shift (screenshots) or Alt no
-  // longer matches ⌘1..9, so the overlay hides for chords like ⌘⇧4.
+  // match a thread-jump binding, so adding or dropping a modifier hides them.
   const shortcutModifiers = useShortcutModifierState();
   const terminalFocused = useTerminalFocus();
   const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
