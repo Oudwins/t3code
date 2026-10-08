@@ -10620,7 +10620,12 @@ export default function ChatView(props: ChatViewProps) {
             key={surface.id}
             data-thread-tab-content={surface.id}
             className={cn(
-              "absolute inset-0 z-10 flex-col bg-background",
+              "absolute inset-0 z-10 flex-col",
+              // A terminal fills its box, so inset it from the window edges like the tab strip is.
+              // The inset takes the terminal's own background so a themed one has no seam.
+              surface.kind === "terminal"
+                ? "bg-(--terminal-background) px-3 pt-2 pb-2"
+                : "bg-background",
               active ? "flex" : "hidden",
             )}
           >
