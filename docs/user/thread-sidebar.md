@@ -236,7 +236,8 @@ On web and desktop, a thread can have tabs beside its conversation. The first ta
 tab** in the command palette, then pick what it holds: a terminal, files, a
 browser (desktop only), a diff, a pull request, or a device. Tabs fill the thread's
 main area and work alongside the right panel, which you can keep open for something
-else.
+else. Press `alt+1` for the conversation, `alt+2` for the first tab, and so on up to
+`alt+9`, even from a terminal; see [Keybindings](./keybindings.md#commands-with-special-behavior).
 
 The conversation keeps its place while a tab covers it, but a reply that finishes
 meanwhile stays unread, and a dot on the **Thread** tab shows when it needs an

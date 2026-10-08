@@ -1116,6 +1116,14 @@ export function selectThreadRightPanelState(
   return byThreadKey[scopedThreadKey(ref)] ?? EMPTY_THREAD_STATE;
 }
 
+/** How many tabs the thread has beside its conversation. */
+export function selectThreadTabCount(
+  byThreadKey: Record<string, ThreadRightPanelState>,
+  ref: ScopedThreadRef | null | undefined,
+): number {
+  return ref ? selectThreadRightPanelState(byThreadKey, threadTabsRef(ref)).surfaces.length : 0;
+}
+
 export function selectThreadPanelVisibility(
   byThreadKey: Record<string, ThreadPanelVisibility>,
   ref: ScopedThreadRef | null | undefined,

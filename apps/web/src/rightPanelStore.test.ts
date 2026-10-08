@@ -12,6 +12,7 @@ import {
   selectThreadPanelOpen,
   selectThreadPanelVisibility,
   selectThreadRightPanelState,
+  selectThreadTabCount,
   threadTabsRef,
   useRightPanelStore,
 } from "./rightPanelStore";
@@ -1190,6 +1191,18 @@ describe("main-area tabs", () => {
     store.reconcileBrowserSurfaces(tabsA, ["tab-b", "tab-c"], { addMissing: false });
 
     expect(idsOf(tabsA)).toEqual(["file:a.ts", "browser:tab-b"]);
+  });
+
+  it("counts a thread's tabs apart from its side panel", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "a.ts");
+    store.openTerminal(tabsA, "term-2");
+    store.openNewTab(tabsA);
+
+    const { byThreadKey } = useRightPanelStore.getState();
+    expect(selectThreadTabCount(byThreadKey, refA)).toBe(2);
+    expect(selectThreadTabCount(byThreadKey, refB)).toBe(0);
+    expect(selectThreadTabCount(byThreadKey, null)).toBe(0);
   });
 
   it("forgets a thread's tabs along with its side panel", () => {
