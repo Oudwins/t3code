@@ -182,6 +182,12 @@ actions of the same kind undo together. The notice remains available for five
 seconds after the latest action. The default shortcut skips text fields and
 terminals so native undo keeps working there.
 
+`thread.tab.1` through `thread.tab.9` (`alt+1` through `alt+9` by default) switch a
+thread's [tabs](./thread-sidebar.md#work-in-tabs): the first is the conversation and
+each later number is the next tab. They work while a terminal has focus. A number
+with no matching tab does nothing and the terminal keeps the key, so a shell or
+editor binding on `alt+digit` still works until that tab exists.
+
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
 
@@ -192,8 +198,8 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 ## Reserved shortcuts
 
-In the desktop app, `mod+w` closes the focused terminal or the active right-panel
-tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
+In the desktop app, `mod+w` closes the focused terminal, the active tab, or the
+active right-panel tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
 closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
 shortcut such as `alt+w`.
 

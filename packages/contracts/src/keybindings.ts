@@ -20,6 +20,20 @@ export const THREAD_JUMP_KEYBINDING_COMMANDS = [
 ] as const;
 export type ThreadJumpKeybindingCommand = (typeof THREAD_JUMP_KEYBINDING_COMMANDS)[number];
 
+/** `thread.tab.1` is the conversation; each later number is the next tab beside it. */
+export const THREAD_TAB_KEYBINDING_COMMANDS = [
+  "thread.tab.1",
+  "thread.tab.2",
+  "thread.tab.3",
+  "thread.tab.4",
+  "thread.tab.5",
+  "thread.tab.6",
+  "thread.tab.7",
+  "thread.tab.8",
+  "thread.tab.9",
+] as const;
+export type ThreadTabKeybindingCommand = (typeof THREAD_TAB_KEYBINDING_COMMANDS)[number];
+
 export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
   "modelPicker.jump.1",
   "modelPicker.jump.2",
@@ -48,6 +62,7 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.pin",
   "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
+  ...THREAD_TAB_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
 

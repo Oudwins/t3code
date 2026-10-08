@@ -6,8 +6,10 @@ import {
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
+  THREAD_TAB_KEYBINDING_COMMANDS,
   type ModelPickerJumpKeybindingCommand,
   type ThreadJumpKeybindingCommand,
+  type ThreadTabKeybindingCommand,
 } from "@t3tools/contracts";
 import { isElectron } from "./env";
 import { isEditableFocused } from "./lib/editableFocus";
@@ -502,6 +504,27 @@ export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCo
 export function threadJumpIndexFromCommand(command: string): number | null {
   const index = THREAD_JUMP_KEYBINDING_COMMANDS.indexOf(command as ThreadJumpKeybindingCommand);
   return index === -1 ? null : index;
+}
+
+/** Zero-based: 0 is the conversation and each later index is the next tab beside it. */
+export function threadTabIndexFromCommand(command: string): number | null {
+  const index = THREAD_TAB_KEYBINDING_COMMANDS.indexOf(command as ThreadTabKeybindingCommand);
+  return index === -1 ? null : index;
+}
+
+/**
+ * The tab a keypress asks for, matched without resolving chords so a terminal can ask before
+ * deciding whether to keep the key.
+ */
+export function threadTabShortcutIndex(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): number | null {
+  for (const [index, command] of THREAD_TAB_KEYBINDING_COMMANDS.entries()) {
+    if (matchesCommandShortcut(event, keybindings, command, options)) return index;
+  }
+  return null;
 }
 
 export function threadTraversalDirectionFromCommand(

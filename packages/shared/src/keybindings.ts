@@ -8,6 +8,7 @@ import {
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
+  THREAD_TAB_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 
 type WhenToken =
@@ -92,6 +93,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     key: `mod+${index + 1}`,
     command,
     when: "isDesktop",
+  })),
+  ...THREAD_TAB_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `alt+${index + 1}`,
+    command,
   })),
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,

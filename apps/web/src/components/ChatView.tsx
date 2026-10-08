@@ -286,7 +286,12 @@ import { DeviceSetup } from "./device/DeviceSetup";
 import { Dialog } from "./ui/dialog";
 import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
-import { isChordFollowUp, resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import {
+  isChordFollowUp,
+  resolveShortcutCommand,
+  shortcutLabelForCommand,
+  threadTabIndexFromCommand,
+} from "../keybindings";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { isEditableFocused } from "../lib/editableFocus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -7447,6 +7452,18 @@ export default function ChatView(props: ChatViewProps) {
       });
       if (!command) return;
 
+      const tabIndex = threadTabIndexFromCommand(command);
+      if (tabIndex !== null) {
+        // With no such tab the key is left alone: Alt+digit types characters on some layouts.
+        const tabSurface = tabIndex === 0 ? null : tabsState.surfaces[tabIndex - 1];
+        if (tabsState.surfaces.length === 0 || tabSurface === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (tabSurface === null) showConversation();
+        else tabsActions.activate(tabSurface);
+        return;
+      }
+
       if (command === "thread.copyReference") {
         event.preventDefault();
         event.stopPropagation();
@@ -7718,8 +7735,10 @@ export default function ChatView(props: ChatViewProps) {
     activeTabSurface,
     activeProjectScripts,
     conversationHidden,
+    showConversation,
     sideActions,
     tabsActions,
+    tabsState.surfaces,
     activeThreadRef,
     activeThreadPinned,
     activeThreadSettled,

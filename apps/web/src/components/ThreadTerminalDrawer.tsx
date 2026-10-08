@@ -67,7 +67,9 @@ import {
   isTerminalToggleShortcut,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
+  threadTabShortcutIndex,
 } from "../keybindings";
+import { selectThreadTabCount, useRightPanelStore } from "../rightPanelStore";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
   MAX_TERMINALS_PER_GROUP,
@@ -756,6 +758,16 @@ export function TerminalViewport({
           isDiffToggleShortcut(event, currentKeybindings, options)
         ) {
           return false;
+        }
+        // A tab shortcut only leaves the terminal when that tab exists, so the shell keeps
+        // the key (Alt+digit is a readline and editor binding) when there is nothing to switch to.
+        const tabIndex = threadTabShortcutIndex(event, currentKeybindings, options);
+        if (tabIndex !== null) {
+          const tabCount = selectThreadTabCount(
+            useRightPanelStore.getState().byThreadKey,
+            threadRef,
+          );
+          if (tabIndex <= tabCount && tabCount > 0) return false;
         }
 
         const navigationData = terminalNavigationShortcutData(event);

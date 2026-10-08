@@ -35,6 +35,8 @@ import {
   threadAttentionTraversalDirectionFromCommand,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
+  threadTabIndexFromCommand,
+  threadTabShortcutIndex,
   threadTraversalDirectionFromCommand,
   type ShortcutEventLike,
 } from "./keybindings";
@@ -1786,6 +1788,58 @@ describe("chord shortcuts", () => {
         rules,
         { platform },
       ),
+    );
+  });
+});
+
+describe("thread tab shortcuts", () => {
+  it("maps tab commands to indices, with 0 as the conversation", () => {
+    assert.strictEqual(threadTabIndexFromCommand("thread.tab.1"), 0);
+    assert.strictEqual(threadTabIndexFromCommand("thread.tab.9"), 8);
+    assert.isNull(threadTabIndexFromCommand("thread.jump.1"));
+  });
+
+  it("binds Alt+1 through Alt+9 by default", () => {
+    for (let number = 1; number <= 9; number += 1) {
+      const pressed = event({ key: String(number), code: `Digit${number}`, altKey: true });
+      assert.strictEqual(
+        threadTabShortcutIndex(pressed, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Linux" }),
+        number - 1,
+      );
+      assert.strictEqual(
+        resolveShortcutCommand(pressed, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Linux" }),
+        `thread.tab.${number}`,
+      );
+    }
+  });
+
+  it("matches Option+digit on macOS, where the key types another character", () => {
+    const pressed = event({ key: "¡", code: "Digit1", altKey: true });
+    assert.strictEqual(
+      threadTabShortcutIndex(pressed, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "MacIntel" }),
+      0,
+    );
+  });
+
+  it("leaves other digit shortcuts alone", () => {
+    const withMod = event({ key: "1", code: "Digit1", metaKey: true });
+    assert.isNull(
+      threadTabShortcutIndex(withMod, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "MacIntel" }),
+    );
+    const plain = event({ key: "1", code: "Digit1" });
+    assert.isNull(
+      threadTabShortcutIndex(plain, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "MacIntel" }),
+    );
+  });
+
+  it("works while a terminal has focus", () => {
+    const pressed = event({ key: "2", code: "Digit2", altKey: true });
+    assert.strictEqual(
+      resolveShortcutCommand(pressed, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Linux",
+        context: { terminalFocus: true },
+      }),
+      "thread.tab.2",
     );
   });
 });
