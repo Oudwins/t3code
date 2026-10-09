@@ -2,7 +2,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { PreviewSessionSnapshot, ScopedThreadRef } from "@t3tools/contracts";
+import type { NewThreadTab, PreviewSessionSnapshot, ScopedThreadRef } from "@t3tools/contracts";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { getTerminalLabel, nextTerminalId } from "@t3tools/shared/terminalLabels";
 import { useCallback } from "react";
@@ -11,7 +11,11 @@ import { BrowserSettingsReadError } from "../browser/openFileInPreview";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { confirmTerminalClose } from "../lib/terminalCloseConfirm";
 import { readLocalApi } from "../localApi";
-import { setActivePreviewTab, type DesktopPreviewOverlay } from "../previewStateStore";
+import {
+  isPreviewSupportedInRuntime,
+  setActivePreviewTab,
+  type DesktopPreviewOverlay,
+} from "../previewStateStore";
 import {
   selectActiveRightPanelSurface,
   useRightPanelStore,
@@ -26,6 +30,7 @@ import { agentControlledBrowserCloseConfirmation } from "./ChatView.logic";
 import type { threadPullRequestPanelTarget } from "./pullRequest/pullRequestDetail.logic";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
+import { seedThreadTabs } from "./seedThreadTabs";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 interface SurfaceGroupInput {
@@ -92,29 +97,34 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const storeCloseTerminal = useTerminalUiStateStore((state) => state.closeTerminal);
 
-  const addBrowser = useCallback(
-    (profileId?: string) => {
+  const openBrowserTab = useCallback(
+    async (profileId?: string) => {
       if (!threadRef || !groupRef) return;
-      void addBrowserSurface({
+      const result = await addBrowserSurface({
         threadRef,
         groupRef,
         openPreview,
         ...(profileId === undefined ? {} : { profileId }),
-      }).then((result) => {
-        if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-        const error = squashAtomCommandFailure(result);
-        if (error instanceof BrowserSettingsReadError) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Unable to open browser",
-              description: error.message,
-            }),
-          );
-        }
       });
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      if (error instanceof BrowserSettingsReadError) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Unable to open browser",
+            description: error.message,
+          }),
+        );
+      }
     },
     [groupRef, openPreview, threadRef],
+  );
+  const addBrowser = useCallback(
+    (profileId?: string) => {
+      void openBrowserTab(profileId);
+    },
+    [openBrowserTab],
   );
   const addDiff = useCallback(() => {
     if (!groupRef || !threadRef || !isServerThread || !isGitRepo) return;
@@ -143,35 +153,49 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     useRightPanelStore.getState().open(groupRef, "device");
   }, [deviceSetupRequired, groupRef, onRequestDeviceSetup]);
 
+  const openTerminalTab = useCallback(
+    (terminalId: string) => {
+      if (!groupRef || !threadRef || !project) return;
+      const cwd = gitCwd ?? project.workspaceRoot;
+      useRightPanelStore.getState().openTerminal(groupRef, terminalId);
+      void openTerminal({
+        environmentId: threadRef.environmentId,
+        input: {
+          threadId: threadRef.threadId,
+          terminalId,
+          cwd,
+          ...(worktreePath != null ? { worktreePath } : {}),
+          env: projectScriptRuntimeEnv({
+            project: { cwd: project.workspaceRoot },
+            worktreePath,
+          }),
+        },
+      });
+    },
+    [gitCwd, groupRef, openTerminal, project, threadRef, worktreePath],
+  );
   const addTerminal = useCallback(() => {
     if (!groupRef || !threadRef || !project) return;
-    const cwd = gitCwd ?? project.workspaceRoot;
-    const terminalId = nextTerminalId(allocatableTerminalIds);
-    useRightPanelStore.getState().openTerminal(groupRef, terminalId);
+    openTerminalTab(nextTerminalId(allocatableTerminalIds));
     requestTerminalFocus();
-    void openTerminal({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        terminalId,
-        cwd,
-        ...(worktreePath != null ? { worktreePath } : {}),
-        env: projectScriptRuntimeEnv({
-          project: { cwd: project.workspaceRoot },
-          worktreePath,
-        }),
-      },
-    });
-  }, [
-    allocatableTerminalIds,
-    gitCwd,
-    groupRef,
-    openTerminal,
-    project,
-    requestTerminalFocus,
-    threadRef,
-    worktreePath,
-  ]);
+  }, [allocatableTerminalIds, groupRef, openTerminalTab, project, requestTerminalFocus, threadRef]);
+  const seedTabs = useCallback(
+    (entries: readonly NewThreadTab[]) => {
+      if (!groupRef || entries.length === 0) return Promise.resolve();
+      return seedThreadTabs({
+        entries,
+        usedTerminalIds: allocatableTerminalIds,
+        open: {
+          terminal: openTerminalTab,
+          files: addFiles,
+          diff: addDiff,
+          browser: isPreviewSupportedInRuntime() ? () => openBrowserTab() : null,
+        },
+        settle: () => useRightPanelStore.getState().close(groupRef),
+      });
+    },
+    [addDiff, addFiles, allocatableTerminalIds, groupRef, openBrowserTab, openTerminalTab],
+  );
   const splitTerminal = useCallback(
     (direction: "horizontal" | "vertical" = "horizontal") => {
       if (
@@ -393,6 +417,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     addPullRequests,
     addDevice,
     addTerminal,
+    seedTabs,
     splitTerminal,
     splitTerminalVertical,
     activateTerminal,

@@ -244,6 +244,13 @@ meanwhile stays unread, and a dot on the **Thread** tab shows when it needs an
 approval or an answer. Tabs are saved on this device and come back after a restart.
 Closing a terminal tab stops its process.
 
+To start every new thread with the same tabs, choose them under **Settings → General →
+Tabs for new threads**. The list opens in order, behind the conversation, once the
+thread you create here is ready, which for a new worktree is after the worktree exists.
+Terminals start empty and browsers start blank. It applies to threads you start on this
+device, not to ones an agent, a schedule, or the mobile app creates. Remove every entry
+to turn it off.
+
 ## Snooze until later
 
 Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your

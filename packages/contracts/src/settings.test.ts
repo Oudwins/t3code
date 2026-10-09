@@ -127,6 +127,24 @@ describe("ClientSettings rich text composer", () => {
   });
 });
 
+describe("ClientSettings new thread tabs", () => {
+  it("defaults to no tabs and leaves a patch without the key alone", () => {
+    expect(decodeClientSettings({}).newThreadTabs).toEqual([]);
+    expect(decodeClientSettingsPatch({})).not.toHaveProperty("newThreadTabs");
+  });
+
+  it("keeps the saved order and repeated entries", () => {
+    const preference = { newThreadTabs: ["terminal", "files", "terminal", "browser"] };
+    expect(decodeClientSettingsPatch(preference)).toEqual(preference);
+    expect(encodeClientSettings(decodeClientSettings(preference))).toMatchObject(preference);
+  });
+
+  it("rejects a tab kind it does not know", () => {
+    expect(() => decodeClientSettings({ newThreadTabs: ["terminal", "pull-request"] })).toThrow();
+    expect(() => decodeClientSettingsPatch({ newThreadTabs: ["chat"] })).toThrow();
+  });
+});
+
 describe("ServerSettings default permissions", () => {
   it("keeps full access for settings saved before a default was configured", () => {
     expect(decodeServerSettings({}).defaultRuntimeMode).toBe("full-access");

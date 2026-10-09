@@ -6514,6 +6514,33 @@ export default function ChatView(props: ChatViewProps) {
     requestedEnvMode: envMode,
     isGitRepo,
   });
+  // Only a thread this view watched being created gets the configured tabs, once its workspace
+  // exists. This view keeps its key across the draft's promotion, so the ref survives it.
+  const pendingNewThreadTabsRef = useRef<{
+    threadId: ThreadId;
+    envMode: DraftThreadEnvMode;
+  } | null>(null);
+  const seedNewThreadTabs = tabsActions.seedTabs;
+  const newThreadTabs = settings.newThreadTabs;
+  useEffect(() => {
+    if (isLocalDraftThread && activeThreadId) {
+      pendingNewThreadTabsRef.current = { threadId: activeThreadId, envMode: sendEnvMode };
+      return;
+    }
+    const pending = pendingNewThreadTabsRef.current;
+    if (!pending || !isServerThread || pending.threadId !== activeThreadId) return;
+    if (pending.envMode === "worktree" && activeThreadWorktreePath === null) return;
+    pendingNewThreadTabsRef.current = null;
+    void seedNewThreadTabs(newThreadTabs);
+  }, [
+    activeThreadId,
+    activeThreadWorktreePath,
+    isLocalDraftThread,
+    isServerThread,
+    newThreadTabs,
+    seedNewThreadTabs,
+    sendEnvMode,
+  ]);
   const localCheckoutBranchMismatch = useMemo(
     () =>
       isServerThread

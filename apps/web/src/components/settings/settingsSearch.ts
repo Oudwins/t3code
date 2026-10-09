@@ -379,6 +379,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["automatically open diff pull request pr right panel agent completion"],
   },
   {
+    id: "new-thread-tabs",
+    title: "Tabs for new threads",
+    to: "/settings/general",
+    searchTerms: ["open automatically terminal files diff browser layout start thread default"],
+  },
+  {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
     to: "/settings/general",
