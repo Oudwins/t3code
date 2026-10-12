@@ -26,7 +26,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
-import * as GitWorkflow from "./git/GitWorkflowService.ts";
 import * as WorktreeManager from "./git/WorktreeManager.ts";
 import * as WorktreePool from "./git/WorktreePool.ts";
 import { CodexProviderCapabilitiesV2 } from "./orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -210,15 +209,15 @@ const sweepWorktree = (options: {
       const closedTerminals: Array<string> = [];
       const closedSessions: Array<string> = [];
       const sweepStarted = yield* Deferred.make<void>();
-      // The real manager, pool and workflow sit over the real driver; only the
-      // repository routing and status cache they reach for are faked.
+      // The real manager and pool sit over the real driver; only the repository
+      // routing and status cache they reach for are faked.
       const gitManager = Layer.mock(GitManager.GitManager)({ invalidateStatus: () => Effect.void });
       const registry = Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
         resolve: () => Effect.succeed({ kind: "git" } as never),
       });
       const manager = WorktreeManager.layer.pipe(
         Layer.provide(WorktreePool.layer),
-        Layer.provide(GitWorkflow.layer.pipe(Layer.provide(Layer.mergeAll(registry, gitManager)))),
+        Layer.provide(registry),
       );
       const fakes = Layer.mergeAll(
         Layer.mock(ProjectStore.ProjectStoreV2)({
