@@ -128,10 +128,33 @@ Enable **Delete worktrees with deleted threads** to remove worktrees after their
 deleted, including archived threads and worktrees left by earlier deletions. With **Delete even
 when in use** off, the server waits for sessions and terminals to stop, keeps worktrees with
 local changes, and retries skipped worktrees after restart. Existing prompts for deleting a
-worktree manually remain available when this policy is off.
+worktree manually remain available when this policy is off. With [worktree
+reuse](#worktree-reuse) on, worktrees removed by these rules go on standby instead.
 
 Browser captures and rotated logs have separate retention periods. Expired capture links stop
 working. Current logs, message attachments, and browser profiles are kept.
+
+## Worktree reuse
+
+Creating a worktree can be slow in a large repository. Turn on **Reuse worktrees** in
+**Settings → Storage** to keep removed worktrees on standby and give one to the next new thread in
+the same repository instead of creating another one. It is off by default and applies to each
+machine separately.
+
+A reused worktree behaves like a new one: it gets a new location, is reset to a clean checkout of
+the requested branch, and the setup script runs in it again, as it does in every new worktree.
+Uncommitted changes in the old worktree are discarded, but ignored files such as `node_modules` are
+kept, so installs finish faster. Branches stay as they were.
+
+Worktrees reach standby when you delete a thread and choose to remove its worktree, and when
+storage cleanup removes a worktree. A thread whose worktree went to standby gets a fresh checkout
+of its branch when you resume it, from another standby worktree when one is available, and the
+setup script runs there too without holding up the turn. Worktrees with submodules cannot be moved,
+so they are removed as usual.
+
+**Standby limit** is how many worktrees each repository keeps, and the least recently released
+are removed first. **Standby time** removes worktrees that have gone unused for that many hours.
+Turning reuse off removes everything on standby.
 
 ## Project icons
 

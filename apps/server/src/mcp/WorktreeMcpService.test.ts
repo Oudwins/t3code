@@ -21,6 +21,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as WorktreeManager from "../git/WorktreeManager.ts";
 import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
@@ -324,10 +325,12 @@ const makeHarness = (options: HarnessOptions = {}) => {
           localStatus,
           fetchRemote,
           resolveRemoteTrackingCommit,
-          createWorktree,
           removeWorktree,
           deleteLocalBranch,
         } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
+        Layer.mock(WorktreeManager.WorktreeManager)({
+          createWorktree,
+        } satisfies Partial<WorktreeManager.WorktreeManager["Service"]>),
         Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
           runForThread,
         } satisfies Partial<ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]>),

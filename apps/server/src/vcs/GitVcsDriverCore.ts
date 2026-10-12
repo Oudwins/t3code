@@ -3272,46 +3272,34 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
-  const createWorktree: GitVcsDriver.GitVcsDriver["Service"]["createWorktree"] = Effect.fn(
-    "createWorktree",
-  )(function* (input, options) {
-    const targetBranch = input.newRefName ?? input.refName;
-    const sanitizedBranch = targetBranch.replace(/\//g, "-");
-    const repoName = path.basename(input.cwd);
-    const worktreePath = input.path ?? path.join(worktreesDir, repoName, sanitizedBranch);
-    const args = input.newRefName
-      ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
-      : ["worktree", "add", worktreePath, input.refName];
+  const checkoutProgressOptions = (
+    onCheckoutProgress: GitVcsDriver.CreateWorktreeProgress["onCheckoutProgress"],
+  ): Pick<ExecuteGitOptions, "env" | "progress"> =>
+    onCheckoutProgress
+      ? {
+          // Git only prints checkout progress when stderr is a tty or the
+          // delay elapsed. GIT_PROGRESS_DELAY=0 forces it through the pipe.
+          env: { GIT_PROGRESS_DELAY: "0", LC_ALL: "C" },
+          progress: {
+            onStderrLine: (line) => {
+              const parsed = parseGitCheckoutProgressLine(line);
+              return parsed ? onCheckoutProgress(parsed) : Effect.void;
+            },
+          },
+        }
+      : {};
+
+  /** What a new or reused worktree needs once its files are checked out. */
+  const finishWorktree = Effect.fn("finishWorktree")(function* (
+    input: {
+      readonly cwd: string;
+      readonly newRefName?: string | undefined;
+      readonly baseRefName?: string | undefined;
+    },
+    worktreePath: string,
+    options: GitVcsDriver.CreateWorktreeOptions | undefined,
+  ) {
     const progress = options?.progress;
-    const onCheckoutProgress = progress?.onCheckoutProgress;
-
-    const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
-    yield* executeGit(
-      "GitVcsDriver.createWorktree",
-      input.cwd,
-      ["-c", `checkout.workers=${checkoutWorkers}`, ...args],
-      {
-        fallbackErrorDetail: "git worktree add failed",
-        timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
-        ...(onCheckoutProgress
-          ? {
-              // Git only prints checkout progress when stderr is a tty or the
-              // delay elapsed. GIT_PROGRESS_DELAY=0 forces it through the pipe.
-              env: { GIT_PROGRESS_DELAY: "0", LC_ALL: "C" },
-              progress: {
-                onStderrLine: (line) => {
-                  const parsed = parseGitCheckoutProgressLine(line);
-                  return parsed ? onCheckoutProgress(parsed) : Effect.void;
-                },
-              },
-            }
-          : {}),
-      },
-    );
-
-    if (progress?.onWorktreeClaimed) {
-      yield* progress.onWorktreeClaimed(worktreePath);
-    }
 
     // `git worktree add` leaves submodules empty, so a repo that keeps agent
     // skills, tooling or source in one gets a worktree that is quietly missing
@@ -3398,13 +3386,223 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         baseBranch,
       ]);
     }
+  });
 
+  const worktreeTarget = (input: {
+    readonly cwd: string;
+    readonly refName: string;
+    readonly newRefName?: string | undefined;
+    readonly path: string | null;
+  }) => {
+    const targetBranch = input.newRefName ?? input.refName;
     return {
-      worktree: {
-        path: worktreePath,
-        refName: targetBranch,
-      },
+      targetBranch,
+      worktreePath:
+        input.path ??
+        path.join(worktreesDir, path.basename(input.cwd), targetBranch.replace(/\//g, "-")),
     };
+  };
+
+  // `git worktree add` creates missing parent directories; `git worktree move` does not.
+  const ensureParentDirectory = (operation: string, cwd: string, target: string) =>
+    fileSystem.makeDirectory(path.dirname(target), { recursive: true }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            ...gitCommandContext({ operation, cwd, args: ["worktree", "move"] }),
+            detail: `could not create ${path.dirname(target)}`,
+            cause,
+          }),
+      ),
+    );
+
+  const createWorktree: GitVcsDriver.GitVcsDriver["Service"]["createWorktree"] = Effect.fn(
+    "createWorktree",
+  )(function* (input, options) {
+    const { targetBranch, worktreePath } = worktreeTarget(input);
+    const args = input.newRefName
+      ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
+      : ["worktree", "add", worktreePath, input.refName];
+    const progress = options?.progress;
+
+    const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
+    yield* executeGit(
+      "GitVcsDriver.createWorktree",
+      input.cwd,
+      ["-c", `checkout.workers=${checkoutWorkers}`, ...args],
+      {
+        fallbackErrorDetail: "git worktree add failed",
+        timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
+        ...checkoutProgressOptions(progress?.onCheckoutProgress),
+      },
+    );
+
+    if (progress?.onWorktreeClaimed) {
+      yield* progress.onWorktreeClaimed(worktreePath);
+    }
+    yield* finishWorktree(input, worktreePath, options);
+
+    return { worktree: { path: worktreePath, refName: targetBranch } };
+  });
+
+  const reuseWorktree: GitVcsDriver.GitVcsDriver["Service"]["reuseWorktree"] = Effect.fn(
+    "reuseWorktree",
+  )(function* (input, options) {
+    const progress = options?.progress;
+    const { targetBranch, worktreePath } = worktreeTarget(input);
+    if (yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => false))) {
+      return yield* new GitCommandError({
+        ...gitCommandContext({
+          operation: "GitVcsDriver.reuseWorktree",
+          cwd: input.cwd,
+          args: ["worktree", "move"],
+        }),
+        detail: `${worktreePath} already exists`,
+      });
+    }
+    yield* ensureParentDirectory("GitVcsDriver.reuseWorktree", input.cwd, worktreePath);
+    yield* runGit("GitVcsDriver.reuseWorktree.move", input.cwd, [
+      "worktree",
+      "move",
+      input.standbyPath,
+      worktreePath,
+    ]);
+
+    return yield* Effect.gen(function* () {
+      if (progress?.onWorktreeClaimed) {
+        yield* progress.onWorktreeClaimed(worktreePath);
+      }
+      const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
+      yield* executeGit(
+        "GitVcsDriver.reuseWorktree",
+        worktreePath,
+        [
+          "-c",
+          `checkout.workers=${checkoutWorkers}`,
+          "checkout",
+          // `--` keeps a ref that shares a name with a file from being read as a path.
+          ...(input.newRefName ? ["-b", input.newRefName, input.refName] : [input.refName, "--"]),
+        ],
+        {
+          fallbackErrorDetail: "git checkout failed",
+          timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
+          ...checkoutProgressOptions(progress?.onCheckoutProgress),
+        },
+      );
+      yield* finishWorktree(input, worktreePath, options);
+      return { worktree: { path: worktreePath, refName: targetBranch } };
+    }).pipe(
+      // The caller only knows the parked path, so a half-claimed worktree is ours to remove.
+      Effect.onError(() =>
+        runGit("GitVcsDriver.reuseWorktree.remove", input.cwd, [
+          "worktree",
+          "remove",
+          "--force",
+          worktreePath,
+        ]).pipe(Effect.ignore),
+      ),
+    );
+  });
+
+  const parkWorktree: GitVcsDriver.GitVcsDriver["Service"]["parkWorktree"] = Effect.fn(
+    "parkWorktree",
+  )(function* (input) {
+    // A client names the path, and `reset --hard` on the main checkout would
+    // destroy the user's own work, so prove the path is a linked worktree of
+    // this repository before touching it.
+    const resolveGitDirs = Effect.fn("resolveGitDirs")(function* (cwd: string) {
+      const stdout = yield* runGitStdout("GitVcsDriver.parkWorktree.identify", cwd, [
+        "rev-parse",
+        "--git-dir",
+        "--git-common-dir",
+      ]);
+      const [gitDir = "", commonDir = ""] = stdout.trim().split("\n");
+      const resolve = (value: string) => {
+        const resolved = path.resolve(cwd, value);
+        return fileSystem.realPath(resolved).pipe(Effect.orElseSucceed(() => resolved));
+      };
+      return { gitDir: yield* resolve(gitDir), commonDir: yield* resolve(commonDir) };
+    });
+    const [worktree, repository] = yield* Effect.all([
+      resolveGitDirs(input.path),
+      resolveGitDirs(input.cwd),
+    ]);
+    if (worktree.gitDir === worktree.commonDir || worktree.commonDir !== repository.commonDir) {
+      return yield* new GitCommandError({
+        ...gitCommandContext({
+          operation: "GitVcsDriver.parkWorktree",
+          cwd: input.cwd,
+          args: ["rev-parse", "--git-dir", "--git-common-dir"],
+        }),
+        detail: "path is not a linked worktree of this repository",
+      });
+    }
+
+    if (input.discardChanges !== true) {
+      const changes = yield* runGitStdout("GitVcsDriver.parkWorktree.status", input.path, [
+        "status",
+        "--porcelain",
+      ]);
+      if (changes.trim().length > 0) {
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: "GitVcsDriver.parkWorktree",
+            cwd: input.path,
+            args: ["status", "--porcelain"],
+          }),
+          detail: "worktree has uncommitted changes",
+        });
+      }
+    }
+
+    // Moving the worktree frees its path, so a thread that recorded that path
+    // and branch recreates its checkout there on resume. Move first: git
+    // refuses a worktree with submodules, and that must leave it untouched.
+    const parkedId = yield* crypto.randomUUIDv4.pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            ...gitCommandContext({
+              operation: "GitVcsDriver.parkWorktree",
+              cwd: input.cwd,
+              args: ["worktree", "move"],
+            }),
+            detail: "could not generate an id for the parked worktree",
+            cause,
+          }),
+      ),
+    );
+    const parkedPath = path.join(worktreesDir, "parked-wt", parkedId);
+    yield* ensureParentDirectory("GitVcsDriver.parkWorktree", input.cwd, parkedPath);
+    const options = { timeoutMs: WORKTREE_REMOVE_TIMEOUT_MS };
+    yield* runGit(
+      "GitVcsDriver.parkWorktree.move",
+      input.cwd,
+      ["worktree", "move", input.path, parkedPath],
+      options,
+    );
+    yield* Effect.gen(function* () {
+      yield* runGit("GitVcsDriver.parkWorktree.reset", parkedPath, ["reset", "--hard"], options);
+      yield* runGit("GitVcsDriver.parkWorktree.clean", parkedPath, ["clean", "-fd"], options);
+      // The thread's branch must stay free to be checked out again at its old path.
+      yield* runGit(
+        "GitVcsDriver.parkWorktree.detach",
+        parkedPath,
+        ["checkout", "--detach"],
+        options,
+      );
+    }).pipe(
+      Effect.onError(() =>
+        runGit(
+          "GitVcsDriver.parkWorktree.restore",
+          input.cwd,
+          ["worktree", "move", parkedPath, input.path],
+          options,
+        ).pipe(Effect.ignore),
+      ),
+    );
+
+    return { path: parkedPath };
   });
 
   const fetchPullRequestBranch: GitVcsDriver.GitVcsDriver["Service"]["fetchPullRequestBranch"] =
@@ -3910,6 +4108,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     listRefs,
     createWorktree: (input, options) =>
       withListRefsInvalidation(input.cwd, createWorktree(input, options)),
+    reuseWorktree: (input, options) =>
+      withListRefsInvalidation(input.cwd, reuseWorktree(input, options)),
+    parkWorktree: (input) => withListRefsInvalidation(input.cwd, parkWorktree(input)),
     fetchPullRequestBranch: (input) =>
       withListRefsInvalidation(input.cwd, fetchPullRequestBranch(input)),
     fetchPullRequestHeadCommit,

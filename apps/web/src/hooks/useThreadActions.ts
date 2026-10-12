@@ -621,6 +621,7 @@ export function useThreadActions() {
           cwd: threadProject.workspaceRoot,
           path: orphanedWorktreePath,
           force: true,
+          reuse: true,
         },
       });
       const refreshResult =

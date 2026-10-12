@@ -28,6 +28,7 @@ import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as WorktreeManager from "./git/WorktreeManager.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
@@ -122,6 +123,7 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
+  const worktreeManager = yield* WorktreeManager.WorktreeManager;
   const terminals = yield* TerminalManager.TerminalManager;
   const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
   const fs = yield* FileSystem.FileSystem;
@@ -390,7 +392,12 @@ export const make = Effect.gen(function* () {
             discard: true,
           });
         }
-        yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force });
+        yield* worktreeManager.removeWorktree({
+          cwd: project.workspaceRoot,
+          path: worktreePath,
+          force,
+          reuse: true,
+        });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderTurnStartService recreates the checkout
         // from that branch when the thread is resumed.
