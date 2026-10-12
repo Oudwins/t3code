@@ -460,6 +460,39 @@ export const layer: Layer.Layer<
           return;
         }
       }
+      // The last start attempt fails the run with the provider's own reason
+      // instead of leaving it `starting` after the effect gives up. A run that
+      // already left `starting` is not overwritten, and a failed write returns
+      // its error to the effect worker.
+      const settleStartFailure = (failed: {
+        readonly signal: string;
+        readonly title: string;
+        readonly error: Error;
+      }) =>
+        Effect.gen(function* () {
+          const nestedCause = "cause" in failed.error ? failed.error.cause : undefined;
+          yield* settleRunBeforeStart({
+            signal: failed.signal,
+            status: "failed",
+            now: yield* DateTime.now,
+            providerInstanceId: run.providerInstanceId,
+            itemProviderThreadId: providerThread.id,
+            item: {
+              type: "error",
+              title: failed.title,
+              failure: makeProviderFailure({
+                cause: failed.error,
+                message:
+                  nestedCause instanceof Error
+                    ? nestedCause.message
+                    : typeof nestedCause === "string"
+                      ? nestedCause
+                      : failed.error.message,
+                class: "provider_error",
+              }),
+            },
+          });
+        });
       const { worktreePath, branch } = projection.thread;
       if (worktreePath !== null && branch !== null) {
         const exists = yield* fileSystem
@@ -498,10 +531,13 @@ export const layer: Layer.Layer<
                 ),
               );
             // A recreated worktree is as bare as a new one, so it gets the same
-            // setup. The turn does not wait for it.
+            // setup. Like a new thread, the turn waits for a blocking script and
+            // leaves an async one running. A failed blocking script removes the
+            // worktree so the next turn recreates it and runs setup again.
             if (recreated) {
-              yield* setupScripts
-                .runForThread({
+              const setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(
+                setupScripts,
+                {
                   threadId: projection.thread.id,
                   projectId: project.id,
                   projectCwd: project.workspaceRoot,
@@ -511,18 +547,34 @@ export const layer: Layer.Layer<
                     workspaceRoot: project.workspaceRoot,
                     scripts: project.scripts,
                   },
-                })
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Cause.hasInterruptsOnly(cause)
-                      ? Effect.failCause(cause)
-                      : Effect.logWarning("provider turn start failed to run worktree setup", {
-                          threadId: projection.thread.id,
-                          worktreePath,
-                          cause: Cause.pretty(cause),
-                        }),
-                  ),
-                );
+                },
+              ).pipe(
+                Effect.as(undefined),
+                Effect.catchTag("ProjectSetupScriptFailedError", Effect.succeed),
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.logWarning("provider turn start failed to run worktree setup", {
+                        threadId: projection.thread.id,
+                        worktreePath,
+                        cause: Cause.pretty(cause),
+                      }).pipe(Effect.as(undefined)),
+                ),
+              );
+              if (setupFailure !== undefined) {
+                yield* worktreeManager
+                  .removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: true })
+                  .pipe(Effect.ignoreCause({ log: true }));
+                if (input.willRetry === true) {
+                  return yield* new ProviderTurnStartError({ runId, cause: setupFailure.message });
+                }
+                yield* settleStartFailure({
+                  signal: "worktree-setup-failure",
+                  title: "Worktree setup failed",
+                  error: setupFailure,
+                });
+                return;
+              }
             }
           }
         }
@@ -578,39 +630,6 @@ export const layer: Layer.Layer<
               }),
         }),
       );
-      // The last start attempt fails the run with the provider's own reason
-      // instead of leaving it `starting` after the effect gives up. A run that
-      // already left `starting` is not overwritten, and a failed write returns
-      // its error to the effect worker.
-      const settleStartFailure = (failed: {
-        readonly signal: string;
-        readonly title: string;
-        readonly error: Error;
-      }) =>
-        Effect.gen(function* () {
-          const nestedCause = "cause" in failed.error ? failed.error.cause : undefined;
-          yield* settleRunBeforeStart({
-            signal: failed.signal,
-            status: "failed",
-            now: yield* DateTime.now,
-            providerInstanceId: run.providerInstanceId,
-            itemProviderThreadId: providerThread.id,
-            item: {
-              type: "error",
-              title: failed.title,
-              failure: makeProviderFailure({
-                cause: failed.error,
-                message:
-                  nestedCause instanceof Error
-                    ? nestedCause.message
-                    : typeof nestedCause === "string"
-                      ? nestedCause
-                      : failed.error.message,
-                class: "provider_error",
-              }),
-            },
-          });
-        });
       if (sessionResult._tag === "Failure") {
         if (input.willRetry === true) return yield* sessionResult.failure;
         yield* settleStartFailure({
