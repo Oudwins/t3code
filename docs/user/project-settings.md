@@ -149,8 +149,8 @@ kept, so installs finish faster. Branches stay as they were.
 Worktrees reach standby when you delete a thread and choose to remove its worktree, and when
 storage cleanup removes a worktree. A thread whose worktree went to standby gets a fresh checkout
 of its branch when you resume it, from another standby worktree when one is available, and the
-setup script runs there too without holding up the turn. Worktrees with submodules cannot be moved,
-so they are removed as usual.
+setup script runs there too. The turn waits for the script only when it is set to finish before the
+agent starts. Worktrees with submodules cannot be moved, so they are removed as usual.
 
 **Standby limit** is how many worktrees each repository keeps, and the least recently released
 are removed first. **Standby time** removes worktrees that have gone unused for that many hours.

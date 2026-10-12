@@ -139,6 +139,14 @@ describe("searchSettings", () => {
     }
   });
 
+  it("finds worktree reuse by its own name and by standby", () => {
+    expect(searchSettings("reuse")[0]).toMatchObject({
+      id: "storage-worktree-reuse",
+      to: "/settings/storage",
+    });
+    expect(searchSettings("standby")[0]?.id).toBe("storage-worktree-reuse");
+  });
+
   it("registers the WSL backend as a desktop-only setting", () => {
     expect(SETTINGS_SEARCH_ITEMS.find((item) => item.id === "wsl-backend")).toMatchObject({
       id: "wsl-backend",
