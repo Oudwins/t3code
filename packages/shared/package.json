@@ -323,6 +323,10 @@
       "types": "./src/AgentScope.ts",
       "import": "./src/AgentScope.ts"
     },
+    "./ThreadPortSpace": {
+      "types": "./src/ThreadPortSpace.ts",
+      "import": "./src/ThreadPortSpace.ts"
+    },
     "./HostProcess": {
       "types": "./src/HostProcess.ts",
       "import": "./src/HostProcess.ts"

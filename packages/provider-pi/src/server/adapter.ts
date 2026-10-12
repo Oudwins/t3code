@@ -72,6 +72,7 @@ import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import { ThreadPortSpace, urlInPortSpace } from "@t3tools/shared/ThreadPortSpace";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -96,7 +97,7 @@ import {
   materializePiT3McpExtension,
   resolvePiLaunchArgs,
 } from "./mcpInjection.ts";
-import { PI_FILE_CHANGE_TOOLS } from "./mcpExtensionSource.ts";
+import { PI_FILE_CHANGE_TOOLS, T3_MCP_URL_ENV } from "./mcpExtensionSource.ts";
 
 export const PI_PROVIDER = ProviderDriverKind.make("pi");
 const PI_DRIVER_KIND = PI_PROVIDER;
@@ -494,6 +495,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const agentScope = yield* AgentScope;
+  const threadPortSpace = yield* ThreadPortSpace;
   const fileSystem = yield* FileSystem.FileSystem;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const host = yield* ProviderHost.ProviderHost;
@@ -547,19 +549,24 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         extensionPath,
         runtimeMode: input.runtimePolicy.runtimeMode,
       });
+      const portSpace = yield* threadPortSpace.resolve(input.threadId);
+      const mcpUrl = launch.env[T3_MCP_URL_ENV];
+      const hostAddress = portSpace === undefined ? undefined : yield* portSpace.hostAddress;
+      const env =
+        mcpUrl === undefined
+          ? launch.env
+          : { ...launch.env, [T3_MCP_URL_ENV]: urlInPortSpace(mcpUrl, hostAddress) };
       const scopedLaunch = yield* agentScope.wrap({
         command: options.settings.binaryPath || "pi",
         args: launch.args,
         name: "pi",
         threadId: input.threadId,
-        env: launch.env,
+        env,
       });
-      const connection: PiRpcConnection = yield* makePiRpcConnection({
-        command: scopedLaunch.command,
-        args: scopedLaunch.args,
-        cwd,
-        env: launch.env,
-      }).pipe(
+      const spawn = { command: scopedLaunch.command, args: scopedLaunch.args, cwd, env };
+      const connection: PiRpcConnection = yield* makePiRpcConnection(
+        portSpace === undefined ? spawn : { ...portSpace.rewrite(spawn), cwd: undefined },
+      ).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.mapError(
           (cause) =>

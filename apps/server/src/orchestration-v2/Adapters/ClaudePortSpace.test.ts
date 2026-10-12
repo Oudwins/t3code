@@ -2,7 +2,7 @@ import type { Options, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
-import type { SpawnRewriter, ThreadPortSpaceHandle } from "../../portSpace/ThreadPortSpace.ts";
+import type { SpawnRewriter, ThreadPortSpaceHandle } from "@t3tools/shared/ThreadPortSpace";
 import { claudeOptionsInPortSpace, spawnClaudeInPortSpace } from "./ClaudePortSpace.ts";
 
 const spawnOptions = (overrides: Partial<SpawnOptions> = {}): SpawnOptions => ({

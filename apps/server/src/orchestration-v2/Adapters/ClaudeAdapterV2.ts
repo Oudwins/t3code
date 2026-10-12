@@ -156,7 +156,7 @@ import {
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { ThreadPortSpace } from "../../portSpace/ThreadPortSpace.ts";
+import { ThreadPortSpace } from "@t3tools/shared/ThreadPortSpace";
 import { claudeOptionsInPortSpace } from "./ClaudePortSpace.ts";
 import {
   ProviderAdapterDriverCreateError,

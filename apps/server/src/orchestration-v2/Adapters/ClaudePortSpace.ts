@@ -8,7 +8,7 @@ import {
   type SpawnRewriter,
   type ThreadPortSpaceHandle,
   urlInPortSpace,
-} from "../../portSpace/ThreadPortSpace.ts";
+} from "@t3tools/shared/ThreadPortSpace";
 
 const STDERR_TAIL_CHARS = 4096;
 

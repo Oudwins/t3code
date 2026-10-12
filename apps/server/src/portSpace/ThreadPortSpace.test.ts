@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
+import { urlInPortSpace } from "@t3tools/shared/ThreadPortSpace";
 import * as Effect from "effect/Effect";
 
 import * as ServerSettings from "../serverSettings.ts";
 import { PortSpaceCommandError, PortSpaces } from "./PortSpaces.ts";
-import { makeThreadPortSpace, makeThreadSpawnWrapper, urlInPortSpace } from "./ThreadPortSpace.ts";
+import { makeThreadPortSpace, makeThreadSpawnWrapper } from "./ThreadPortSpace.ts";
 
 const wrapped = { command: "helper", args: ["exec"], env: { T3_PORTSPACE_PROLOGUE: "" } };
 
