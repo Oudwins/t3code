@@ -49,6 +49,22 @@ const gitProcesses = Semaphore.makeUnsafe(8);
 // machine). Give it generous headroom while still bounding a genuinely hung git.
 const WORKTREE_ADD_TIMEOUT_MS = 300_000;
 const WORKTREE_REMOVE_TIMEOUT_MS = Duration.toMillis(Duration.minutes(5));
+
+// Unfinished operations keep their state in the worktree's git dir, which
+// `reset` and `clean` leave alone. Each is dropped the way git forgets it
+// without moving HEAD.
+const IN_PROGRESS_OPERATIONS: ReadonlyArray<{
+  readonly marker: string;
+  readonly args: ReadonlyArray<string>;
+}> = [
+  { marker: "rebase-merge", args: ["rebase", "--quit"] },
+  { marker: "rebase-apply", args: ["rebase", "--quit"] },
+  { marker: "MERGE_HEAD", args: ["merge", "--quit"] },
+  { marker: "CHERRY_PICK_HEAD", args: ["cherry-pick", "--quit"] },
+  { marker: "REVERT_HEAD", args: ["revert", "--quit"] },
+  { marker: "sequencer", args: ["cherry-pick", "--quit"] },
+  { marker: "BISECT_LOG", args: ["bisect", "reset"] },
+];
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
@@ -3468,6 +3484,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       worktreePath,
     ]);
 
+    let createdBranch = false;
     return yield* Effect.gen(function* () {
       if (progress?.onWorktreeClaimed) {
         yield* progress.onWorktreeClaimed(worktreePath);
@@ -3489,17 +3506,31 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ...checkoutProgressOptions(progress?.onCheckoutProgress),
         },
       );
+      createdBranch = input.newRefName != null;
       yield* finishWorktree(input, worktreePath, options);
       return { worktree: { path: worktreePath, refName: targetBranch } };
     }).pipe(
-      // The caller only knows the parked path, so a half-claimed worktree is ours to remove.
+      // The caller only knows the parked path, so a half-claimed worktree and
+      // the branch this attempt created are ours to remove. Leaving the branch
+      // would make the fallback `worktree add -b` fail on its name.
       Effect.onError(() =>
         runGit("GitVcsDriver.reuseWorktree.remove", input.cwd, [
           "worktree",
           "remove",
           "--force",
           worktreePath,
-        ]).pipe(Effect.ignore),
+        ]).pipe(
+          Effect.ignore,
+          Effect.andThen(
+            createdBranch && input.newRefName
+              ? runGit("GitVcsDriver.reuseWorktree.deleteBranch", input.cwd, [
+                  "branch",
+                  "-D",
+                  input.newRefName,
+                ]).pipe(Effect.ignore)
+              : Effect.void,
+          ),
+        ),
       ),
     );
   });
@@ -3583,7 +3614,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     yield* Effect.gen(function* () {
       yield* runGit("GitVcsDriver.parkWorktree.reset", parkedPath, ["reset", "--hard"], options);
-      yield* runGit("GitVcsDriver.parkWorktree.clean", parkedPath, ["clean", "-fd"], options);
+      // The second `-f` also removes untracked directories that are their own repository.
+      yield* runGit("GitVcsDriver.parkWorktree.clean", parkedPath, ["clean", "-ffd"], options);
+      for (const operation of IN_PROGRESS_OPERATIONS) {
+        const inProgress = yield* fileSystem
+          .exists(path.join(worktree.gitDir, operation.marker))
+          .pipe(Effect.orElseSucceed(() => false));
+        if (inProgress) {
+          yield* runGit(
+            "GitVcsDriver.parkWorktree.endOperation",
+            parkedPath,
+            operation.args,
+            options,
+          );
+        }
+      }
       // The thread's branch must stay free to be checked out again at its old path.
       yield* runGit(
         "GitVcsDriver.parkWorktree.detach",
