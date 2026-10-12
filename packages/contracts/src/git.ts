@@ -171,6 +171,15 @@ export const VcsRemoveWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   path: TrimmedNonEmptyStringSchema,
   force: Schema.optional(Schema.Boolean),
+  /**
+   * Keep the worktree on standby for a later thread instead of deleting it,
+   * when the environment has worktree reuse enabled. The worktree is moved
+   * away from `path`. Uncommitted changes are discarded only with `force`;
+   * without it a dirty worktree is removed the plain way, which git refuses.
+   * A worktree git cannot move, such as one with submodules, is removed the
+   * plain way too.
+   */
+  reuse: Schema.optional(Schema.Boolean),
 });
 export type VcsRemoveWorktreeInput = typeof VcsRemoveWorktreeInput.Type;
 

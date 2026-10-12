@@ -1202,10 +1202,30 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+const WorktreeReuseMaxStandby = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }));
+const WorktreeReuseStandbyHours = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 24 * 30 }),
+);
+
+/**
+ * Keep removed worktrees on standby so the next new thread can take one
+ * instead of running `git worktree add` again. Environment-wide because the
+ * standby pool is shared disk.
+ */
+export const WorktreeReuseSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  maxStandby: WorktreeReuseMaxStandby.pipe(Schema.withDecodingDefault(Effect.succeed(3))),
+  standbyHours: WorktreeReuseStandbyHours.pipe(Schema.withDecodingDefault(Effect.succeed(24))),
+});
+export type WorktreeReuseSettings = typeof WorktreeReuseSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
+  ),
+  worktreeReuse: WorktreeReuseSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(WorktreeReuseSettings)({}))),
   ),
   responseStreamingMode: ResponseStreamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
@@ -1609,6 +1629,13 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeForce: Schema.optionalKey(Schema.Boolean),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+    }),
+  ),
+  worktreeReuse: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      maxStandby: Schema.optionalKey(WorktreeReuseMaxStandby),
+      standbyHours: Schema.optionalKey(WorktreeReuseStandbyHours),
     }),
   ),
   // Server settings
