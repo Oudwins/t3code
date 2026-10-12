@@ -6,6 +6,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -4840,6 +4841,225 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         "--show-current",
       ])).stdout.trim();
       expect(worktreeBranch).toBe("feature/pr-reuse");
+    }),
+  );
+
+  it.effect("runs the setup script in fresh and reused worktrees created for a thread", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const setupCalls: ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput[] = [];
+      const { manager, worktreeManager } = yield* makeManager({
+        serverSettings: { worktreeReuse: { enabled: true } },
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.sync(() => {
+              setupCalls.push(setupInput);
+              return { status: "no-script" as const };
+            }),
+        },
+      });
+
+      const fresh = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/thread-fresh",
+        path: null,
+        threadId: asThreadId("thread-fresh"),
+      });
+
+      const previous = NodePath.join(yield* makeTempDir("t3code-git-manager-"), "previous");
+      yield* runGit(repoDir, ["worktree", "add", "-b", "feature/previous", previous, "main"]);
+      yield* worktreeManager.removeWorktree({
+        cwd: repoDir,
+        path: previous,
+        force: true,
+        reuse: true,
+      });
+      const reused = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/thread-reused",
+        path: null,
+        threadId: asThreadId("thread-reused"),
+      });
+
+      const worktreeRoots = (yield* runGit(repoDir, ["worktree", "list", "--porcelain"])).stdout
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "));
+      expect(worktreeRoots.some((line) => line.includes("parked-wt"))).toBe(false);
+      expect(setupCalls).toEqual([
+        {
+          threadId: "thread-fresh",
+          projectCwd: repoDir,
+          worktreePath: fresh.worktree.path,
+          observeCompletion: {},
+        },
+        {
+          threadId: "thread-reused",
+          projectCwd: repoDir,
+          worktreePath: reused.worktree.path,
+          observeCompletion: {},
+        },
+      ]);
+    }),
+  );
+
+  it.effect("does not run a setup script when no thread is given", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const setupCalls: ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput[] = [];
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.sync(() => {
+              setupCalls.push(setupInput);
+              return { status: "no-script" as const };
+            }),
+        },
+      });
+
+      const created = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/no-thread",
+        path: null,
+      });
+
+      expect(NodeFS.existsSync(created.worktree.path)).toBe(true);
+      expect(setupCalls).toEqual([]);
+    }),
+  );
+
+  it.effect("returns before an async setup script finishes and still drains its completion", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const gate = yield* Deferred.make<void>();
+      const drained = yield* Deferred.make<void>();
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Setup",
+              scriptCommand: "true",
+              terminalId: "setup-terminal",
+              cwd: setupInput.worktreePath,
+              async: true,
+              completion: Deferred.await(gate).pipe(
+                Effect.andThen(Deferred.succeed(drained, undefined)),
+                Effect.as({ exitCode: 0, durationMs: 1 }),
+              ),
+            }),
+        },
+      });
+
+      const created = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/async-setup",
+        path: null,
+        threadId: asThreadId("thread-async"),
+      });
+
+      // The gate is still closed, so the setup script was not waited on.
+      expect(NodeFS.existsSync(created.worktree.path)).toBe(true);
+      yield* Deferred.succeed(gate, undefined);
+      yield* Deferred.await(drained);
+    }),
+  );
+
+  it.effect("waits for a blocking setup script and keeps the worktree when it succeeds", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const finished = yield* Deferred.make<void>();
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Setup",
+              scriptCommand: "true",
+              terminalId: "setup-terminal",
+              cwd: setupInput.worktreePath,
+              async: false,
+              completion: Deferred.succeed(finished, undefined).pipe(
+                Effect.as({ exitCode: 0, durationMs: 1 }),
+              ),
+            }),
+        },
+      });
+
+      const created = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/blocking-setup",
+        path: null,
+        threadId: asThreadId("thread-blocking"),
+      });
+
+      expect(yield* Deferred.isDone(finished)).toBe(true);
+      expect(NodeFS.existsSync(created.worktree.path)).toBe(true);
+    }),
+  );
+
+  it.effect("removes the worktree and its new branch when a blocking setup script fails", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      let worktreePath: string | undefined;
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.sync(() => {
+              worktreePath = setupInput.worktreePath;
+              return {
+                status: "started" as const,
+                scriptId: "setup",
+                scriptName: "Install",
+                scriptCommand: "exit 3",
+                terminalId: "setup-terminal",
+                cwd: setupInput.worktreePath,
+                async: false,
+                completion: Effect.succeed({ exitCode: 3, durationMs: 1 }),
+              };
+            }),
+        },
+      });
+
+      const result = yield* manager
+        .createThreadWorktree({
+          cwd: repoDir,
+          refName: "main",
+          newRefName: "t3code/failing-setup",
+          path: null,
+          threadId: asThreadId("thread-failing"),
+        })
+        .pipe(Effect.result);
+
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toBeInstanceOf(GitCommandError);
+        expect(result.failure.message).toContain("Install");
+      }
+      expect(worktreePath).toBeDefined();
+      expect(NodeFS.existsSync(worktreePath as string)).toBe(false);
+      const branches = (yield* runGit(repoDir, [
+        "branch",
+        "--list",
+        "t3code/failing-setup",
+      ])).stdout.trim();
+      expect(branches).toBe("");
     }),
   );
 

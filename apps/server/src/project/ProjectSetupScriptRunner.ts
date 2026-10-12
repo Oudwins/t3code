@@ -113,6 +113,20 @@ export const ProjectSetupScriptRunnerError = Schema.Union([
 ]);
 export type ProjectSetupScriptRunnerError = typeof ProjectSetupScriptRunnerError.Type;
 
+export class ProjectSetupScriptFailedError extends Schema.TaggedError<ProjectSetupScriptFailedError>()(
+  "ProjectSetupScriptFailedError",
+  {
+    threadId: Schema.String,
+    worktreePath: Schema.String,
+    scriptName: Schema.String,
+    exitCode: Schema.NullOr(Schema.Number),
+  },
+) {
+  override get message(): string {
+    return `Setup script '${this.scriptName}' exited with ${this.exitCode ?? "no exit code"}.`;
+  }
+}
+
 export class ProjectSetupScriptRunner extends Context.Service<
   ProjectSetupScriptRunner,
   {
@@ -469,3 +483,34 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(ProjectSetupScriptRunner, make);
+
+/**
+ * Runs the setup script the way a thread launch does. A script that blocks
+ * (`async: false`) is awaited and must exit 0; an async one is left to finish
+ * in the background.
+ */
+export const runForThreadSettled = Effect.fn("ProjectSetupScriptRunner.runForThreadSettled")(
+  function* (
+    runner: ProjectSetupScriptRunner["Service"],
+    input: Omit<ProjectSetupScriptRunnerInput, "observeCompletion">,
+  ) {
+    const result = yield* runner.runForThread({ ...input, observeCompletion: {} });
+    if (result.status === "started" && result.completion !== undefined) {
+      if (result.async) {
+        // Running the completion is what releases its terminal subscription.
+        yield* Effect.forkDetach(result.completion);
+      } else {
+        const { exitCode } = yield* result.completion;
+        if (exitCode !== 0) {
+          return yield* new ProjectSetupScriptFailedError({
+            threadId: input.threadId,
+            worktreePath: input.worktreePath,
+            scriptName: result.scriptName,
+            exitCode,
+          });
+        }
+      }
+    }
+    return result;
+  },
+);
