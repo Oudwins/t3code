@@ -13,8 +13,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import type * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as GitWorkflow from "./GitWorkflowService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as WorktreeManager from "./WorktreeManager.ts";
 import * as WorktreePool from "./WorktreePool.ts";
 
@@ -31,6 +31,7 @@ interface HarnessOptions {
   readonly reuse?: { enabled?: boolean; maxStandby?: number; standbyHours?: number };
   readonly parkFails?: boolean;
   readonly reuseFails?: boolean;
+  readonly repositoryKind?: VcsDriverRegistry.VcsDriverHandle["kind"];
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -67,12 +68,19 @@ function makeHarness(options: HarnessOptions = {}) {
     Layer.provideMerge(WorktreePool.layer),
     Layer.provideMerge(
       Layer.mergeAll(
-        Layer.mock(GitWorkflow.GitWorkflowService)({
+        Layer.mock(GitVcsDriver.GitVcsDriver)({
           createWorktree,
           reuseWorktree,
           parkWorktree,
           removeWorktree,
-        } satisfies Partial<GitWorkflow.GitWorkflowService["Service"]>),
+        } satisfies Partial<GitVcsDriver.GitVcsDriver["Service"]>),
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+          // The manager only reads the kind, to refuse repositories that are not git.
+          resolve: () =>
+            Effect.succeed({
+              kind: options.repositoryKind ?? "git",
+            } as VcsDriverRegistry.VcsDriverHandle),
+        }),
         ServerSettings.layerTest({ worktreeReuse: { enabled: true, ...options.reuse } }),
         NodeServices.layer,
         SqlitePersistenceMemory,
@@ -451,5 +459,20 @@ it.effect("hands each standby worktree to exactly one concurrent launch", () => 
     assert.deepEqual(claimedFrom(harness).toSorted(), paths.map(parkedOf).toSorted());
     assert.equal(harness.createWorktree.mock.calls.length, 2);
     assert.deepEqual(yield* standbyPaths, []);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("refuses to create or remove worktrees outside a git repository", () => {
+  const harness = makeHarness({ repositoryKind: "unknown" });
+  return Effect.gen(function* () {
+    const manager = yield* WorktreeManager.WorktreeManager;
+    const path = yield* makeDir;
+
+    const created = yield* Effect.flip(launch("feature/next"));
+    const removed = yield* Effect.flip(manager.removeWorktree({ cwd: repo, path, reuse: true }));
+    assert.equal(created.operation, "WorktreeManager.createWorktree");
+    assert.equal(removed.operation, "WorktreeManager.removeWorktree");
+    assert.equal(harness.createWorktree.mock.calls.length, 0);
+    assert.equal(harness.removeWorktree.mock.calls.length, 0);
   }).pipe(Effect.provide(harness.layer));
 });

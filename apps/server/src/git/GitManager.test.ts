@@ -5,6 +5,7 @@ import * as NodeChildProcess from "node:child_process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -41,6 +42,7 @@ import { decodeGitHubPullRequestListJson } from "../sourceControl/gitHubPullRequ
 import * as GitLabCli from "../sourceControl/GitLabCli.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceControlProvider.ts";
 import * as GitLabSourceControlProvider from "../sourceControl/GitLabSourceControlProvider.ts";
@@ -58,6 +60,8 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitManager from "./GitManager.ts";
+import * as WorktreeManager from "./WorktreeManager.ts";
+import * as WorktreePool from "./WorktreePool.ts";
 
 const encodeCliJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeForgejoPullRequest = Schema.decodeEffect(ForgejoPullRequestSchema);
@@ -728,20 +732,28 @@ function makeManager(input?: {
     ),
   );
 
-  const managerLayer = Layer.mergeAll(
-    Layer.succeed(TextGeneration.TextGeneration, textGeneration),
-    Layer.mock(ProviderRegistry.ProviderRegistry)({
-      getProviders: Effect.succeed([]),
-    }),
-    Layer.succeed(
-      ProjectSetupScriptRunner.ProjectSetupScriptRunner,
-      input?.setupScriptRunner ?? {
-        runForThread: () => Effect.succeed({ status: "no-script" as const }),
-      },
+  const managerLayer = WorktreeManager.layer.pipe(
+    Layer.provide(WorktreePool.layer),
+    Layer.provide(VcsDriverRegistry.layer),
+    Layer.provideMerge(
+      Layer.mergeAll(
+        Layer.succeed(TextGeneration.TextGeneration, textGeneration),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([]),
+        }),
+        Layer.succeed(
+          ProjectSetupScriptRunner.ProjectSetupScriptRunner,
+          input?.setupScriptRunner ?? {
+            runForThread: () => Effect.succeed({ status: "no-script" as const }),
+          },
+        ),
+        vcsDriverLayer,
+        serverSettingsLayer,
+      ),
     ),
-    vcsDriverLayer,
-    serverSettingsLayer,
-  ).pipe(Layer.provideMerge(sourceControlRegistryLayer), Layer.provideMerge(NodeServices.layer));
+    Layer.provideMerge(sourceControlRegistryLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
   // Built into the test's scope: the manager reads these stores after this returns.
   const storesLayer = Layer.merge(ProjectionStore.layer, ProjectStore.layer).pipe(
     Layer.provideMerge(SqlitePersistenceMemory),
@@ -752,11 +764,13 @@ function makeManager(input?: {
     if (input?.seed !== undefined) {
       yield* input.seed.pipe(Effect.provideContext(stores), Effect.orDie);
     }
+    const services = yield* Layer.build(managerLayer).pipe(Effect.provideContext(stores));
     const manager = yield* GitManager.make.pipe(
-      Effect.provide(managerLayer),
+      Effect.provideContext(services),
       Effect.provideContext(stores),
     );
-    return { manager, ghCalls };
+    const worktreeManager = Context.get(services, WorktreeManager.WorktreeManager);
+    return { manager, worktreeManager, ghCalls };
   });
 }
 
@@ -4756,6 +4770,76 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         "--show-current",
       ])).stdout.trim();
       expect(worktreeBranch).toBe("feature/pr-worktree");
+    }),
+  );
+
+  it.effect("prepares a pull request thread in a standby worktree when reuse is on", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/pr-reuse"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "reuse.txt"), "reuse\n");
+      yield* runGit(repoDir, ["add", "reuse.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "PR reuse branch"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-reuse"]);
+      yield* runGit(repoDir, ["push", "origin", "HEAD:refs/pull/78/head"]);
+      yield* runGit(repoDir, ["checkout", "main"]);
+
+      const { manager, worktreeManager } = yield* makeManager({
+        serverSettings: { worktreeReuse: { enabled: true } },
+        ghScenario: {
+          pullRequest: {
+            number: 78,
+            title: "Reuse PR",
+            url: "https://github.com/pingdotgg/codething-mvp/pull/78",
+            baseRefName: "main",
+            headRefName: "feature/pr-reuse",
+            state: "open",
+          },
+        },
+      });
+
+      const previous = NodePath.join(yield* makeTempDir("t3code-git-manager-"), "previous");
+      yield* runGit(repoDir, ["worktree", "add", "-b", "feature/previous", previous, "main"]);
+      yield* worktreeManager.removeWorktree({
+        cwd: repoDir,
+        path: previous,
+        force: true,
+        reuse: true,
+      });
+      const listWorktrees = runGit(repoDir, ["worktree", "list", "--porcelain"]).pipe(
+        Effect.map((result) =>
+          result.stdout
+            .split("\n")
+            .filter((line) => line.startsWith("worktree "))
+            .map((line) => line.slice("worktree ".length)),
+        ),
+      );
+      const parked = (yield* listWorktrees).filter((path) => path.includes("parked-wt"));
+      expect(parked).toHaveLength(1);
+
+      const result = yield* preparePullRequestThread(manager, {
+        cwd: repoDir,
+        reference: "78",
+        mode: "worktree",
+      });
+
+      expect(result.branch).toBe("feature/pr-reuse");
+      expect(NodeFS.existsSync(parked[0] as string)).toBe(false);
+      // The checkout came from the parked worktree, so git still tracks a single linked worktree.
+      const worktrees = yield* listWorktrees;
+      expect(worktrees).toHaveLength(2);
+      expect(
+        worktrees.some((path) => path.endsWith(NodePath.basename(result.worktreePath as string))),
+      ).toBe(true);
+      const worktreeBranch = (yield* runGit(result.worktreePath as string, [
+        "branch",
+        "--show-current",
+      ])).stdout.trim();
+      expect(worktreeBranch).toBe("feature/pr-reuse");
     }),
   );
 

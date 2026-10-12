@@ -71,15 +71,6 @@ export class GitWorkflowService extends Context.Service<
       input: VcsCreateWorktreeInput,
       options?: GitVcsDriver.CreateWorktreeOptions,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
-    readonly reuseWorktree: (
-      input: GitVcsDriver.ReuseWorktreeInput,
-      options?: GitVcsDriver.CreateWorktreeOptions,
-    ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
-    readonly parkWorktree: (input: {
-      readonly cwd: string;
-      readonly path: string;
-      readonly discardChanges?: boolean;
-    }) => Effect.Effect<{ readonly path: string }, GitCommandError>;
     readonly listLocalBranchNames: (cwd: string) => Effect.Effect<string[], GitCommandError>;
     readonly fetchRemote: (input: {
       readonly cwd: string;
@@ -193,31 +184,8 @@ export const make = Effect.gen(function* () {
     }
   });
 
-  const ensureGitCommand = Effect.fn("GitWorkflowService.ensureGitCommand")(function* (
-    operation: string,
-    cwd: string,
-  ) {
-    const handle = yield* registry.resolve({ cwd }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GitCommandError({
-            operation,
-            command: "vcs-route",
-            cwd,
-            detail: "Failed to resolve the VCS driver for this Git command.",
-            cause,
-          }),
-      ),
-    );
-    if (handle.kind !== "git") {
-      return yield* new GitCommandError({
-        operation,
-        command: "vcs-route",
-        cwd,
-        detail: `The ${operation} command currently supports Git repositories only; detected ${handle.kind}.`,
-      });
-    }
-  });
+  const ensureGitCommand = (operation: string, cwd: string) =>
+    VcsDriverRegistry.ensureGitCommand(registry, operation, cwd);
 
   const detectGitRepositoryForStatus = Effect.fn("GitWorkflowService.detectGitRepositoryForStatus")(
     function* (operation: string, cwd: string) {
@@ -357,14 +325,6 @@ export const make = Effect.gen(function* () {
     createWorktree: (input, options) =>
       ensureGitCommand("GitWorkflowService.createWorktree", input.cwd).pipe(
         Effect.andThen(git.createWorktree(input, options)),
-      ),
-    reuseWorktree: (input, options) =>
-      ensureGitCommand("GitWorkflowService.reuseWorktree", input.cwd).pipe(
-        Effect.andThen(git.reuseWorktree(input, options)),
-      ),
-    parkWorktree: (input) =>
-      ensureGitCommand("GitWorkflowService.parkWorktree", input.cwd).pipe(
-        Effect.andThen(git.parkWorktree(input)),
       ),
     listLocalBranchNames: (cwd) =>
       ensureGitCommand("GitWorkflowService.listLocalBranchNames", cwd).pipe(

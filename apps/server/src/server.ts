@@ -331,7 +331,15 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
   Layer.provide(SourceControlRateLimit.layer),
 );
 
+const WorktreeManagerLayerLive = WorktreeManager.layer.pipe(
+  Layer.provide(WorktreePool.layer),
+  Layer.provide(VcsDriverRegistryLayerLive),
+  Layer.provide(GitVcsDriver.layer),
+  Layer.provide(ServerSettingsLayerLive),
+);
+
 const GitManagerLayerLive = GitManager.layer.pipe(
+  Layer.provide(WorktreeManagerLayerLive),
   // Per-project git settings resolve the acting thread's project.
   Layer.provide(Layer.merge(ProjectionStoreV2.layer, ProjectStore.layer)),
   Layer.provideMerge(ProjectSetupScriptRunnerLayerLive),
@@ -351,12 +359,6 @@ const GitLayerLive = Layer.empty.pipe(
 const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
   Layer.provideMerge(VcsDriverRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
-);
-
-const WorktreeManagerLayerLive = WorktreeManager.layer.pipe(
-  Layer.provide(WorktreePool.layer),
-  Layer.provide(GitWorkflowLayerLive),
-  Layer.provide(ServerSettingsLayerLive),
 );
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(

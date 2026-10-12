@@ -17,7 +17,7 @@ import * as Stream from "effect/Stream";
 import { forkParked } from "../serverActivation.ts";
 import * as Settings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as GitWorkflow from "./GitWorkflowService.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as WorktreePool from "./WorktreePool.ts";
 
 const HOUR_MS = 3_600_000;
@@ -62,7 +62,8 @@ export class WorktreeManager extends Context.Service<
 >()("t3/git/WorktreeManager") {}
 
 const make = Effect.gen(function* () {
-  const git = yield* GitWorkflow.GitWorkflowService;
+  const git = yield* GitVcsDriver.GitVcsDriver;
+  const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const pool = yield* WorktreePool.WorktreePool;
   const fileSystem = yield* FileSystem.FileSystem;
   const settings = yield* Settings.ServerSettingsService;
@@ -131,6 +132,11 @@ const make = Effect.gen(function* () {
   const createWorktree: WorktreeManager["Service"]["createWorktree"] = Effect.fn(
     "WorktreeManager.createWorktree",
   )(function* (input, options) {
+    yield* VcsDriverRegistry.ensureGitCommand(
+      registry,
+      "WorktreeManager.createWorktree",
+      input.cwd,
+    );
     if (yield* reuseEnabled) {
       const reused = yield* claimStandby(input, options);
       if (reused !== null) return reused;
@@ -162,6 +168,11 @@ const make = Effect.gen(function* () {
   const removeWorktree: WorktreeManager["Service"]["removeWorktree"] = Effect.fn(
     "WorktreeManager.removeWorktree",
   )(function* (input) {
+    yield* VcsDriverRegistry.ensureGitCommand(
+      registry,
+      "WorktreeManager.removeWorktree",
+      input.cwd,
+    );
     if (input.reuse === true && (yield* reuseEnabled)) {
       if (yield* park(input)) {
         yield* sweep;
