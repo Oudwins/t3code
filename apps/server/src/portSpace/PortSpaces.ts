@@ -15,7 +15,6 @@ import type { ThreadId } from "@t3tools/contracts";
 import { HostProcessPlatform, HostProcessUserId } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as NodeCrypto from "node:crypto";
 
@@ -101,9 +100,16 @@ export class PortSpaces extends Context.Service<
   }
 >()("t3/portSpace/PortSpaces") {}
 
-/** Namespace ids are `[a-z0-9-]{1,32}`; thread ids are not guaranteed to be. */
-const portSpaceId = (threadId: ThreadId) =>
-  NodeCrypto.createHash("sha256").update(threadId).digest("hex").slice(0, 16);
+/**
+ * Namespace ids are `[a-z0-9-]{1,32}`; thread ids are not guaranteed to be.
+ * Namespaces are machine-global, so the environment is part of the id: a dev
+ * server holding a copy of a thread must not share, or release, its namespace.
+ */
+const portSpaceId = (environmentId: string, threadId: ThreadId) =>
+  NodeCrypto.createHash("sha256")
+    .update(`${environmentId}\0${threadId}`)
+    .digest("hex")
+    .slice(0, 16);
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 
@@ -143,7 +149,7 @@ const parseListeners = (output: string): ReadonlyArray<PortSpaceListener> => {
   return listeners.toSorted((a, b) => a.port - b.port || a.address.localeCompare(b.address));
 };
 
-export const make = Effect.gen(function* () {
+export const make = Effect.fn("PortSpaces.make")(function* (environmentId: string) {
   const runner = yield* ProcessRunner.ProcessRunner;
   const platform = yield* HostProcessPlatform;
   const uid = yield* HostProcessUserId;
@@ -205,7 +211,7 @@ export const make = Effect.gen(function* () {
   }).pipe(Effect.withSpan("PortSpaces.capability"));
 
   const ensure = Effect.fn("PortSpaces.ensure")(function* (threadId: ThreadId) {
-    yield* runHelper("ensure", ["create", portSpaceId(threadId)]);
+    yield* runHelper("ensure", ["create", portSpaceId(environmentId, threadId)]);
   });
 
   const wrapSpawn: PortSpaces["Service"]["wrapSpawn"] = (threadId, input) => {
@@ -215,7 +221,7 @@ export const make = Effect.gen(function* () {
       args: [
         ...helperPrefix.args,
         "exec",
-        portSpaceId(threadId),
+        portSpaceId(environmentId, threadId),
         "--",
         input.command,
         ...input.args,
@@ -228,7 +234,10 @@ export const make = Effect.gen(function* () {
   };
 
   const hostAddress = Effect.fn("PortSpaces.hostAddress")(function* (threadId: ThreadId) {
-    const address = (yield* runHelper("hostAddress", ["gateway", portSpaceId(threadId)])).trim();
+    const address = (yield* runHelper("hostAddress", [
+      "gateway",
+      portSpaceId(environmentId, threadId),
+    ])).trim();
     if (address.length === 0) {
       return yield* new PortSpaceCommandError({
         operation: "hostAddress",
@@ -239,14 +248,14 @@ export const make = Effect.gen(function* () {
   });
 
   const listeners = Effect.fn("PortSpaces.listeners")(function* (threadId: ThreadId) {
-    return parseListeners(yield* runHelper("listeners", ["listeners", portSpaceId(threadId)]));
+    return parseListeners(
+      yield* runHelper("listeners", ["listeners", portSpaceId(environmentId, threadId)]),
+    );
   });
 
   const release = Effect.fn("PortSpaces.release")(function* (threadId: ThreadId) {
-    yield* runHelper("release", ["delete", portSpaceId(threadId)]);
+    yield* runHelper("release", ["delete", portSpaceId(environmentId, threadId)]);
   });
 
   return PortSpaces.of({ capability, ensure, wrapSpawn, hostAddress, listeners, release });
 });
-
-export const layer = Layer.effect(PortSpaces, make);

@@ -30,7 +30,10 @@ export class CliPortSpaceError extends Schema.TaggedError<CliPortSpaceError>()(
   }
 }
 
-const runtimeLayer = PortSpaces.layer.pipe(Layer.provideMerge(ProcessRunner.layer));
+// The CLI only asks what the machine can do; it never names a namespace.
+const runtimeLayer = Layer.effect(PortSpaces.PortSpaces, PortSpaces.make("cli")).pipe(
+  Layer.provideMerge(ProcessRunner.layer),
+);
 
 const yesFlag = Flag.Boolean("yes").pipe(
   Flag.withAlias("y"),

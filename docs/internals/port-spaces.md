@@ -16,7 +16,9 @@ current Ubuntu. `t3 portspace setup` installs
 [`t3-portspace`](../../apps/server/src/portSpace/PortSpaceHelper.ts) and a sudoers entry that lets
 one uid run only that file. The helper is the whole trust boundary:
 
-- Every argument is untrusted. Ids are `[a-z0-9-]{1,32}`; thread ids are hashed to fit.
+- Every argument is untrusted. Ids are `[a-z0-9-]{1,32}`; the environment id and thread id are
+  hashed to fit. Namespaces are machine-global, so the environment is in the hash: a dev server
+  with a copy of a thread must not reach, or release, the installed server's namespace.
 - User commands run only after `setpriv` drops to `SUDO_UID`/`SUDO_GID`. Nothing the helper runs
   while privileged goes through a shell.
 - The child environment and cwd travel in one variable, `T3_PORTSPACE_PROLOGUE`, that sudoers keeps

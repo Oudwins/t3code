@@ -45,6 +45,7 @@ const output = (code: number, stdout = "", stderr = "") => ({
 /** Runs `PortSpaces` against a scripted helper; `reply` answers by the helper's subcommand. */
 const withPortSpaces = <A, E>(
   options: {
+    readonly environmentId?: string;
     readonly platform?: NodeJS.Platform;
     readonly uid?: number | undefined;
     readonly reply?: (subcommand: string, args: ReadonlyArray<string>) => ReturnType<typeof output>;
@@ -61,7 +62,7 @@ const withPortSpaces = <A, E>(
       }),
   });
   return Effect.gen(function* () {
-    const portSpaces = yield* PortSpaces.make;
+    const portSpaces = yield* PortSpaces.make(options.environmentId ?? "environment-a");
     return yield* use(portSpaces, calls);
   }).pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
@@ -155,6 +156,23 @@ describe("PortSpaces.wrapSpawn", () => {
         expect(idA).not.toBe(idB);
       }),
     ),
+  );
+
+  it.effect("gives the same thread a different namespace in each environment", () =>
+    Effect.gen(function* () {
+      const idIn = (environmentId: string) =>
+        withPortSpaces({ environmentId }, (portSpaces) =>
+          Effect.succeed(
+            namespaceIdOf(portSpaces.wrapSpawn(threadA, { command: "node", args: [] })),
+          ),
+        );
+      const first = yield* idIn("environment-a");
+      const second = yield* idIn("environment-b");
+      expect(first).toMatch(/^[a-z0-9-]{1,32}$/);
+      expect(second).toMatch(/^[a-z0-9-]{1,32}$/);
+      expect(first).not.toBe(second);
+      expect(yield* idIn("environment-a")).toBe(first);
+    }),
   );
 
   it.effect("goes through sudo for a normal user and runs the helper directly as root", () =>
@@ -373,7 +391,7 @@ describe("PortSpaces.ensure and release", () => {
         ),
     });
     return Effect.gen(function* () {
-      const portSpaces = yield* PortSpaces.make;
+      const portSpaces = yield* PortSpaces.make("environment-a");
       const exit = yield* Effect.exit(portSpaces.release(threadA));
       expect(String(Exit.isFailure(exit) ? exit.cause : "")).toContain("Port space release failed");
     }).pipe(
