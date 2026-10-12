@@ -2,6 +2,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  GitCommandError,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -25,7 +26,9 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderAuthService from "../provider/Services/ProviderAuthService.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -40,7 +43,9 @@ import * as RuntimePolicy from "./RuntimePolicy.ts";
 
 const isDomainEvent = Schema.is(OrchestrationV2DomainEvent);
 
-it("does not commit running state when inherited background routing cannot be read", async () => {
+// The projection read after a missing worktree is recreated fails, so the turn
+// stops before any provider work and only the recreate side effects remain.
+async function startAfterMissingWorktree(options?: { readonly recreateFails?: boolean }) {
   const threadId = ThreadId.make("thread_provider_turn_start_projection_failure");
   const runId = RunId.make("run_provider_turn_start_projection_failure");
   const attemptId = RunAttemptId.make("attempt_provider_turn_start_projection_failure");
@@ -88,7 +93,25 @@ it("does not commit running state when inherited background routing cannot be re
   );
   const startRootRun = vi.fn(() => Effect.void);
   const pruneWorktrees = vi.fn(() => Effect.void);
-  const createWorktree = vi.fn(() => Effect.succeed({} as never));
+  const createWorktree = vi.fn(
+    (): ReturnType<WorktreeManager.WorktreeManager["Service"]["createWorktree"]> =>
+      options?.recreateFails
+        ? Effect.fail(
+            new GitCommandError({
+              operation: "createWorktree",
+              command: "git worktree add",
+              cwd: "/tmp/provider-turn-start-project",
+              detail: "simulated failure",
+            }),
+          )
+        : Effect.succeed({} as never),
+  );
+  const runForThread = vi.fn(() => Effect.succeed({ status: "no-script" } as const));
+  const project = {
+    id: projection.thread.projectId,
+    workspaceRoot: "/tmp/provider-turn-start-project",
+    scripts: [],
+  };
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -96,13 +119,12 @@ it("does not commit running state when inherited background routing cannot be re
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
         Layer.succeed(FileSystem.FileSystem, { exists: () => Effect.succeed(false) } as never),
-        Layer.mock(GitWorkflow.GitWorkflowService)({ pruneWorktrees, createWorktree }),
+        Layer.mock(GitWorkflow.GitWorkflowService)({ pruneWorktrees }),
+        Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree }),
         Layer.mock(ProjectService.ProjectService)({
-          getById: () =>
-            Effect.succeed(
-              Option.some({ workspaceRoot: "/tmp/provider-turn-start-project" } as never),
-            ),
+          getById: () => Effect.succeed(Option.some(project as never)),
         }),
+        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({ runForThread }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getTurnStartContext: () => {
             projectionReadCount += 1;
@@ -135,22 +157,57 @@ it("does not commit running state when inherited background routing cannot be re
     ),
   );
 
-  await Effect.gen(function* () {
-    const error = yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2)
+  const error = await Effect.gen(function* () {
+    return yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2)
       .start({ threadId, runId })
       .pipe(Effect.flip);
-
-    expect(error._tag).toBe("ProviderTurnStartError");
-    expect(projectionReadCount).toBe(2);
-    expect(pruneWorktrees).toHaveBeenCalledWith({ cwd: "/tmp/provider-turn-start-project" });
-    expect(createWorktree).toHaveBeenCalledWith({
-      cwd: "/tmp/provider-turn-start-project",
-      refName: "feature/restore",
-      path: "/tmp/missing-provider-turn-start-worktree",
-    });
-    expect(writeIfRunCurrent).not.toHaveBeenCalled();
-    expect(startRootRun).not.toHaveBeenCalled();
   }).pipe(Effect.provide(layer), Effect.runPromise);
+
+  return {
+    error,
+    projectionReadCount,
+    pruneWorktrees,
+    createWorktree,
+    runForThread,
+    writeIfRunCurrent,
+    startRootRun,
+    project,
+  };
+}
+
+it("does not commit running state when inherited background routing cannot be read", async () => {
+  const result = await startAfterMissingWorktree();
+
+  expect(result.error._tag).toBe("ProviderTurnStartError");
+  expect(result.projectionReadCount).toBe(2);
+  expect(result.pruneWorktrees).toHaveBeenCalledWith({ cwd: "/tmp/provider-turn-start-project" });
+  expect(result.createWorktree).toHaveBeenCalledWith({
+    cwd: "/tmp/provider-turn-start-project",
+    refName: "feature/restore",
+    path: "/tmp/missing-provider-turn-start-worktree",
+  });
+  expect(result.writeIfRunCurrent).not.toHaveBeenCalled();
+  expect(result.startRootRun).not.toHaveBeenCalled();
+});
+
+it("runs the project setup script in a missing worktree it recreated", async () => {
+  const result = await startAfterMissingWorktree();
+
+  expect(result.runForThread).toHaveBeenCalledTimes(1);
+  expect(result.runForThread).toHaveBeenCalledWith({
+    threadId: "thread_provider_turn_start_projection_failure",
+    projectId: result.project.id,
+    projectCwd: "/tmp/provider-turn-start-project",
+    worktreePath: "/tmp/missing-provider-turn-start-worktree",
+    project: result.project,
+  });
+});
+
+it("skips setup when the missing worktree could not be recreated", async () => {
+  const result = await startAfterMissingWorktree({ recreateFails: true });
+
+  expect(result.createWorktree).toHaveBeenCalledTimes(1);
+  expect(result.runForThread).not.toHaveBeenCalled();
 });
 
 function makeLocalCommandHarness(input: {
@@ -493,7 +550,9 @@ function makeLocalCommandHarness(input: {
         IdAllocator.layer,
         FileSystem.layerNoop({}),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
+        Layer.mock(WorktreeManager.WorktreeManager)({}),
         Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getTurnStartContext: () =>
             Effect.succeed({
