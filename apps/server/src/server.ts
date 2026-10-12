@@ -72,6 +72,7 @@ import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
 import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
 import * as PortSpaces from "./portSpace/PortSpaces.ts";
+import * as ThreadPortSpace from "./portSpace/ThreadPortSpace.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
@@ -421,6 +422,11 @@ const layerPortSpaces = PortSpaces.layer.pipe(
   Layer.provide(ServerEnvironment.layerIdentity),
 );
 
+const layerThreadPortSpace = ThreadPortSpace.layer.pipe(
+  Layer.provide(layerPortSpaces),
+  Layer.provide(layerServerSettings),
+);
+
 const layerTerminal = TerminalManager.layer.pipe(
   Layer.provide(layerPtyAdapter),
   Layer.provide(layerPortScanner),
@@ -634,6 +640,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // hydration adds their default instances to `providerInstances` on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
+  // Adapters read this when their instances are built, so it has to be
+  // provided after hydration: hydration's own requirements do not mention it.
+  Layer.provideMerge(layerThreadPortSpace),
   Layer.provideMerge(
     Layer.mergeAll(
       AntigravityInstallation.AntigravityInstallation.layer,

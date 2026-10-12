@@ -156,6 +156,8 @@ import {
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { ThreadPortSpace } from "../../portSpace/ThreadPortSpace.ts";
+import { claudeOptionsInPortSpace } from "./ClaudePortSpace.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -713,6 +715,8 @@ export const layerQueryRunner: Layer.Layer<
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
     const agentScope = yield* AgentScope;
     const platform = yield* HostProcess.Platform;
+    const threadPortSpace = yield* ThreadPortSpace;
+    const runFork = Effect.runForkWith(yield* Effect.context<never>());
 
     return ClaudeAgentSdkQueryRunner.of({
       allocateSessionId: crypto
@@ -739,7 +743,19 @@ export const layerQueryRunner: Layer.Layer<
         // which every local user can read. They go over the CLI's stdin control
         // channel instead, so header credentials stay out of its argv and out
         // of the environment every command the agent runs inherits.
-        const { mcpServers, ...queryOptions } = input.options;
+        const portSpace = yield* threadPortSpace.resolve(input.threadId);
+        const requested =
+          portSpace === undefined
+            ? input.options
+            : yield* claudeOptionsInPortSpace(input.options, portSpace, (failure) =>
+                runFork(
+                  Effect.logWarning("claude exited inside its port space", {
+                    threadId: input.threadId,
+                    ...failure,
+                  }),
+                ),
+              );
+        const { mcpServers, ...queryOptions } = requested;
         // The SDK spawns a native binary as `path ...executableArgs ...sdkArgs`,
         // which lets the agent scope wrapper go in front of the CLI. The SDK
         // runs a script entry through node instead, so those launch unwrapped.
