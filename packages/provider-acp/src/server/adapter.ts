@@ -62,6 +62,8 @@ import { makeAcpMcpOverAcpBridge, type AcpMcpOverAcpBridge } from "./mcpOverAcpB
 import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import { spawnerInPortSpace } from "@t3tools/shared/SpawnerInPortSpace";
+import { type SpawnRewriter, ThreadPortSpace, urlInPortSpace } from "@t3tools/shared/ThreadPortSpace";
 import {
   applyAcpAgentTerminalUpdate,
   acpContentBlockDisplayText,
@@ -139,6 +141,8 @@ export interface AcpAdapterV2RuntimeInput {
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
+  /** Present when the thread has a port space: flavors hand it to the session runtime. */
+  readonly rewriteSpawn?: SpawnRewriter;
   /** Scoped credentials for terminal fallback when an ACP agent drops `mcpServers`. */
   readonly processEnvironment?: NodeJS.ProcessEnv;
   readonly resumeSessionId?: string;
@@ -485,6 +489,7 @@ export interface AcpAdapterV2Options {
   readonly flavor: AcpAdapterV2Flavor;
   /** How agents spawn this install's `acp-mcp-bridge`; see `resolveSelfInvocation`. */
   readonly selfInvocation: SelfInvocation;
+  /** Runs the agent, and the terminals it asks for, in a thread's port space when it has one. */
   /**
    * Opts the session into the ACP client `terminal` capability. Agents run
    * commands themselves unless an adapter sets this; with it, sessions
@@ -680,13 +685,20 @@ interface AcpMcpContext {
   readonly authorization?: string;
 }
 
+/**
+ * `hostAddress` is where the host's loopback is for an agent in a port space.
+ * Only what the agent reads is pointed there: the bridge T3 runs itself keeps
+ * the raw `endpoint`.
+ */
 function acpMcpContext(
   session: McpProviderSession.McpProviderSessionConfig | undefined,
   self: SelfInvocation,
+  hostAddress?: string,
 ): AcpMcpContext {
   if (session === undefined) {
     return { servers: [], acpServers: [] };
   }
+  const agentEndpoint = urlInPortSpace(session.endpoint, hostAddress);
   // Stdio is ACP's required baseline MCP transport. Agents that advertise
   // optional http support still routinely fail to wire injected http servers
   // through to their backend (codex-acp 1.2.0 and pi-acp both drop them), so
@@ -701,7 +713,7 @@ function acpMcpContext(
         args: [...selfInvocationArgs(self, ["acp-mcp-bridge"])],
         env: [
           { name: "ELECTRON_RUN_AS_NODE", value: "1" },
-          { name: "T3_ACP_MCP_ENDPOINT", value: session.endpoint },
+          { name: "T3_ACP_MCP_ENDPOINT", value: agentEndpoint },
           { name: "T3_ACP_MCP_AUTHORIZATION", value: session.authorizationHeader },
         ],
       },
@@ -710,7 +722,7 @@ function acpMcpContext(
     endpoint: session.endpoint,
     authorization: session.authorizationHeader,
     processEnvironment: {
-      T3_ACP_MCP_ENDPOINT: session.endpoint,
+      T3_ACP_MCP_ENDPOINT: agentEndpoint,
       T3_ACP_MCP_AUTHORIZATION: session.authorizationHeader,
       T3_ACP_MCP_NODE: self.command,
       ...(self.entrypoint === undefined ? {} : { T3_ACP_MCP_ENTRYPOINT: self.entrypoint }),
@@ -1490,14 +1502,17 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const agentScope = yield* AgentScope;
+  const threadPortSpace = yield* ThreadPortSpace;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const host = yield* ProviderHost.ProviderHost;
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const { flavor, selfInvocation: self } = options;
-  const readMcpContext = (threadId: ThreadId | null) =>
+  const readMcpContextAt = (threadId: ThreadId | null, hostAddress: string | undefined) =>
     threadId === null
-      ? Effect.succeed(acpMcpContext(undefined, self))
-      : mcpSessions.read(threadId).pipe(Effect.map((session) => acpMcpContext(session, self)));
+      ? Effect.succeed(acpMcpContext(undefined, self, hostAddress))
+      : mcpSessions
+          .read(threadId)
+          .pipe(Effect.map((session) => acpMcpContext(session, self, hostAddress)));
   const driver = flavor.driver;
   const continuationRequests = options.continuationRequests;
   const postSettleContinuationEnabled =
@@ -1511,6 +1526,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
     openSession: Effect.fn("AcpAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
+        const portSpace = yield* threadPortSpace.resolve(input.threadId);
+        const hostAddress = portSpace === undefined ? undefined : yield* portSpace.hostAddress;
+        const readMcpContext = (threadId: ThreadId | null) => readMcpContextAt(threadId, hostAddress);
         // Persisted ACP threads from before item identity v2 retain their old
         // deterministic ids. Fresh threads scope native ids by instance so
         // separately configured agents cannot collide.
@@ -1611,7 +1629,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     : undefined;
                 },
               }).pipe(
-                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+                Effect.provideService(
+                  ChildProcessSpawner.ChildProcessSpawner,
+                  portSpace === undefined
+                    ? childProcessSpawner
+                    : spawnerInPortSpace(childProcessSpawner, portSpace.rewrite),
+                ),
               );
         if (clientTerminals !== undefined) {
           yield* Scope.addFinalizer(sessionScope, clientTerminals.disposeAll);
@@ -2111,6 +2134,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             runtimePolicy: input.runtimePolicy,
             mcpServers: mcpContext.servers,
             acpMcpServers: mcpContext.acpServers,
+            ...(portSpace === undefined ? {} : { rewriteSpawn: portSpace.rewrite }),
             ...(mcpContext.processEnvironment === undefined
               ? {}
               : { processEnvironment: mcpContext.processEnvironment }),

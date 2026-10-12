@@ -58,6 +58,7 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { type SpawnRewriter, ThreadPortSpace } from "@t3tools/shared/ThreadPortSpace";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   ACP_EMPTY_OPTION_VALUE,
@@ -766,6 +767,93 @@ describe("AcpAdapterV2", () => {
       assert.deepEqual(mcpServer.args, ["acp-mcp-bridge"]);
       assert.equal(runtimeInput?.processEnvironment?.T3_ACP_MCP_NODE, process.execPath);
       assert.equal(runtimeInput?.processEnvironment?.T3_ACP_MCP_ENTRYPOINT, undefined);
+    }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
+  it.effect.each([
+    { name: "in a port space", portSpace: true },
+    { name: "without a port space", portSpace: false },
+  ])("points the agent's MCP endpoint at the host only $name", ({ portSpace }) =>
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const path = yield* Path.Path;
+      const selfInvocation = yield* resolveSelfInvocation();
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+
+      const instanceId = ProviderInstanceId.make("acp-test-port-space-mcp");
+      const threadId = ThreadId.make("thread-acp-port-space-mcp");
+      yield* (yield* McpProviderSessions.McpProviderSessions).set({
+        environmentId: EnvironmentId.make("environment-acp-port-space-mcp"),
+        threadId,
+        providerSessionId: "mcp-session-acp-port-space-mcp",
+        providerInstanceId: instanceId,
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: "Bearer port-space-mcp-token",
+        browserToolsAvailable: false,
+      });
+
+      let runtimeInput: AcpAdapterV2RuntimeInput | undefined;
+      const makeRuntime = makeMockRuntime({ childProcessSpawner, mockAgentPath });
+      const rewrittenSpawns: Array<string> = [];
+      const rewrite: SpawnRewriter = (spawn) => {
+        rewrittenSpawns.push(spawn.command);
+        return {
+          command: spawn.command,
+          args: spawn.args,
+          env: Object.fromEntries(
+            Object.entries(spawn.env ?? {}).filter(
+              (entry): entry is [string, string] => entry[1] !== undefined,
+            ),
+          ),
+        };
+      };
+      const adapter = yield* makeAcpAdapterV2({
+        instanceId,
+        flavor: {
+          driver: ACP_TEST_DRIVER,
+          capabilities: AcpProviderCapabilitiesV2,
+          makeRuntime: (input) =>
+            Effect.sync(() => {
+              runtimeInput = input;
+            }).pipe(Effect.andThen(makeRuntime(input))),
+        },
+        selfInvocation,
+      }).pipe(
+        Effect.provideService(ThreadPortSpace, {
+          resolve: () =>
+            Effect.succeed(
+              portSpace ? { rewrite, hostAddress: Effect.succeed("192.168.5.2") } : undefined,
+            ),
+        }),
+      );
+      yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("provider-session-acp-port-space-mcp"),
+        modelSelection: { instanceId, model: "default" },
+        runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        }),
+      });
+
+      const expectedEndpoint = portSpace
+        ? "http://192.168.5.2:43123/mcp"
+        : "http://127.0.0.1:43123/mcp";
+      const mcpServer = runtimeInput?.mcpServers[0];
+      if (mcpServer === undefined || !("command" in mcpServer)) {
+        return yield* Effect.die("ACP runtime must receive the t3-code stdio MCP server");
+      }
+      const mcpEnvironment = Array.isArray(mcpServer.env) ? mcpServer.env : [];
+      assert.equal(
+        mcpEnvironment.find((variable) => variable.name === "T3_ACP_MCP_ENDPOINT")?.value,
+        expectedEndpoint,
+      );
+      assert.equal(runtimeInput?.processEnvironment?.T3_ACP_MCP_ENDPOINT, expectedEndpoint);
+      assert.equal(runtimeInput?.rewriteSpawn, portSpace ? rewrite : undefined);
+      assert.equal(rewrittenSpawns.length, portSpace ? 1 : 0);
     }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 
