@@ -11,6 +11,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { forkParked } from "../serverActivation.ts";
@@ -51,7 +52,11 @@ export class WorktreeManager extends Context.Service<
     readonly removeWorktree: (
       input: VcsRemoveWorktreeInput,
     ) => Effect.Effect<void, GitCommandError>;
-    /** Removes standby worktrees past their time or count limit, or all of them once reuse is disabled. */
+    /**
+     * Removes standby worktrees past their time or count limit, or all of them
+     * once reuse is disabled. A worktree that fails to remove is retried by the
+     * next sweep.
+     */
     readonly sweep: Effect.Effect<void>;
   }
 >()("t3/git/WorktreeManager") {}
@@ -67,24 +72,34 @@ const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => false),
   );
 
+  // A removal that fails leaves the worktree queued in the pool, so the next sweep retries it.
   const discard = (cwd: string, path: string) =>
-    git
-      .removeWorktree({ cwd, path, force: true })
-      .pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("failed to remove standby worktree", { path, error }),
+    git.removeWorktree({ cwd, path, force: true }).pipe(
+      Effect.andThen(pool.forget(path)),
+      Effect.catch((error) =>
+        Effect.logWarning("failed to remove standby worktree; will retry", { path, error }).pipe(
+          Effect.andThen(pool.condemn({ path, repoRoot: cwd })),
         ),
-      );
+      ),
+      Effect.catch((error) =>
+        Effect.logWarning("failed to queue standby worktree for removal", { path, error }),
+      ),
+    );
 
-  const sweep = Effect.gen(function* () {
-    const { enabled, maxStandby, standbyHours } = (yield* settings.getSettings).worktreeReuse;
-    const evicted = yield* enabled
-      ? pool.evict({ maxAgeMs: standbyHours * HOUR_MS, maxPerRepo: maxStandby })
-      : pool.evictAll;
-    yield* Effect.forEach(evicted, ({ path, repoRoot }) => discard(repoRoot, path), {
-      discard: true,
-    });
-  }).pipe(Effect.catch((error) => Effect.logWarning("worktree standby sweep failed", { error })));
+  const sweepLock = yield* Semaphore.make(1);
+  const sweep = sweepLock
+    .withPermits(1)(
+      Effect.gen(function* () {
+        const { enabled, maxStandby, standbyHours } = (yield* settings.getSettings).worktreeReuse;
+        const evicted = yield* enabled
+          ? pool.evict({ maxAgeMs: standbyHours * HOUR_MS, maxPerRepo: maxStandby })
+          : pool.evictAll;
+        yield* Effect.forEach(evicted, ({ path, repoRoot }) => discard(repoRoot, path), {
+          discard: true,
+        });
+      }),
+    )
+    .pipe(Effect.catch((error) => Effect.logWarning("worktree standby sweep failed", { error })));
 
   const claimStandby = Effect.fn("WorktreeManager.claimStandby")(function* (
     input: VcsCreateWorktreeInput,

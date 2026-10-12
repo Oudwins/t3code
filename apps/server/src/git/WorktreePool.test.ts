@@ -74,6 +74,42 @@ it.effect("evicts the least recently released worktrees beyond the per-repositor
   }).pipe(Effect.provide(layer)),
 );
 
+it.effect("keeps an evicted worktree queued, and unclaimable, until it is forgotten", () =>
+  Effect.gen(function* () {
+    const pool = yield* WorktreePool.WorktreePool;
+    yield* release("/p/old");
+    yield* release("/p/new");
+
+    const limits = { maxAgeMs: 3_600_000, maxPerRepo: 1 };
+    const stale = { path: "/p/old", repoRoot: "/repos/app" };
+    assert.deepEqual(yield* pool.evict(limits), [stale]);
+    // A removal that failed is offered again by the next eviction.
+    assert.deepEqual(yield* pool.evict(limits), [stale]);
+    assert.deepEqual(yield* pool.claim("/repos/app"), Option.some("/p/new"));
+    assert.deepEqual(yield* pool.claim("/repos/app"), Option.none());
+
+    yield* pool.forget("/p/old");
+    assert.deepEqual(yield* pool.evict(limits), []);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("queues a worktree that is no longer in the pool for removal", () =>
+  Effect.gen(function* () {
+    const pool = yield* WorktreePool.WorktreePool;
+    const claimed = { path: "/p/claimed", repoRoot: "/repos/app" };
+    yield* release(claimed.path);
+    assert.deepEqual(yield* pool.claim("/repos/app"), Option.some(claimed.path));
+
+    yield* pool.condemn(claimed);
+    yield* pool.condemn(claimed);
+    assert.deepEqual(yield* pool.claim("/repos/app"), Option.none());
+    assert.deepEqual(yield* pool.evict({ maxAgeMs: 3_600_000, maxPerRepo: 10 }), [claimed]);
+
+    yield* pool.forget(claimed.path);
+    assert.deepEqual(yield* pool.evict({ maxAgeMs: 3_600_000, maxPerRepo: 10 }), []);
+  }).pipe(Effect.provide(layer)),
+);
+
 it.effect("evicts everything on request", () =>
   Effect.gen(function* () {
     const pool = yield* WorktreePool.WorktreePool;

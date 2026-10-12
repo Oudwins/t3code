@@ -12,9 +12,11 @@ interface StandbyWorktree {
 }
 
 /**
- * Bookkeeping for parked worktrees. A row is the ownership token for its
- * directory: whoever deletes it, a claim or an eviction, is the only one
- * allowed to touch that path. The pool never touches the filesystem.
+ * Bookkeeping for parked worktrees. A claim deletes its row, which makes the
+ * claimer the only one allowed to touch that path. An eviction only marks the
+ * row: it stays, out of reach of claims, until `forget` confirms the directory
+ * is gone, so a removal that fails is retried by the next eviction. The pool
+ * never touches the filesystem.
  */
 export class WorktreePool extends Context.Service<
   WorktreePool,
@@ -22,12 +24,20 @@ export class WorktreePool extends Context.Service<
     readonly release: (worktree: StandbyWorktree) => Effect.Effect<void, SqlError.SqlError>;
     /** Takes the most recently released worktree of the repository. */
     readonly claim: (repoRoot: string) => Effect.Effect<Option.Option<string>, SqlError.SqlError>;
-    /** Takes out worktrees older than `maxAgeMs` or beyond `maxPerRepo` per repository. */
+    /**
+     * Marks worktrees older than `maxAgeMs` or beyond `maxPerRepo` per
+     * repository for removal. Returns everything awaiting removal, including
+     * worktrees an earlier eviction failed to remove.
+     */
     readonly evict: (limits: {
       readonly maxAgeMs: number;
       readonly maxPerRepo: number;
     }) => Effect.Effect<ReadonlyArray<StandbyWorktree>, SqlError.SqlError>;
     readonly evictAll: Effect.Effect<ReadonlyArray<StandbyWorktree>, SqlError.SqlError>;
+    /** Queues a worktree that is no longer in the pool, such as a claimed one that failed to remove. */
+    readonly condemn: (worktree: StandbyWorktree) => Effect.Effect<void, SqlError.SqlError>;
+    /** Drops the row of a worktree whose directory is gone. */
+    readonly forget: (path: string) => Effect.Effect<void, SqlError.SqlError>;
   }
 >()("t3/git/WorktreePool") {}
 
@@ -51,7 +61,7 @@ const make = Effect.gen(function* () {
         DELETE FROM worktree_standby
         WHERE path = (
           SELECT path FROM worktree_standby
-          WHERE repo_root = ${repoRoot}
+          WHERE repo_root = ${repoRoot} AND evicting = 0
           ORDER BY released_at_ms DESC
           LIMIT 1
         )
@@ -61,22 +71,34 @@ const make = Effect.gen(function* () {
     },
   );
 
-  const evictOlderThan = (cutoffMs: number, maxPerRepo: number) =>
-    sql<{ readonly path: string; readonly repo_root: string }>`
-      DELETE FROM worktree_standby
-      WHERE released_at_ms < ${cutoffMs}
-        OR path IN (
-          SELECT path FROM (
-            SELECT path,
-              ROW_NUMBER() OVER (PARTITION BY repo_root ORDER BY released_at_ms DESC) AS slot
-            FROM worktree_standby
+  const evictOlderThan = Effect.fn("WorktreePool.evictOlderThan")(function* (
+    cutoffMs: number,
+    maxPerRepo: number,
+  ) {
+    yield* sql`
+      UPDATE worktree_standby
+      SET evicting = 1
+      WHERE evicting = 0
+        AND (
+          released_at_ms < ${cutoffMs}
+          OR path IN (
+            SELECT path FROM (
+              SELECT path,
+                ROW_NUMBER() OVER (PARTITION BY repo_root ORDER BY released_at_ms DESC) AS slot
+              FROM worktree_standby
+              WHERE evicting = 0
+            )
+            WHERE slot > ${maxPerRepo}
           )
-          WHERE slot > ${maxPerRepo}
         )
-      RETURNING path, repo_root
-    `.pipe(
-      Effect.map((rows) => rows.map(({ path, repo_root }) => ({ path, repoRoot: repo_root }))),
-    );
+    `;
+    const rows = yield* sql<{ readonly path: string; readonly repo_root: string }>`
+      SELECT path, repo_root FROM worktree_standby
+      WHERE evicting = 1
+      ORDER BY released_at_ms
+    `;
+    return rows.map(({ path, repo_root }) => ({ path, repoRoot: repo_root }));
+  });
 
   const evict: WorktreePool["Service"]["evict"] = Effect.fn("WorktreePool.evict")(function* ({
     maxAgeMs,
@@ -88,7 +110,25 @@ const make = Effect.gen(function* () {
 
   const evictAll: WorktreePool["Service"]["evictAll"] = evictOlderThan(Number.MAX_SAFE_INTEGER, 0);
 
-  return WorktreePool.of({ release, claim, evict, evictAll });
+  const condemn: WorktreePool["Service"]["condemn"] = Effect.fn("WorktreePool.condemn")(function* ({
+    path,
+    repoRoot,
+  }) {
+    const now = yield* Clock.currentTimeMillis;
+    yield* sql`
+        INSERT INTO worktree_standby (path, repo_root, released_at_ms, evicting)
+        VALUES (${path}, ${repoRoot}, ${now}, 1)
+        ON CONFLICT (path) DO UPDATE SET evicting = 1
+      `;
+  });
+
+  const forget: WorktreePool["Service"]["forget"] = Effect.fn("WorktreePool.forget")(
+    function* (path) {
+      yield* sql`DELETE FROM worktree_standby WHERE path = ${path}`;
+    },
+  );
+
+  return WorktreePool.of({ release, claim, evict, evictAll, condemn, forget });
 });
 
 export const layer = Layer.effect(WorktreePool, make);

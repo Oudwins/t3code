@@ -8,7 +8,8 @@ export default Effect.gen(function* () {
     CREATE TABLE worktree_standby (
       path TEXT PRIMARY KEY,
       repo_root TEXT NOT NULL,
-      released_at_ms INTEGER NOT NULL
+      released_at_ms INTEGER NOT NULL,
+      evicting INTEGER NOT NULL DEFAULT 0
     )
   `;
   yield* sql`

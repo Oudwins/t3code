@@ -58,7 +58,10 @@ function makeHarness(options: HarnessOptions = {}) {
         ? Effect.fail(gitFailure("parkWorktree"))
         : Effect.succeed({ path: parkedOf(input.path) }),
   );
-  const removeWorktree = vi.fn((_input: VcsRemoveWorktreeInput) => Effect.void);
+  let removalsFail = false;
+  const removeWorktree = vi.fn((_input: VcsRemoveWorktreeInput) =>
+    removalsFail ? Effect.fail(gitFailure("removeWorktree")) : Effect.void,
+  );
 
   const layer = WorktreeManager.layer.pipe(
     Layer.provideMerge(WorktreePool.layer),
@@ -77,7 +80,16 @@ function makeHarness(options: HarnessOptions = {}) {
     ),
   );
 
-  return { layer, createWorktree, reuseWorktree, parkWorktree, removeWorktree };
+  return {
+    layer,
+    createWorktree,
+    reuseWorktree,
+    parkWorktree,
+    removeWorktree,
+    failRemovals: (fail: boolean) => {
+      removalsFail = fail;
+    },
+  };
 }
 
 const makeDir = Effect.gen(function* () {
@@ -288,6 +300,52 @@ it.effect("sweeps worktrees that outlive the standby time", () => {
       [{ cwd: repo, path: parkedOf(stale), force: true }],
     ]);
     assert.deepEqual(yield* standbyPaths, [parkedOf(fresh)]);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("keeps a standby worktree that fails to remove queued and retries it", () => {
+  const harness = makeHarness({ reuse: { maxStandby: 1 } });
+  return Effect.gen(function* () {
+    const manager = yield* WorktreeManager.WorktreeManager;
+    const [first, second] = [yield* makeDir, yield* makeDir];
+
+    yield* release(first);
+    harness.failRemovals(true);
+    yield* release(second);
+    assert.deepEqual(removedPaths(harness), [parkedOf(first)]);
+    assert.deepEqual(yield* standbyPaths, [parkedOf(first), parkedOf(second)]);
+
+    // The failed one is out of the pool: it is never handed to a launch.
+    yield* launch("feature/next");
+    assert.deepEqual(claimedFrom(harness), [parkedOf(second)]);
+
+    yield* manager.sweep;
+    assert.deepEqual(removedPaths(harness), [parkedOf(first), parkedOf(first)]);
+    assert.deepEqual(yield* standbyPaths, [parkedOf(first)]);
+
+    harness.failRemovals(false);
+    yield* manager.sweep;
+    assert.deepEqual(removedPaths(harness), [parkedOf(first), parkedOf(first), parkedOf(first)]);
+    assert.deepEqual(yield* standbyPaths, []);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("queues a claimed worktree that fails both to reuse and to remove", () => {
+  const harness = makeHarness({ reuseFails: true });
+  return Effect.gen(function* () {
+    const manager = yield* WorktreeManager.WorktreeManager;
+    const path = yield* makeDir;
+    yield* release(path);
+
+    harness.failRemovals(true);
+    const result = yield* launch("feature/next");
+    assert.equal(result.worktree.path, "/fresh/feature/next");
+    assert.deepEqual(yield* standbyPaths, [parkedOf(path)]);
+
+    harness.failRemovals(false);
+    yield* manager.sweep;
+    assert.deepEqual(yield* standbyPaths, []);
+    assert.equal(harness.removeWorktree.mock.calls.length, 2);
   }).pipe(Effect.provide(harness.layer));
 });
 
