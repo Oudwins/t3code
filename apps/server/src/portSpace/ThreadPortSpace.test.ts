@@ -7,12 +7,15 @@ import { makeThreadPortSpace, makeThreadSpawnWrapper, urlInPortSpace } from "./T
 
 const wrapped = { command: "helper", args: ["exec"], env: { T3_PORTSPACE_PROLOGUE: "" } };
 
-const stubPortSpaces = (ensure: (threadId: string) => Effect.Effect<void, PortSpaceCommandError>) =>
+const stubPortSpaces = (
+  ensure: (threadId: string) => Effect.Effect<void, PortSpaceCommandError>,
+  hostAddress: Effect.Effect<string, PortSpaceCommandError> = Effect.succeed("10.0.2.2"),
+) =>
   PortSpaces.of({
     capability: Effect.succeed({ available: true }),
     ensure,
     wrapSpawn: () => wrapped,
-    hostAddress: () => Effect.succeed("10.0.2.2"),
+    hostAddress: () => hostAddress,
     listeners: () => Effect.succeed([]),
     release: () => Effect.void,
   });
@@ -85,6 +88,23 @@ describe("ThreadPortSpace.resolve", () => {
     ),
   );
 
+  it.effect("leaves URLs alone when the host address cannot be found", () =>
+    Effect.gen(function* () {
+      const { resolve } = yield* makeThreadPortSpace;
+      const handle = yield* resolve("thread-1");
+      expect(yield* handle!.hostAddress).toBeUndefined();
+    }).pipe(
+      Effect.provideService(
+        PortSpaces,
+        stubPortSpaces(
+          () => Effect.void,
+          Effect.fail(new PortSpaceCommandError({ operation: "hostAddress", detail: "no route" })),
+        ),
+      ),
+      Effect.provide(ServerSettings.layerTest({ enablePortSpaces: true })),
+    ),
+  );
+
   it.effect("hands out nothing when the environment has port spaces off", () =>
     Effect.gen(function* () {
       const { resolve } = yield* makeThreadPortSpace;
@@ -117,5 +137,8 @@ describe("urlInPortSpace", () => {
       "https://example.com/mcp",
     );
     expect(urlInPortSpace("not a url", "192.168.5.2")).toBe("not a url");
+    expect(urlInPortSpace("http://127.0.0.1:4120/mcp", undefined)).toBe(
+      "http://127.0.0.1:4120/mcp",
+    );
   });
 });

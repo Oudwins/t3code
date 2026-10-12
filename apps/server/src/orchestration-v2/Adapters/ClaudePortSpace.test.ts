@@ -2,7 +2,6 @@ import type { Options, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
-import { PortSpaceCommandError } from "../../portSpace/PortSpaces.ts";
 import type { SpawnRewriter, ThreadPortSpaceHandle } from "../../portSpace/ThreadPortSpace.ts";
 import { claudeOptionsInPortSpace, spawnClaudeInPortSpace } from "./ClaudePortSpace.ts";
 
@@ -134,9 +133,7 @@ describe("claudeOptionsInPortSpace", () => {
     Effect.gen(function* () {
       const options = yield* claudeOptionsInPortSpace(
         { mcpServers },
-        handle(
-          Effect.fail(new PortSpaceCommandError({ operation: "hostAddress", detail: "no route" })),
-        ),
+        handle(Effect.succeed(undefined)),
         () => {},
       );
 

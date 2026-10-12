@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ServerSettings from "../serverSettings.ts";
-import { type PortSpaceCommandError, PortSpaces, type PortSpaceSpawn } from "./PortSpaces.ts";
+import { PortSpaces, type PortSpaceSpawn } from "./PortSpaces.ts";
 
 type SpawnInput = Parameters<PortSpaces["Service"]["wrapSpawn"]>[1];
 
@@ -23,8 +23,11 @@ export type SpawnRewriter = (input: SpawnInput) => PortSpaceSpawn;
 
 export interface ThreadPortSpaceHandle {
   readonly rewrite: SpawnRewriter;
-  /** Where the host's loopback is, seen from inside the namespace. */
-  readonly hostAddress: Effect.Effect<string, PortSpaceCommandError>;
+  /**
+   * Where the host's loopback is, seen from inside the namespace, or
+   * `undefined` when it cannot be found: URLs then stay as they are.
+   */
+  readonly hostAddress: Effect.Effect<string | undefined>;
 }
 
 export interface ThreadPortSpaceShape {
@@ -67,7 +70,15 @@ export const makeThreadPortSpace = Effect.gen(function* () {
     }
     return {
       rewrite: (input) => portSpaces.wrapSpawn(threadId, input),
-      hostAddress: portSpaces.hostAddress(threadId),
+      hostAddress: portSpaces.hostAddress(threadId).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("port space host address unavailable, MCP stays on loopback", {
+            threadId,
+            cause: error.message,
+          }),
+        ),
+        Effect.orElseSucceed(() => undefined),
+      ),
     } satisfies ThreadPortSpaceHandle;
   });
   return { resolve } satisfies ThreadPortSpaceShape;
@@ -98,7 +109,8 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
  * loopback, so anything that points at the host's loopback (T3's MCP endpoint)
  * has to go through `hostAddress` instead. Other hosts are left alone.
  */
-export const urlInPortSpace = (url: string, hostAddress: string): string => {
+export const urlInPortSpace = (url: string, hostAddress: string | undefined): string => {
+  if (hostAddress === undefined) return url;
   const parsed = URL.parse(url);
   if (parsed === null || !LOOPBACK_HOSTS.has(parsed.hostname)) return url;
   parsed.hostname = hostAddress;

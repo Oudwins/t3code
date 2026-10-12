@@ -60,16 +60,9 @@ export const spawnClaudeInPortSpace = (
 export const claudeOptionsInPortSpace = Effect.fn("claudeOptionsInPortSpace")(function* <
   O extends Pick<Options, "mcpServers">,
 >(options: O, handle: ThreadPortSpaceHandle, onFailure: (failure: ClaudeSpawnFailure) => void) {
-  const hostAddress = yield* handle.hostAddress.pipe(
-    Effect.tapError((error) =>
-      Effect.logWarning("port space host address unavailable, MCP stays on loopback", {
-        cause: error.message,
-      }),
-    ),
-    Effect.orElseSucceed(() => undefined),
-  );
+  const hostAddress = yield* handle.hostAddress;
   const mcpServers =
-    hostAddress === undefined || options.mcpServers === undefined
+    options.mcpServers === undefined
       ? options.mcpServers
       : Object.fromEntries(
           Object.entries(options.mcpServers).map(([name, config]) => [
