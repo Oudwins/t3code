@@ -8,12 +8,13 @@ import * as Schema from "effect/Schema";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as PortSpaces from "../portSpace/PortSpaces.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 
 export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupError>()(
   "ResourceCleanupError",
   {
-    operation: Schema.Literals(["terminal", "preview", "attachment"]),
+    operation: Schema.Literals(["terminal", "preview", "attachment", "portSpace"]),
     threadId: Schema.optional(Schema.String),
     attachmentId: Schema.optional(Schema.String),
     cause: Schema.Defect(),
@@ -24,6 +25,8 @@ export class ResourceCleanupService extends Context.Reference<{
   readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   /** Closes every preview session of the thread; server browser tabs end with them. */
   readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
+  /** Kills whatever still runs in the thread's port space and deletes the namespace. */
+  readonly releasePortSpace: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
   ) => Effect.Effect<void, ResourceCleanupError>;
@@ -31,6 +34,7 @@ export class ResourceCleanupService extends Context.Reference<{
   defaultValue: () => ({
     cleanupTerminals: () => Effect.void,
     cleanupPreviews: () => Effect.void,
+    releasePortSpace: () => Effect.void,
     cleanupAttachments: () => Effect.void,
   }),
 }) {}
@@ -40,9 +44,20 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const terminals = yield* TerminalManager.TerminalManager;
     const previews = yield* PreviewManager.PreviewManager;
+    const portSpaces = yield* PortSpaces.PortSpaces;
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
     return {
+      // Hosts that never set port spaces up have nothing to release.
+      releasePortSpace: (threadId: string) =>
+        portSpaces.capability.pipe(
+          Effect.flatMap((capability) =>
+            capability.available ? portSpaces.release(ThreadId.make(threadId)) : Effect.void,
+          ),
+          Effect.mapError(
+            (cause) => new ResourceCleanupError({ operation: "portSpace", threadId, cause }),
+          ),
+        ),
       cleanupTerminals: (threadId: string) =>
         terminals
           .close({ threadId, deleteHistory: true })

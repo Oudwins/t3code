@@ -477,6 +477,7 @@ export const layerExecutor: Layer.Layer<
               );
           case "terminal.cleanup":
             return resourceCleanup.cleanupTerminals(effect.threadId).pipe(
+              Effect.andThen(resourceCleanup.releasePortSpace(effect.threadId)),
               Effect.mapError(
                 (cause) =>
                   new OrchestrationEffectExecutionError({

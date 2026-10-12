@@ -34,7 +34,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/process";
-import { expect } from "vite-plus/test";
+import { describe, expect, vi } from "vite-plus/test";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -243,6 +243,7 @@ interface CreateManagerOptions {
   >[0]["resolveProviderInstanceEnvironment"];
   managedBinaryCacheDir?: string;
   managedBinaryToolsDir?: string;
+  wrapSpawn?: Parameters<typeof TerminalManager.makeWithOptions>[0]["wrapSpawn"];
 }
 
 interface ManagerFixture {
@@ -291,6 +292,7 @@ const createManager = (
         ...(options.resolveProviderInstanceEnvironment !== undefined
           ? { resolveProviderInstanceEnvironment: options.resolveProviderInstanceEnvironment }
           : {}),
+        ...(options.wrapSpawn !== undefined ? { wrapSpawn: options.wrapSpawn } : {}),
         ...(options.managedBinaryCacheDir === undefined
           ? {}
           : {
@@ -1810,6 +1812,152 @@ it.layer(
       expect(process.killSignals).toContain("SIGKILL");
     }).pipe(Effect.provide(TestClock.layer())),
   );
+
+  describe("port spaces", () => {
+    const wrapIntoPortSpace =
+      (calls: Array<{ threadId: string; command: string }> = []) =>
+      (
+        threadId: string,
+        input: { readonly command: string; readonly args: ReadonlyArray<string> },
+      ) =>
+        Effect.sync(() => {
+          calls.push({ threadId, command: input.command });
+          return {
+            command: "sudo",
+            args: ["-n", "/helper", "exec", threadId, "--", input.command, ...input.args],
+            env: { PATH: "/usr/bin", T3_PORTSPACE_PROLOGUE: "export A='1'" },
+          };
+        });
+
+    it.effect("spawns the shell through the wrapper with the wrapped environment", () =>
+      Effect.gen(function* () {
+        const calls: Array<{ threadId: string; command: string }> = [];
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          shellResolver: () => "/bin/zsh -l",
+          wrapSpawn: wrapIntoPortSpace(calls),
+        });
+
+        yield* manager.open(openInput());
+
+        expect(calls).toEqual([{ threadId: "thread-1", command: "/bin/zsh" }]);
+        const spawned = ptyAdapter.spawnInputs[0];
+        expect(spawned?.shell).toBe("sudo");
+        expect(spawned?.args?.slice(0, 6)).toEqual([
+          "-n",
+          "/helper",
+          "exec",
+          "thread-1",
+          "--",
+          "/bin/zsh",
+        ]);
+        expect(spawned?.env).toEqual({ PATH: "/usr/bin", T3_PORTSPACE_PROLOGUE: "export A='1'" });
+      }),
+    );
+
+    it.effect("spawns the shell as it is when the thread has no port space", () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          shellResolver: () => "/bin/zsh -l",
+          env: { PATH: "/usr/bin", HOME: "/home/test" },
+          wrapSpawn: () => Effect.succeed(undefined),
+        });
+
+        yield* manager.open(openInput());
+
+        const spawned = ptyAdapter.spawnInputs[0];
+        expect(spawned?.shell).toBe("/bin/zsh");
+        expect(spawned?.env?.HOME).toBe("/home/test");
+      }),
+    );
+
+    it.effect("treats the shell under `sudo` as the terminal's shell", () =>
+      Effect.gen(function* () {
+        // FakePtyAdapter assigns pids from 9000 in open order; each is a `sudo`.
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          wrapSpawn: wrapIntoPortSpace(),
+          processTable: Effect.succeed([
+            { pid: 9000, ppid: 1, name: "sudo" },
+            { pid: 100, ppid: 9000, name: "zsh" },
+            { pid: 9001, ppid: 1, name: "sudo" },
+            { pid: 200, ppid: 9001, name: "zsh" },
+            { pid: 201, ppid: 200, name: "node" },
+          ]),
+        }).pipe(Effect.provide(withHostPlatform("linux")));
+        yield* manager.open(openInput({ terminalId: "idle" }));
+        yield* manager.open(openInput({ terminalId: "dev-server" }));
+
+        yield* manager.closeIdle({ threadId: "thread-1" });
+
+        expect(ptyAdapter.processes.map((process) => process.killed)).toEqual([true, false]);
+      }),
+    );
+
+    it.effect("signals the user's processes under `sudo`, which the server cannot signal", () =>
+      Effect.gen(function* () {
+        const signals: Array<{ pid: number; signal: unknown }> = [];
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            vi.spyOn(globalThis.process, "kill").mockImplementation((pid, signal) => {
+              signals.push({ pid, signal });
+              return true;
+            }),
+          ),
+          (spy) => Effect.sync(() => spy.mockRestore()),
+        );
+        const { manager } = yield* createManager(5, {
+          processKillGraceMs: 10,
+          wrapSpawn: wrapIntoPortSpace(),
+          processTable: Effect.succeed([
+            { pid: 9000, ppid: 1, name: "sudo" },
+            { pid: 100, ppid: 9000, name: "zsh" },
+            { pid: 101, ppid: 100, name: "node" },
+          ]),
+        }).pipe(Effect.provide(withHostPlatform("linux")));
+        yield* manager.open(openInput());
+
+        const closeFiber = yield* manager.close({ threadId: "thread-1" }).pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("10 millis");
+        yield* Fiber.join(closeFiber);
+
+        const forPid = (pid: number) => signals.filter((entry) => entry.pid === pid);
+        expect(forPid(100).map((entry) => entry.signal)).toEqual(["SIGTERM", "SIGKILL"]);
+        expect(forPid(101).map((entry) => entry.signal)).toEqual(["SIGTERM", "SIGKILL"]);
+        expect(forPid(9000)).toEqual([]);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    it.effect("leaves processes outside a port space to the pty's own signals", () =>
+      Effect.gen(function* () {
+        const signals: Array<number> = [];
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            vi.spyOn(globalThis.process, "kill").mockImplementation((pid) => {
+              signals.push(pid);
+              return true;
+            }),
+          ),
+          (spy) => Effect.sync(() => spy.mockRestore()),
+        );
+        const { manager } = yield* createManager(5, {
+          processKillGraceMs: 10,
+          wrapSpawn: () => Effect.succeed(undefined),
+          processTable: Effect.succeed([
+            { pid: 9000, ppid: 1, name: "zsh" },
+            { pid: 100, ppid: 9000, name: "node" },
+          ]),
+        }).pipe(Effect.provide(withHostPlatform("linux")));
+        yield* manager.open(openInput());
+
+        const closeFiber = yield* manager.close({ threadId: "thread-1" }).pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("10 millis");
+        yield* Fiber.join(closeFiber);
+
+        expect(signals).toEqual([]);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+  });
 
   it.effect("publishes closed events when terminals are explicitly closed", () =>
     Effect.gen(function* () {

@@ -77,6 +77,7 @@ import {
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
+import { makeThreadSpawnWrapper, type ThreadSpawnWrapper } from "../portSpace/ThreadPortSpace.ts";
 import * as NativeTelemetryClient from "../resourceTelemetry/NativeTelemetryClient.ts";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
 
@@ -718,10 +719,15 @@ function deriveSubprocessInspectResult(
 ): TerminalSubprocessInspectResult {
   const commandName = (pid: number) =>
     normalizeChildCommandName(snapshot.commandById.get(pid) ?? "", platform);
-  const shellName = commandName(terminalPid);
+  // A terminal in a port space is `sudo`, with the user's shell as its child.
+  const shellPid =
+    commandName(terminalPid) === "sudo"
+      ? (snapshot.childrenByParent.get(terminalPid)?.[0] ?? terminalPid)
+      : terminalPid;
+  const shellName = commandName(shellPid);
   // Async prompt themes fork the shell into a helper that waits with no
   // children of its own. That copy is not a command the user started.
-  const childPid = (snapshot.childrenByParent.get(terminalPid) ?? []).find(
+  const childPid = (snapshot.childrenByParent.get(shellPid) ?? []).find(
     (pid) =>
       shellName === null ||
       commandName(pid) !== shellName ||
@@ -1377,6 +1383,8 @@ interface TerminalManagerOptions {
   managedBinaryCacheDir?: string;
   managedBinaryToolsDir?: string;
   subprocessInspector?: TerminalSubprocessInspector;
+  /** Moves a thread's shells into its port space. Terminals run in the host network without it. */
+  wrapSpawn?: ThreadSpawnWrapper;
   processTable?: Effect.Effect<
     ReadonlyArray<ResourceMonitorProcessTableEntry>,
     TerminalSubprocessCheckError
@@ -1450,6 +1458,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
   const portDiscovery = yield* PortScanner.PortDiscovery;
   const nativeTelemetry = yield* NativeTelemetryClient.NativeTelemetryClient;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const wrapSpawn = yield* makeThreadSpawnWrapper;
   const path = yield* Path.Path;
   const resolveProviderInstanceEnvironment = Effect.fn(
     "terminal.resolveProviderInstanceEnvironment",
@@ -1471,6 +1480,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     ),
     managedBinaryCacheDir: providerStatusCacheDir,
     managedBinaryToolsDir: path.join(baseDir, "tools"),
+    wrapSpawn,
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
     resolveProviderInstanceEnvironment,
@@ -1655,11 +1665,45 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     });
   });
 
+  // The pid of a port space terminal is root-owned `sudo`, which the server may
+  // not signal, so its signals go to the user-owned processes beneath it.
+  const portSpaceProcesses = new WeakSet<PtyAdapter.PtyProcess>();
+
+  const descendantPids = (terminalPid: number) =>
+    fetchProcessTableSnapshot.pipe(
+      Effect.map(({ snapshot }) => {
+        const found: Array<number> = [];
+        const pending = [terminalPid];
+        for (let parent = pending.pop(); parent !== undefined; parent = pending.pop()) {
+          for (const pid of snapshot.childrenByParent.get(parent) ?? []) {
+            found.push(pid);
+            pending.push(pid);
+          }
+        }
+        return found;
+      }),
+      Effect.orElseSucceed((): Array<number> => []),
+    );
+
+  const signalPids = (pids: ReadonlyArray<number>, signal: NodeJS.Signals) =>
+    Effect.sync(() => {
+      for (const pid of pids) {
+        try {
+          globalThis.process.kill(pid, signal);
+        } catch {
+          // Already gone, or not ours.
+        }
+      }
+    });
+
   const runKillEscalation = Effect.fn("terminal.runKillEscalation")(function* (
     process: PtyAdapter.PtyProcess,
     threadId: string,
     terminalId: string,
   ) {
+    const portSpacePids = portSpaceProcesses.has(process) ? yield* descendantPids(process.pid) : [];
+    yield* signalPids(portSpacePids, "SIGTERM");
+
     const terminated = yield* Effect.try({
       try: () => process.kill("SIGTERM"),
       catch: (cause) =>
@@ -1685,6 +1729,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
     yield* Effect.sleep(processKillGraceMs);
 
+    yield* signalPids(portSpacePids, "SIGKILL");
     yield* Effect.try({
       try: () => process.kill("SIGKILL"),
       catch: (cause) =>
@@ -2198,18 +2243,30 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       env: spawnEnv,
       survivesRestart: true,
     });
+    const inPortSpace =
+      options.wrapSpawn === undefined
+        ? undefined
+        : yield* options.wrapSpawn(session.threadId, {
+            command: launch.command,
+            args: launch.args,
+            cwd: session.cwd,
+            env: spawnEnv,
+          });
+
+    const spawn = inPortSpace ?? launch;
     const attempt = yield* Effect.result(
       options.ptyAdapter.spawn({
-        shell: launch.command,
-        ...(launch.args.length > 0 ? { args: [...launch.args] } : {}),
+        shell: spawn.command,
+        ...(spawn.args.length > 0 ? { args: [...spawn.args] } : {}),
         cwd: session.cwd,
         cols: session.cols,
         rows: session.rows,
-        env: spawnEnv,
+        env: inPortSpace?.env ?? spawnEnv,
       }),
     );
 
     if (attempt._tag === "Success") {
+      if (inPortSpace !== undefined) portSpaceProcesses.add(attempt.success);
       return {
         process: attempt.success,
         shellLabel: formatShellCandidate(candidate),

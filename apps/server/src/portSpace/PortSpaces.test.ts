@@ -379,6 +379,46 @@ describe("PortSpaces.ensure and release", () => {
     ),
   );
 
+  it.effect("never run two helper commands for one thread at once", () => {
+    const active = new Map<string, number>();
+    let overlapped = false;
+    let otherThreadOverlapped = false;
+    const runner = ProcessRunner.ProcessRunner.of({
+      run: (input) =>
+        Effect.gen(function* () {
+          const id = input.args.at(-1) ?? "";
+          if ((active.get(id) ?? 0) > 0) overlapped = true;
+          if ([...active].some(([other, count]) => other !== id && count > 0)) {
+            otherThreadOverlapped = true;
+          }
+          active.set(id, (active.get(id) ?? 0) + 1);
+          yield* Effect.yieldNow;
+          yield* Effect.yieldNow;
+          active.set(id, (active.get(id) ?? 1) - 1);
+          return output(0);
+        }),
+    });
+    return Effect.gen(function* () {
+      const portSpaces = yield* PortSpaces.make("environment-a");
+      yield* Effect.all(
+        [
+          portSpaces.ensure(threadA),
+          portSpaces.ensure(threadA),
+          portSpaces.release(threadA),
+          portSpaces.ensure(threadB),
+        ],
+        { concurrency: "unbounded" },
+      );
+      expect(overlapped).toBe(false);
+      // Threads do not wait on each other.
+      expect(otherThreadOverlapped).toBe(true);
+    }).pipe(
+      Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      Effect.provideService(HostProcessPlatform, "linux"),
+      Effect.provideService(HostProcessUserId, 1000),
+    );
+  });
+
   it.effect("report a spawn failure as a port space error", () => {
     const runner = ProcessRunner.ProcessRunner.of({
       run: () =>

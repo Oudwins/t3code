@@ -13,12 +13,15 @@
 
 import type { ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- the namespace id is derived synchronously at spawn.
 import * as NodeCrypto from "node:crypto";
 
+import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import {
   PORT_SPACE_HELPER_PATH,
@@ -211,8 +214,14 @@ export const make = Effect.fn("PortSpaces.make")(function* (environmentId: strin
       : ({ available: true } as const);
   }).pipe(Effect.withSpan("PortSpaces.capability"));
 
+  // Two terminals opening at once must not race `ip netns add`.
+  const threadLocks = yield* KeyedLock.make<string>();
+
   const ensure = Effect.fn("PortSpaces.ensure")(function* (threadId: ThreadId) {
-    yield* runHelper("ensure", ["create", portSpaceId(environmentId, threadId)]);
+    yield* threadLocks.withLock(
+      threadId,
+      runHelper("ensure", ["create", portSpaceId(environmentId, threadId)]),
+    );
   });
 
   const wrapSpawn: PortSpaces["Service"]["wrapSpawn"] = (threadId, input) => {
@@ -255,8 +264,19 @@ export const make = Effect.fn("PortSpaces.make")(function* (environmentId: strin
   });
 
   const release = Effect.fn("PortSpaces.release")(function* (threadId: ThreadId) {
-    yield* runHelper("release", ["delete", portSpaceId(environmentId, threadId)]);
+    yield* threadLocks.withLock(
+      threadId,
+      runHelper("release", ["delete", portSpaceId(environmentId, threadId)]),
+    );
   });
 
   return PortSpaces.of({ capability, ensure, wrapSpawn, hostAddress, listeners, release });
 });
+
+export const layer = Layer.effect(
+  PortSpaces,
+  Effect.gen(function* () {
+    const identity = yield* ServerEnvironmentIdentity;
+    return yield* make(yield* identity.getEnvironmentId);
+  }),
+);
