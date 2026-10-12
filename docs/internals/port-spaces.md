@@ -71,3 +71,28 @@ Spawning through the helper changes what a caller holds:
 - Spawn failure is not detected by the shell-fallback loop: `sudo` starts fine even when the shell
   it was asked to run does not exist.
 - Host-side port discovery does not see a namespace's listeners. Use `PortSpaces.listeners`.
+
+## Providers
+
+A provider is in a port space only if the process that runs its tools is. Each adapter reads
+`ThreadPortSpace` when its instance is built, which is why the live layer is provided to provider
+hydration in `server.ts`. The service is a `Context.Reference`: a layer that forgets to provide it
+silently leaves every provider on the host network, and the types will not tell you.
+
+- **Claude, Pi.** The adapter spawns the agent process itself, so the spawn is rewritten per thread.
+  Tools the agent runs are its children and inherit the namespace.
+- **Grok, Antigravity, ACP registry agents.** `AcpSessionRuntime` takes `rewriteSpawn` and applies it
+  to the agent spawn only, never to health checks or version probes. Client-side terminals the
+  agent asks T3 to run (Devin) are wrapped too.
+- **MCP endpoint.** T3's MCP server listens on the host's loopback. The URL handed to an agent in a
+  namespace is rewritten to `hostAddress`. The in-process MCP-over-ACP bridge stays on the raw host
+  endpoint because T3, not the agent, dials it.
+- **Not isolated: Codex, OpenCode, OpenCode 2, Cursor.** They serve every thread from one shared
+  process, so there is no per-thread process to place. Their threads keep sharing the host's ports.
+  Codex needs per-thread sessions first.
+
+A namespace outlives the server by design: it is released when its thread is archived or deleted,
+and recreated lazily when the thread runs again. A thread deleted while the server was down leaves
+its namespace behind until reboot. There is no startup sweep because the helper is per machine, and
+a dev server and an installed one can share it. Nothing in a namespace can be running by then, since
+every process is `--pdeathsig KILL`.
