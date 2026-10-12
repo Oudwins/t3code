@@ -2345,25 +2345,28 @@ export const make = Effect.gen(function* () {
   const preparePullRequestThread: GitManager["Service"]["preparePullRequestThread"] = Effect.fn(
     "preparePullRequestThread",
   )(function* (input) {
-    const maybeRunSetupScript = (worktreePath: string) => {
+    // A blocking script is awaited and a failure fails the preparation, so the
+    // caller never starts an agent in a checkout whose setup did not finish.
+    const runSetupScript = (worktreePath: string) => {
       if (!input.threadId) {
         return Effect.void;
       }
-      return projectSetupScriptRunner
-        .runForThread({
-          threadId: input.threadId,
-          projectCwd: input.cwd,
-          worktreePath,
-        })
-        .pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("GitManager.preparePullRequestThread setup script failed", {
-              threadId: input.threadId,
-              worktreePath,
-              cause: error,
-            }).pipe(Effect.asVoid),
-          ),
-        );
+      return ProjectSetupScriptRunner.runForThreadSettled(projectSetupScriptRunner, {
+        threadId: input.threadId,
+        projectCwd: input.cwd,
+        worktreePath,
+      }).pipe(
+        Effect.asVoid,
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "preparePullRequestThread",
+              cwd: input.cwd,
+              detail: `The worktree setup script failed: ${cause.message}`,
+              cause,
+            }),
+        ),
+      );
     };
     return yield* Effect.gen(function* () {
       const normalizedReference = normalizePullRequestReference(input.reference);
@@ -2503,7 +2506,7 @@ export const make = Effect.gen(function* () {
         // Only when the checkout actually moved: another thread may be running in this worktree,
         // and re-running the setup script under it buys nothing when the code did not change.
         if (refreshed.moved) {
-          yield* maybeRunSetupScript(worktreePath);
+          yield* runSetupScript(worktreePath);
         }
 
         return {
@@ -2604,8 +2607,17 @@ export const make = Effect.gen(function* () {
           ),
         },
       );
-      yield* ensureExistingWorktreeUpstream(worktree.worktree.path);
-      yield* maybeRunSetupScript(worktree.worktree.path);
+      // The thread is not bound to the worktree until the caller gets it back, so a
+      // failed preparation would otherwise leave a checkout nobody owns. The branch is
+      // the pull request's own and stays.
+      yield* ensureExistingWorktreeUpstream(worktree.worktree.path).pipe(
+        Effect.andThen(runSetupScript(worktree.worktree.path)),
+        Effect.onError(() =>
+          worktreeManager
+            .removeWorktree({ cwd: input.cwd, path: worktree.worktree.path, force: true })
+            .pipe(Effect.ignoreCause({ log: true })),
+        ),
+      );
 
       return {
         pullRequest,

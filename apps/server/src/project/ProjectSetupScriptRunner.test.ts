@@ -1,7 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId, TerminalNotRunningError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -250,3 +251,184 @@ it.effect("ignores the Cursor worktree config when the project has its own actio
     assert.equal(result.status, "no-script");
   }),
 );
+
+/** The runner over a mocked terminal whose script is blocking or async, recording closes. */
+const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFails?: boolean }) => {
+  const open = vi.fn(
+    (openInput: Parameters<TerminalManager.TerminalManager["Service"]["open"]>[0]) =>
+      Effect.succeed({
+        threadId: openInput.threadId,
+        terminalId: openInput.terminalId,
+        cwd: openInput.cwd,
+        worktreePath: openInput.worktreePath ?? null,
+        status: "running" as const,
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        label: "Shell",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      }),
+  );
+  const write = vi.fn(
+    (_input: Parameters<TerminalManager.TerminalManager["Service"]["write"]>[0]) =>
+      input.writeFails
+        ? Effect.fail(
+            new TerminalNotRunningError({ threadId: "thread-1", terminalId: "setup-setup" }),
+          )
+        : Effect.void,
+  );
+  // Recorded when the effect runs, not when it is built.
+  const closeCalls: Array<Parameters<TerminalManager.TerminalManager["Service"]["close"]>[0]> = [];
+  const closeIdleCalls: Array<
+    Parameters<TerminalManager.TerminalManager["Service"]["closeIdle"]>[0]
+  > = [];
+  const close = (input: Parameters<TerminalManager.TerminalManager["Service"]["close"]>[0]) =>
+    Effect.sync(() => {
+      closeCalls.push(input);
+    });
+  const closeIdle = (
+    input: Parameters<TerminalManager.TerminalManager["Service"]["closeIdle"]>[0],
+  ) =>
+    Effect.sync(() => {
+      closeIdleCalls.push(input);
+    });
+  const listeners: Array<Parameters<TerminalManager.TerminalManager["Service"]["subscribe"]>[0]> =
+    [];
+  const subscribe: TerminalManager.TerminalManager["Service"]["subscribe"] = (listener) =>
+    Effect.sync(() => {
+      listeners.push(listener);
+      return () => undefined;
+    });
+  const projectId = ProjectId.make("project:setup-release");
+  const project = {
+    id: projectId,
+    title: "Project",
+    workspaceRoot: "/repo",
+    repositoryIdentity: null,
+    faviconPath: null,
+    defaultModelSelection: null,
+    scripts: [{ ...SETUP_SCRIPT, async: input.async }],
+    createdAt: "2026-06-20T00:00:00.000Z",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+    deletedAt: null,
+  };
+  const layer = ProjectSetupScriptRunner.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () => Effect.succeed(Option.some(project)),
+        }),
+        Layer.mock(TerminalManager.TerminalManager)({
+          open,
+          write,
+          close,
+          closeIdle,
+          subscribe,
+        }),
+        ServerSettings.layerTest(),
+        NodeServices.layer,
+      ),
+    ),
+  );
+  const runInput = {
+    threadId: "thread-1",
+    projectId,
+    worktreePath: "/repo-worktree",
+  };
+  /** Prints the sentinel the run's wrapper would print when the script exits with `exitCode`. */
+  const finishScript = (exitCode: number) =>
+    Effect.gen(function* () {
+      const written = write.mock.calls[0]?.[0].data ?? "";
+      const token = /__T3_SETUP_DONE___([0-9a-f]{32}):/.exec(written)?.[1];
+      assert.isDefined(token);
+      yield* listeners[0]!({
+        type: "output",
+        threadId: "thread-1",
+        terminalId: "setup-setup",
+        data: `__T3_SETUP_DONE___${token}:${exitCode}\n`,
+      });
+    });
+  return { layer, runInput, closeCalls, closeIdleCalls, finishScript };
+};
+
+it.effect("closes a blocking setup terminal, keeping its output, when the script fails", () => {
+  const harness = makeReleaseHarness({ async: false });
+  return Effect.gen(function* () {
+    const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const failure = yield* Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(
+        ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
+      );
+      yield* Effect.yieldNow;
+      yield* harness.finishScript(3);
+      return yield* Fiber.join(fiber);
+    }).pipe(Effect.flip);
+
+    assert.equal(failure._tag, "ProjectSetupScriptFailedError");
+    assert.deepEqual(harness.closeCalls, [{ threadId: "thread-1", terminalId: "setup-setup" }]);
+    assert.equal(harness.closeIdleCalls.length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("only closes an idle blocking setup terminal when the script succeeds", () => {
+  const harness = makeReleaseHarness({ async: false });
+  return Effect.gen(function* () {
+    const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const fiber = yield* Effect.forkChild(
+      ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
+    );
+    yield* Effect.yieldNow;
+    yield* harness.finishScript(0);
+    yield* Fiber.join(fiber);
+
+    assert.equal(harness.closeCalls.length, 0);
+    assert.equal(harness.closeIdleCalls.length, 1);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("leaves an async setup terminal open when the script fails", () => {
+  const harness = makeReleaseHarness({ async: true });
+  return Effect.gen(function* () {
+    const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const result = yield* runner.runForThread({
+      ...harness.runInput,
+      observeCompletion: { releaseOnFailure: true },
+    });
+    assert.equal(result.status, "started");
+    if (result.status !== "started") return;
+    const fiber = yield* Effect.forkChild(result.completion!);
+    yield* Effect.yieldNow;
+    yield* harness.finishScript(1);
+    assert.deepEqual(yield* Fiber.join(fiber), { exitCode: 1, durationMs: 0 });
+
+    assert.equal(harness.closeCalls.length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("closes a blocking setup terminal when the wait is interrupted", () => {
+  const harness = makeReleaseHarness({ async: false });
+  return Effect.gen(function* () {
+    const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const fiber = yield* Effect.forkChild(
+      ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
+    );
+    yield* Effect.yieldNow;
+    yield* Fiber.interrupt(fiber);
+
+    assert.deepEqual(harness.closeCalls, [{ threadId: "thread-1", terminalId: "setup-setup" }]);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("closes the setup terminal when the command cannot be written", () => {
+  const harness = makeReleaseHarness({ async: false, writeFails: true });
+  return Effect.gen(function* () {
+    const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const exit = yield* ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput).pipe(
+      Effect.exit,
+    );
+
+    assert.equal(exit._tag, "Failure");
+    assert.deepEqual(harness.closeCalls, [{ threadId: "thread-1", terminalId: "setup-setup" }]);
+  }).pipe(Effect.provide(harness.layer));
+});

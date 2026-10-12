@@ -74,6 +74,14 @@ export interface ProjectSetupScriptRunnerInput {
    */
   readonly observeCompletion?: {
     readonly onOutputLine?: (line: string) => Effect.Effect<void>;
+    /**
+     * For callers that discard the checkout when setup fails. Closes the
+     * terminal, keeping its output, when a blocking script fails or is
+     * interrupted, or when the command cannot be written. Otherwise the shell
+     * stays open in the deleted directory, and a retry in a recreated checkout
+     * at the same path would reuse it.
+     */
+    readonly releaseOnFailure?: boolean;
   };
 }
 
@@ -438,6 +446,12 @@ export const make = Effect.gen(function* () {
           })
         : undefined;
 
+    const releaseTerminal = terminalManager
+      .close({ threadId: input.threadId, terminalId })
+      .pipe(Effect.ignore);
+    const releaseOnFailure = observe?.releaseOnFailure === true;
+    const releaseOnBlockingFailure = releaseOnFailure && script.async === false;
+
     yield* terminalManager
       .write({
         threadId: input.threadId,
@@ -455,16 +469,21 @@ export const make = Effect.gen(function* () {
         ),
         // Nothing will ever settle the completion if the command never ran.
         Effect.tapError(() => Effect.sync(() => observed?.unsubscribe())),
+        Effect.onError(() => (releaseOnFailure ? releaseTerminal : Effect.void)),
       );
 
     // A clean run leaves only an idle prompt behind; its output stays in the
-    // terminal history. A failed run keeps its shell open for a look.
+    // terminal history. A failed run keeps its shell open for a look, unless
+    // the caller is about to discard the checkout it runs in.
     const completion = observed?.completion.pipe(
       Effect.tap(({ exitCode }) =>
         exitCode === 0
           ? terminalManager.closeIdle({ threadId: input.threadId, terminalId })
-          : Effect.void,
+          : releaseOnBlockingFailure
+            ? releaseTerminal
+            : Effect.void,
       ),
+      releaseOnBlockingFailure ? Effect.onInterrupt(() => releaseTerminal) : (effect) => effect,
     );
 
     return {
@@ -494,7 +513,10 @@ export const runForThreadSettled = Effect.fn("ProjectSetupScriptRunner.runForThr
     runner: ProjectSetupScriptRunner["Service"],
     input: Omit<ProjectSetupScriptRunnerInput, "observeCompletion">,
   ) {
-    const result = yield* runner.runForThread({ ...input, observeCompletion: {} });
+    const result = yield* runner.runForThread({
+      ...input,
+      observeCompletion: { releaseOnFailure: true },
+    });
     if (result.status === "started" && result.completion !== undefined) {
       if (result.async) {
         // Running the completion is what releases its terminal subscription.
