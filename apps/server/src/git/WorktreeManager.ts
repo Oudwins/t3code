@@ -7,6 +7,7 @@ import type {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -102,32 +103,55 @@ const make = Effect.gen(function* () {
     )
     .pipe(Effect.catch((error) => Effect.logWarning("worktree standby sweep failed", { error })));
 
-  const claimStandby = Effect.fn("WorktreeManager.claimStandby")(function* (
+  // A claim deletes its pool row, so from there to the end of the reuse this
+  // fiber alone owns the worktree and must remove it if the reuse does not
+  // finish, including when it is interrupted.
+  const claimStandby = (
     input: VcsCreateWorktreeInput,
     options: GitVcsDriver.CreateWorktreeOptions | undefined,
-  ) {
-    for (;;) {
-      const standbyPath = Option.getOrUndefined(
-        yield* pool.claim(input.cwd).pipe(Effect.orElseSucceed(() => Option.none<string>())),
-      );
-      if (standbyPath === undefined) return null;
-      // Someone may have deleted the directory outside the app.
-      if (!(yield* fileSystem.exists(standbyPath).pipe(Effect.orElseSucceed(() => false)))) {
-        continue;
-      }
-
-      const reused = yield* git
-        .reuseWorktree({ ...input, standbyPath }, options)
-        .pipe(Effect.option);
-      if (Option.isSome(reused)) return reused.value;
-
-      yield* Effect.logWarning("standby worktree could not be reused; removing it", {
-        path: standbyPath,
-      });
-      yield* discard(input.cwd, standbyPath);
-      return null;
-    }
-  });
+  ) =>
+    Effect.acquireUseRelease(
+      Effect.gen(function* () {
+        for (;;) {
+          const standbyPath = Option.getOrUndefined(
+            yield* pool.claim(input.cwd).pipe(Effect.orElseSucceed(() => Option.none<string>())),
+          );
+          if (standbyPath === undefined) return null;
+          // Someone may have deleted the directory outside the app.
+          if (yield* fileSystem.exists(standbyPath).pipe(Effect.orElseSucceed(() => false))) {
+            // `path` follows the checkout: the driver reports its destination once it has moved it.
+            return { path: standbyPath };
+          }
+        }
+      }),
+      (claim) =>
+        claim === null
+          ? Effect.succeed(null)
+          : git
+              .reuseWorktree(
+                { ...input, standbyPath: claim.path },
+                {
+                  ...options,
+                  progress: {
+                    ...options?.progress,
+                    onWorktreeClaimed: (path) => {
+                      claim.path = path;
+                      return options?.progress?.onWorktreeClaimed?.(path) ?? Effect.void;
+                    },
+                  },
+                },
+              )
+              .pipe(Effect.option, Effect.map(Option.getOrNull)),
+      (claim, exit) =>
+        claim === null || (Exit.isSuccess(exit) && exit.value !== null)
+          ? Effect.void
+          : Effect.logWarning("standby worktree could not be reused; removing it", {
+              path: claim.path,
+            }).pipe(
+              // Removing a checkout the failed reuse already removed is a no-op.
+              Effect.andThen(discard(input.cwd, claim.path)),
+            ),
+    ).pipe(Effect.withSpan("WorktreeManager.claimStandby"));
 
   const createWorktree: WorktreeManager["Service"]["createWorktree"] = Effect.fn(
     "WorktreeManager.createWorktree",

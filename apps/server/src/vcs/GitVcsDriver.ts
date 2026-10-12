@@ -125,8 +125,9 @@ export interface ExecuteGitProgress {
  */
 export interface CreateWorktreeProgress {
   /**
-   * Fires once `git worktree add` has created and registered the directory,
-   * before the (possibly long) submodule step. Git refuses an existing path,
+   * Fires once `git worktree add` has created and registered the directory
+   * (or `reuseWorktree` has moved a parked one into place), before the
+   * (possibly long) checkout and submodule steps. Git refuses an existing path,
    * so a path reported here belongs to this call and is safe to remove on
    * cancel.
    */
@@ -364,7 +365,8 @@ export class GitVcsDriver extends Context.Service<
      * `refName` itself) and finished the same way (submodules, merge base).
      * The result looks like a new worktree, except that ignored files such as
      * `node_modules` survive from its previous life. Fails when that path is
-     * taken.
+     * taken. A failure after the move removes the half-claimed checkout where it
+     * can; one that survives is at the path last given to `onWorktreeClaimed`.
      */
     readonly reuseWorktree: (
       input: ReuseWorktreeInput,

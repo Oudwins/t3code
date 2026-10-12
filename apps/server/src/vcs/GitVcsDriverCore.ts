@@ -3477,61 +3477,71 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       });
     }
     yield* ensureParentDirectory("GitVcsDriver.reuseWorktree", input.cwd, worktreePath);
-    yield* runGit("GitVcsDriver.reuseWorktree.move", input.cwd, [
-      "worktree",
-      "move",
-      input.standbyPath,
-      worktreePath,
-    ]);
 
     let createdBranch = false;
-    return yield* Effect.gen(function* () {
-      if (progress?.onWorktreeClaimed) {
-        yield* progress.onWorktreeClaimed(worktreePath);
-      }
-      const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
-      yield* executeGit(
-        "GitVcsDriver.reuseWorktree",
-        worktreePath,
-        [
-          "-c",
-          `checkout.workers=${checkoutWorkers}`,
-          "checkout",
-          // `--` keeps a ref that shares a name with a file from being read as a path.
-          ...(input.newRefName ? ["-b", input.newRefName, input.refName] : [input.refName, "--"]),
-        ],
-        {
-          fallbackErrorDetail: "git checkout failed",
-          timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
-          ...checkoutProgressOptions(progress?.onCheckoutProgress),
-        },
-      );
-      createdBranch = input.newRefName != null;
-      yield* finishWorktree(input, worktreePath, options);
-      return { worktree: { path: worktreePath, refName: targetBranch } };
-    }).pipe(
-      // The caller only knows the parked path, so a half-claimed worktree and
-      // the branch this attempt created are ours to remove. Leaving the branch
-      // would make the fallback `worktree add -b` fail on its name.
-      Effect.onError(() =>
-        runGit("GitVcsDriver.reuseWorktree.remove", input.cwd, [
+    // The move and its notification are one uninterruptible step: once the
+    // checkout has left `standbyPath`, the caller must learn where it went.
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        yield* runGit("GitVcsDriver.reuseWorktree.move", input.cwd, [
           "worktree",
-          "remove",
-          "--force",
+          "move",
+          input.standbyPath,
           worktreePath,
-        ]).pipe(
-          Effect.ignore,
-          Effect.andThen(
-            createdBranch && input.newRefName
-              ? runGit("GitVcsDriver.reuseWorktree.deleteBranch", input.cwd, [
-                  "branch",
-                  "-D",
-                  input.newRefName,
-                ]).pipe(Effect.ignore)
-              : Effect.void,
+        ]);
+        if (progress?.onWorktreeClaimed) {
+          yield* progress.onWorktreeClaimed(worktreePath);
+        }
+        return yield* restore(
+          Effect.gen(function* () {
+            const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
+            yield* executeGit(
+              "GitVcsDriver.reuseWorktree",
+              worktreePath,
+              [
+                "-c",
+                `checkout.workers=${checkoutWorkers}`,
+                "checkout",
+                // `--` keeps a ref that shares a name with a file from being read as a path.
+                ...(input.newRefName
+                  ? ["-b", input.newRefName, input.refName]
+                  : [input.refName, "--"]),
+              ],
+              {
+                fallbackErrorDetail: "git checkout failed",
+                timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
+                ...checkoutProgressOptions(progress?.onCheckoutProgress),
+              },
+            );
+            createdBranch = input.newRefName != null;
+            yield* finishWorktree(input, worktreePath, options);
+            return { worktree: { path: worktreePath, refName: targetBranch } };
+          }),
+        ).pipe(
+          // Best effort: a removal that fails leaves the checkout at
+          // `worktreePath`, which the caller already knows about. Leaving the
+          // created branch would make a fallback `worktree add -b` fail on its name.
+          Effect.onError(() =>
+            runGit("GitVcsDriver.reuseWorktree.remove", input.cwd, [
+              "worktree",
+              "remove",
+              "--force",
+              worktreePath,
+            ]).pipe(
+              Effect.ignore,
+              Effect.andThen(
+                createdBranch && input.newRefName
+                  ? runGit("GitVcsDriver.reuseWorktree.deleteBranch", input.cwd, [
+                      "branch",
+                      "-D",
+                      input.newRefName,
+                    ]).pipe(Effect.ignore)
+                  : Effect.void,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      }),
     );
   });
 
