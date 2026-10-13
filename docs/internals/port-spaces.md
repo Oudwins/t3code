@@ -138,12 +138,16 @@ Those clients still show a thread's servers and can run its terminals, but they 
   per-thread partition (`getPreviewConfig` with `portSpaceThreadId`). `localhost`, `127.0.0.1`, and
   `::1` open a WebSocket to the tunnel route; every other host connects directly; loopback forms the
   tunnel cannot express (`127.0.0.2`, `0.0.0.0`) are refused rather than sent to the client's own
-  machine. Chromium reports every proxy failure as `ERR_SOCKS_CONNECTION_FAILED`, which the
+  machine. A host sent as a name is parsed as a URL host first, so `127.1`, `2130706433`, and
+  `0x7f.0.0.1` route like the addresses they are, and anything that is not a bare host is refused.
+  Tunnel sockets are `ws` duplex streams so each direction waits on its reader. Chromium reports every proxy failure as `ERR_SOCKS_CONNECTION_FAILED`, which the
   unreachable view words as a failure of that thread's port space.
 - The tunnel needs a credential main cannot mint: relay environments sign with a key that lives in
   the renderer. The renderer mints a short-lived WebSocket ticket and hands it to main
-  (`setPortSpaceTunnel`), renewing it while a preview is mounted. The webview waits for the first
-  attempt to settle, and loopback requests fail closed whenever main holds no ticket.
+  (`setPortSpaceTunnel`), renewing it every four minutes while a preview is mounted and retrying a
+  failed attempt within seconds so the gap after the old ticket expires stays short. The webview
+  waits for the first attempt to settle, and loopback requests fail closed whenever main holds no
+  ticket.
 - Chromium has no authentication for SOCKS5, so the listener accepts any local process. While a
   ticket is held, such a process can open tunnels into that thread's namespace as the signed-in user.
 - The partition is ephemeral. It is keyed by thread so two threads never share cookies or storage for
