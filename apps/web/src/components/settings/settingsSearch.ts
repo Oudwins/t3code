@@ -141,6 +141,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "storage-worktree-reuse",
+    title: "Worktree reuse",
+    to: "/settings/storage",
+    scope: "environment-defaults",
+    searchTerms: [
+      "disk storage reuse recycle standby parked pool worktrees limit time hours setup script new thread faster",
+    ],
+  },
+  {
     id: "storage-artifacts",
     title: "Artifacts and logs",
     to: "/settings/storage",

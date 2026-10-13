@@ -1,4 +1,8 @@
-import type { StorageCleanupSettings, WorktreeCleanupRules } from "@t3tools/contracts";
+import type {
+  StorageCleanupSettings,
+  WorktreeCleanupRules,
+  WorktreeReuseSettings,
+} from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { useState } from "react";
 
@@ -21,6 +25,62 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
+function UnitNumberField({
+  label,
+  unit,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  unit: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState<number | null>(value);
+  const [savedValue, setSavedValue] = useState(value);
+  if (savedValue !== value) {
+    setSavedValue(value);
+    setDraft(value);
+  }
+
+  return (
+    <NumberField
+      value={draft}
+      min={min}
+      max={max}
+      step={1}
+      size="sm"
+      className="w-auto"
+      onValueChange={setDraft}
+      onValueCommitted={(next) => {
+        if (next === null) setDraft(value);
+        else {
+          const clamped = Math.min(max, Math.max(min, Math.round(next)));
+          setDraft(clamped);
+          onChange(clamped);
+        }
+      }}
+    >
+      <NumberFieldGroup>
+        <NumberFieldDecrement aria-label={`Decrease ${label}`} />
+        <NumberFieldInput
+          aria-label={`${label} (${unit})`}
+          size={new Intl.NumberFormat().format(draft ?? value).length}
+          className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
+        />
+        <span aria-hidden="true" className="self-center pr-2 text-xs">
+          {unit}
+        </span>
+        <NumberFieldIncrement aria-label={`Increase ${label}`} />
+      </NumberFieldGroup>
+    </NumberField>
+  );
+}
+
 function RetentionControl({
   label,
   value,
@@ -30,46 +90,17 @@ function RetentionControl({
   value: number | null;
   onChange: (value: number | null) => void;
 }) {
-  const [draft, setDraft] = useState(value);
-  const [savedValue, setSavedValue] = useState(value);
-  if (savedValue !== value) {
-    setSavedValue(value);
-    setDraft(value);
-  }
-
   return (
     <div className="flex items-center gap-3">
       {value !== null ? (
-        <NumberField
-          value={draft}
+        <UnitNumberField
+          label={label}
+          unit="days"
+          value={value}
           min={1}
           max={3650}
-          step={1}
-          size="sm"
-          className="w-auto"
-          onValueChange={setDraft}
-          onValueCommitted={(next) => {
-            if (next === null) setDraft(value);
-            else {
-              const days = Math.min(3650, Math.max(1, Math.round(next)));
-              setDraft(days);
-              onChange(days);
-            }
-          }}
-        >
-          <NumberFieldGroup>
-            <NumberFieldDecrement aria-label={`Decrease ${label}`} />
-            <NumberFieldInput
-              aria-label={`${label} in days`}
-              size={new Intl.NumberFormat().format(draft ?? value).length}
-              className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
-            />
-            <span aria-hidden="true" className="self-center pr-2 text-xs">
-              days
-            </span>
-            <NumberFieldIncrement aria-label={`Increase ${label}`} />
-          </NumberFieldGroup>
-        </NumberField>
+          onChange={onChange}
+        />
       ) : (
         <span className="text-xs text-muted-foreground">Off</span>
       )}
@@ -113,6 +144,16 @@ export function StorageSettingsPanel() {
     isProjectScope
       ? updateSettings({ worktreeCleanup: { mode: "custom", rules: patch } })
       : update(patch);
+  const reuse = scopedSettings.worktreeReuse;
+  const reuseStatus = (key: keyof WorktreeReuseSettings) =>
+    targets.some((target) => target.settings.worktreeReuse[key] !== reuse[key])
+      ? "Mixed across selected machines"
+      : undefined;
+  const updateReuse = (patch: Partial<WorktreeReuseSettings>) =>
+    updateSettings({ worktreeReuse: patch });
+  const reuseSupported = connectedEnvironments.every(
+    (environment) => environment.serverConfig?.environment.capabilities.worktreeReuse === true,
+  );
 
   if (
     isProjectScope &&
@@ -265,6 +306,73 @@ export function StorageSettingsPanel() {
           </>
         )}
       </SettingsSection>
+
+      {!isProjectScope && (
+        <SettingsSection id="storage-worktree-reuse" title="Worktree reuse">
+          {reuseSupported ? (
+            <>
+              <SettingsRow
+                title="Reuse worktrees"
+                status={reuseStatus("enabled")}
+                description="Keep removed worktrees on standby and give them to new threads instead of creating new ones. A reused worktree gets a new location, is reset to the requested branch, and the setup script runs again; ignored files such as node_modules are kept."
+                serverScoped
+                settingKeys={["worktreeReuse"]}
+                control={
+                  <Switch
+                    aria-label="Reuse worktrees"
+                    checked={reuse.enabled}
+                    onCheckedChange={(enabled) => updateReuse({ enabled })}
+                  />
+                }
+              />
+              {reuse.enabled && (
+                <>
+                  <SettingsRow
+                    title="Standby limit"
+                    status={reuseStatus("maxStandby")}
+                    description="The most worktrees kept on standby for each repository. The least recently released are removed first."
+                    serverScoped
+                    settingKeys={["worktreeReuse"]}
+                    control={
+                      <UnitNumberField
+                        label="Standby limit"
+                        unit="per repository"
+                        value={reuse.maxStandby}
+                        min={1}
+                        max={50}
+                        onChange={(maxStandby) => updateReuse({ maxStandby })}
+                      />
+                    }
+                  />
+                  <SettingsRow
+                    title="Standby time"
+                    status={reuseStatus("standbyHours")}
+                    description="Remove a worktree from standby after it has gone unused this long."
+                    serverScoped
+                    settingKeys={["worktreeReuse"]}
+                    control={
+                      <UnitNumberField
+                        label="Standby time"
+                        unit="hours"
+                        value={reuse.standbyHours}
+                        min={1}
+                        max={720}
+                        onChange={(standbyHours) => updateReuse({ standbyHours })}
+                      />
+                    }
+                  />
+                </>
+              )}
+            </>
+          ) : (
+            <SettingsRow
+              title="Reuse worktrees"
+              description="Update the selected environments to reuse worktrees."
+              serverScoped
+            />
+          )}
+        </SettingsSection>
+      )}
 
       {!isProjectScope && (
         <SettingsSection id="storage-artifacts" title="Artifacts and logs">

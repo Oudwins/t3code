@@ -78,6 +78,29 @@ describe("restoring V2 settings", () => {
     expect(state.update.mock.calls[0]?.[0][key]).toBe(DEFAULT_UNIFIED_SETTINGS[key]);
   });
 
+  it("restores worktree reuse limits as one changed setting", async () => {
+    state.settings = {
+      ...DEFAULT_UNIFIED_SETTINGS,
+      worktreeReuse: { ...DEFAULT_UNIFIED_SETTINGS.worktreeReuse, maxStandby: 7 },
+    };
+    hooks.beginRender();
+    const restore = useSettingsRestore();
+
+    expect(restore.changedSettingLabels).toEqual(["Worktree reuse"]);
+    await restore.restoreDefaults();
+
+    expect(state.update.mock.calls[0]?.[0].worktreeReuse).toEqual(
+      DEFAULT_UNIFIED_SETTINGS.worktreeReuse,
+    );
+  });
+
+  it("does not report default worktree reuse as changed", () => {
+    state.settings = { ...DEFAULT_UNIFIED_SETTINGS };
+    hooks.beginRender();
+
+    expect(useSettingsRestore().changedSettingLabels).toEqual([]);
+  });
+
   it("does not reset settings after cancellation", async () => {
     state.settings = { ...DEFAULT_UNIFIED_SETTINGS, autoResumeLimitedThreads: true };
     state.confirm.mockResolvedValue(false);
