@@ -47,7 +47,10 @@ const isDomainEvent = Schema.is(OrchestrationV2DomainEvent);
 // stops before any provider work and only the recreate side effects remain.
 async function startAfterMissingWorktree(options?: {
   readonly recreateFails?: boolean;
-  readonly setup?: Effect.Effect<ProjectSetupScriptRunner.ProjectSetupScriptRunnerResult>;
+  readonly setup?: Effect.Effect<
+    ProjectSetupScriptRunner.ProjectSetupScriptRunnerResult,
+    ProjectSetupScriptRunner.ProjectSetupScriptRunnerError
+  >;
   readonly willRetry?: boolean;
 }) {
   const threadId = ThreadId.make("thread_provider_turn_start_projection_failure");
@@ -209,7 +212,7 @@ it("runs the project setup script in a missing worktree it recreated", async () 
     projectCwd: "/tmp/provider-turn-start-project",
     worktreePath: "/tmp/missing-provider-turn-start-worktree",
     project: result.project,
-    observeCompletion: {},
+    observeCompletion: { releaseOnFailure: true },
   });
 });
 
@@ -269,6 +272,65 @@ it("hands a blocking setup failure back to the effect worker while retries remai
   expect(result.removeWorktree).toHaveBeenCalledTimes(1);
   expect(result.writeIfRunCurrent).not.toHaveBeenCalled();
   expect(result.projectionReadCount).toBe(1);
+});
+
+// The terminal never opened or the command never reached it, so setup did not run at all.
+const setupOperationFailure = (operation: "openTerminal" | "writeCommand") =>
+  Effect.fail(
+    new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
+      threadId: "thread_provider_turn_start_projection_failure",
+      worktreePath: "/tmp/missing-provider-turn-start-worktree",
+      operation,
+      cause: new Error(`simulated ${operation} failure`),
+    }),
+  );
+
+const setupOperations = ["openTerminal", "writeCommand"] as const;
+
+it.each(setupOperations)(
+  "fails the run and removes the worktree when setup cannot start (%s)",
+  async (operation) => {
+    const result = await startAfterMissingWorktree({ setup: setupOperationFailure(operation) });
+
+    expect(result.error).toBeUndefined();
+    expect(result.removeWorktree).toHaveBeenCalledWith({
+      cwd: "/tmp/provider-turn-start-project",
+      path: "/tmp/missing-provider-turn-start-worktree",
+      force: true,
+    });
+    expect(result.writeIfRunCurrent).toHaveBeenCalledTimes(1);
+    const [{ events }] = result.writeIfRunCurrent.mock.calls[0] as unknown as [
+      { events: ReadonlyArray<{ type: string; payload: { status: string; title?: string } }> },
+    ];
+    expect(events.find((event) => event.type === "turn-item.updated")?.payload).toMatchObject({
+      status: "failed",
+      title: "Worktree setup failed",
+    });
+    // The provider session is never opened.
+    expect(result.projectionReadCount).toBe(1);
+    expect(result.startRootRun).not.toHaveBeenCalled();
+  },
+);
+
+it.each(setupOperations)(
+  "hands a setup that cannot start back to the effect worker while retries remain (%s)",
+  async (operation) => {
+    const result = await startAfterMissingWorktree({
+      setup: setupOperationFailure(operation),
+      willRetry: true,
+    });
+
+    expect(result.error?._tag).toBe("ProviderTurnStartError");
+    expect(result.removeWorktree).toHaveBeenCalledTimes(1);
+    expect(result.writeIfRunCurrent).not.toHaveBeenCalled();
+    expect(result.projectionReadCount).toBe(1);
+    expect(result.startRootRun).not.toHaveBeenCalled();
+  },
+);
+
+it("lets an interrupted setup interrupt the turn start instead of treating it as a failure", async () => {
+  // An interrupt is neither a typed failure nor a result, so it escapes the start.
+  await expect(startAfterMissingWorktree({ setup: Effect.interrupt })).rejects.toThrow();
 });
 
 it("starts the turn once a blocking setup script succeeds", async () => {

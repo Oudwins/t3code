@@ -532,8 +532,9 @@ export const layer: Layer.Layer<
               );
             // A recreated worktree is as bare as a new one, so it gets the same
             // setup. Like a new thread, the turn waits for a blocking script and
-            // leaves an async one running. A failed blocking script removes the
-            // worktree so the next turn recreates it and runs setup again.
+            // leaves an async one running. Setup that fails, or cannot start,
+            // removes the worktree so the next turn recreates it and runs setup
+            // again; the provider never starts in a checkout that skipped it.
             if (recreated) {
               const setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(
                 setupScripts,
@@ -550,16 +551,7 @@ export const layer: Layer.Layer<
                 },
               ).pipe(
                 Effect.as(undefined),
-                Effect.catchTag("ProjectSetupScriptFailedError", Effect.succeed),
-                Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.failCause(cause)
-                    : Effect.logWarning("provider turn start failed to run worktree setup", {
-                        threadId: projection.thread.id,
-                        worktreePath,
-                        cause: Cause.pretty(cause),
-                      }).pipe(Effect.as(undefined)),
-                ),
+                Effect.catch((error) => Effect.succeed(error)),
               );
               if (setupFailure !== undefined) {
                 yield* worktreeManager
