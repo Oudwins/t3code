@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The SOCKS listener and tunnel sockets are Node streams at the Electron main boundary.
 /** A per-thread SOCKS5 proxy that sends loopback requests through the environment's port tunnel. */
+import { NodeWS } from "@effect/platform-node/NodeSocket";
 import type { Session } from "electron";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -52,6 +53,43 @@ const formatIpv6 = (bytes: Uint8Array): string => {
   return groups.join(":");
 };
 
+/** Expands the canonical IPv6 text a URL parser produces (no embedded dotted quad). */
+const parseIpv6 = (text: string): Uint8Array => {
+  const [head = "", tail] = text.split("::");
+  const groupsOf = (part: string) => (part === "" ? [] : part.split(":"));
+  const front = groupsOf(head);
+  const back = tail === undefined ? [] : groupsOf(tail);
+  const groups = [...front, ...Array<string>(8 - front.length - back.length).fill("0"), ...back];
+  const bytes = new Uint8Array(16);
+  groups.forEach((group, index) => {
+    const value = Number.parseInt(group, 16);
+    bytes[index * 2] = value >> 8;
+    bytes[index * 2 + 1] = value & 0xff;
+  });
+  return bytes;
+};
+
+/**
+ * The host as a URL parser reads it, so `127.1`, `0x7f.1`, `2130706433` and
+ * `::ffff:127.0.0.1` classify as the addresses they are, matching what the
+ * resolver would dial. Anything that is not a bare host is undefined.
+ */
+const canonicalHostname = (host: string): string | undefined => {
+  try {
+    const bare = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+    const url = new URL(`http://${bare}/`);
+    const bareHost =
+      url.username === "" &&
+      url.password === "" &&
+      url.search === "" &&
+      url.hash === "" &&
+      url.pathname === "/";
+    return bareHost ? url.hostname : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /** Loopback belongs to the thread's namespace; forms the tunnel cannot express are refused, never sent to this machine. */
 export const routeTarget = (target: SocksTarget): SocksRoute => {
   if (target.kind === "ipv4") return ipv4Route(target.bytes, target.port);
@@ -66,11 +104,20 @@ export const routeTarget = (target: SocksTarget): SocksRoute => {
     }
     return { kind: "direct", host: formatIpv6(bytes), port };
   }
-  const host = target.host.toLowerCase().replace(/\.$/, "");
-  if (host === "localhost" || host.endsWith(".localhost")) {
-    return { kind: "tunnel", family: "localhost", port: target.port };
+  const { port } = target;
+  const host = canonicalHostname(target.host);
+  if (host === undefined) return { kind: "blocked" };
+  if (host.startsWith("[")) {
+    return routeTarget({ kind: "ipv6", bytes: parseIpv6(host.slice(1, -1)), port });
   }
-  return { kind: "direct", host: target.host, port: target.port };
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    return routeTarget({ kind: "ipv4", bytes: Uint8Array.from(host.split(".").map(Number)), port });
+  }
+  const name = host.replace(/\.$/, "");
+  if (name === "localhost" || name.endsWith(".localhost")) {
+    return { kind: "tunnel", family: "localhost", port };
+  }
+  return { kind: "direct", host, port };
 };
 
 export type SocksParse<T> = "incomplete" | "invalid" | T;
@@ -204,36 +251,27 @@ export const startSocksServer = (connect: SocksConnect): Promise<SocksServer> =>
     });
   });
 
-export interface TunnelHandlers {
-  readonly open: () => void;
-  readonly message: (data: Uint8Array) => void;
-  readonly close: () => void;
-  readonly error: () => void;
-}
+/** Resolves to the open tunnel as a byte stream, or rejects if it cannot be opened. */
+export type TunnelSocketFactory = (url: string) => Promise<NodeStream.Duplex>;
 
-export interface TunnelSocket {
-  readonly send: (data: Uint8Array) => void;
-  readonly close: () => void;
-  readonly isOpen: () => boolean;
-}
-
-export type TunnelSocketFactory = (url: string, handlers: TunnelHandlers) => TunnelSocket;
-
-const webSocketFactory: TunnelSocketFactory = (url, handlers) => {
-  const socket = new WebSocket(url);
-  socket.binaryType = "arraybuffer";
-  socket.addEventListener("open", handlers.open);
-  socket.addEventListener("close", handlers.close);
-  socket.addEventListener("error", handlers.error);
-  socket.addEventListener("message", (event) => {
-    if (event.data instanceof ArrayBuffer) handlers.message(new Uint8Array(event.data));
+/**
+ * One TCP connection in the thread's namespace, carried by one WebSocket. The
+ * `ws` stream pauses the socket while the reader is behind and holds each write
+ * until its frame is flushed, so neither direction buffers without bound; the
+ * built-in WebSocket has no way to pause reads.
+ */
+export const webSocketFactory: TunnelSocketFactory = (url) =>
+  new Promise((resolve, reject) => {
+    const socket = new NodeWS.WebSocket(url, { perMessageDeflate: false });
+    const failed = () => reject(new Error("port tunnel could not be opened"));
+    socket.once("error", failed);
+    socket.once("close", failed);
+    socket.once("open", () => {
+      socket.off("error", failed);
+      socket.off("close", failed);
+      resolve(NodeWS.createWebSocketStream(socket));
+    });
   });
-  return {
-    send: (data) => socket.send(new Uint8Array(data)),
-    close: () => socket.close(),
-    isOpen: () => socket.readyState === WebSocket.OPEN,
-  };
-};
 
 const tunnelUrl = (
   access: PortSpaceTunnelAccess,
@@ -248,43 +286,6 @@ const tunnelUrl = (
   url.searchParams.set("wsTicket", access.ticket);
   return url.toString();
 };
-
-/** One TCP connection in the thread's namespace, carried by one WebSocket. */
-const openTunnel = (url: string, createSocket: TunnelSocketFactory): Promise<NodeStream.Duplex> =>
-  new Promise((resolve, reject) => {
-    let opened = false;
-    const stream: NodeStream.Duplex = new NodeStream.Duplex({
-      read() {},
-      write(chunk: Buffer, _encoding, done) {
-        if (!socket.isOpen()) return done(new Error("port tunnel closed"));
-        socket.send(chunk);
-        done();
-      },
-      final(done) {
-        socket.close();
-        done();
-      },
-      destroy(error, done) {
-        socket.close();
-        done(error);
-      },
-    });
-    const socket = createSocket(url, {
-      open: () => {
-        opened = true;
-        resolve(stream);
-      },
-      message: (data) => void stream.push(Buffer.from(data)),
-      close: () => {
-        if (opened) stream.push(null);
-        else reject(new Error("port tunnel closed before it opened"));
-      },
-      error: () => {
-        if (opened) stream.destroy(new Error("port tunnel failed"));
-        else reject(new Error("port tunnel could not be opened"));
-      },
-    });
-  });
 
 const connectDirect = (host: string, port: number): Promise<NodeStream.Duplex> =>
   new Promise((resolve, reject) => {
@@ -311,10 +312,7 @@ export const makeSocksConnect =
       return (input.connectDirect ?? connectDirect)(route.host, route.port);
     const access = input.access();
     if (access === undefined) throw new Error("the environment's port tunnel is not available");
-    return openTunnel(
-      tunnelUrl(access, input.threadId, route.family, route.port),
-      input.createSocket,
-    );
+    return input.createSocket(tunnelUrl(access, input.threadId, route.family, route.port));
   };
 
 export class PortSpaceProxyError extends Schema.TaggedError<PortSpaceProxyError>()(

@@ -1,9 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Tests drive the proxy over real loopback sockets and WebSockets.
+import { NodeWS } from "@effect/platform-node/NodeSocket";
 import { assert, describe, it } from "@effect/vitest";
 import type { Session } from "electron";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
+import * as NodeEvents from "node:events";
 import * as NodeNet from "node:net";
 import * as NodeStream from "node:stream";
 import { vi } from "vite-plus/test";
@@ -60,6 +62,61 @@ describe("routeTarget", () => {
     }
   });
 
+  it("classifies numeric hosts sent as names like the addresses they are", () => {
+    const domain = (host: string) =>
+      PortSpaceProxy.routeTarget({ kind: "domain", host, port: 3000 });
+    const tunnel = (family: PortSpaceProxy.TunnelFamily): PortSpaceProxy.SocksRoute => ({
+      kind: "tunnel",
+      family,
+      port: 3000,
+    });
+    for (const host of [
+      "127.0.0.1",
+      "127.000.0.1",
+      "127.1",
+      "0x7f.0.0.1",
+      "0177.0.0.1",
+      "2130706433",
+    ]) {
+      assert.deepStrictEqual(domain(host), tunnel(4), host);
+    }
+    for (const host of ["::1", "[::1]", "0:0:0:0:0:0:0:1"]) {
+      assert.deepStrictEqual(domain(host), tunnel(6), host);
+    }
+    for (const host of ["::ffff:127.0.0.1", "[::ffff:7f00:1]"]) {
+      assert.deepStrictEqual(domain(host), tunnel(4), host);
+    }
+    for (const host of [
+      "127.0.0.2",
+      "127.1.2.3",
+      "0x7f000002",
+      "0.0.0.0",
+      "0",
+      "::",
+      "[::ffff:7f00:2]",
+      "[::1%25lo0]",
+      "::1%lo0",
+      "127.0.0.1:80",
+      "user@127.0.0.1",
+      "127.0.0.1/",
+      "",
+    ]) {
+      assert.deepStrictEqual(domain(host), { kind: "blocked" }, host);
+    }
+  });
+
+  it("keeps routable numeric names on the direct path", () => {
+    const domain = (host: string) =>
+      PortSpaceProxy.routeTarget({ kind: "domain", host, port: 443 });
+    assert.deepStrictEqual(domain("10.0.0.5"), { kind: "direct", host: "10.0.0.5", port: 443 });
+    assert.deepStrictEqual(domain("0xa.5"), { kind: "direct", host: "10.0.0.5", port: 443 });
+    assert.deepStrictEqual(domain("2001:db8::1"), {
+      kind: "direct",
+      host: "2001:db8:0:0:0:0:0:1",
+      port: 443,
+    });
+  });
+
   it("leaves everything else on the direct path", () => {
     assert.deepStrictEqual(
       PortSpaceProxy.routeTarget({ kind: "domain", host: "example.com", port: 443 }),
@@ -80,24 +137,22 @@ describe("routeTarget", () => {
 
 interface FakeTunnel {
   readonly url: URL;
-  readonly sent: Buffer[];
 }
 
 /** A tunnel whose far end echoes what it receives, so a round trip proves the route. */
 const makeFakeTunnels = (options?: { readonly failToOpen?: boolean }) => {
   const tunnels: FakeTunnel[] = [];
-  const createSocket: PortSpaceProxy.TunnelSocketFactory = (url, handlers) => {
-    const tunnel: FakeTunnel = { url: new URL(url), sent: [] };
-    tunnels.push(tunnel);
-    queueMicrotask(options?.failToOpen ? handlers.error : handlers.open);
-    return {
-      send: (data) => {
-        tunnel.sent.push(Buffer.from(data));
-        handlers.message(Uint8Array.from(data));
+  const createSocket: PortSpaceProxy.TunnelSocketFactory = (url) => {
+    tunnels.push({ url: new URL(url) });
+    if (options?.failToOpen) return Promise.reject(new Error("port tunnel could not be opened"));
+    const echo: NodeStream.Duplex = new NodeStream.Duplex({
+      read() {},
+      write(chunk: Buffer, _encoding, done) {
+        echo.push(chunk);
+        done();
       },
-      close: () => handlers.close(),
-      isOpen: () => true,
-    };
+    });
+    return Promise.resolve(echo);
   };
   return { tunnels, createSocket };
 };
@@ -198,6 +253,8 @@ describe("SOCKS proxy", () => {
         ["thread-a", domainTarget("localhost", 3000)],
         ["thread-b", domainTarget("localhost", 3000)],
         ["thread-b", addressTarget([127, 0, 0, 1], 8080)],
+        ["thread-b", domainTarget("127.0.0.1", 8081)],
+        ["thread-b", domainTarget("::1", 8082)],
       ] as const) {
         yield* withServer(proxyFor(threadId), async ({ port }) => {
           const { status, socket } = await socksConnect(port, target);
@@ -216,6 +273,8 @@ describe("SOCKS proxy", () => {
           ["thread-a", "localhost", "3000"],
           ["thread-b", "localhost", "3000"],
           ["thread-b", "4", "8080"],
+          ["thread-b", "4", "8081"],
+          ["thread-b", "6", "8082"],
         ],
       );
     }),
@@ -238,6 +297,14 @@ describe("SOCKS proxy", () => {
           addressTarget([127, 0, 0, 1], 3000),
           addressTarget([127, 0, 0, 2], 3000),
           addressTarget([0, 0, 0, 0], 3000),
+          domainTarget("127.0.0.1", 3000),
+          domainTarget("127.1", 3000),
+          domainTarget("0x7f.0.0.1", 3000),
+          domainTarget("127.0.0.2", 3000),
+          domainTarget("0.0.0.0", 3000),
+          domainTarget("::1", 3000),
+          domainTarget("[::1]", 3000),
+          domainTarget("::ffff:127.0.0.1", 3000),
         ]) {
           const { status, socket } = await socksConnect(port, target);
           assert.strictEqual(status, 5);
@@ -327,6 +394,127 @@ describe("SOCKS proxy", () => {
           }),
       );
     }),
+  );
+});
+
+describe("tunnel WebSocket stream", () => {
+  const CHUNK_BYTES = 64 * 1024;
+  const MIB = 1024 * 1024;
+
+  const withTunnelServer = <A>(
+    onConnection: (socket: NodeWS.WebSocket) => void,
+    use: (open: () => Promise<NodeStream.Duplex>) => Promise<A>,
+  ) =>
+    Effect.acquireUseRelease(
+      Effect.promise(
+        () =>
+          new Promise<NodeWS.WebSocketServer>((resolve) => {
+            const server: NodeWS.WebSocketServer = new NodeWS.WebSocketServer(
+              { host: "127.0.0.1", port: 0 },
+              () => resolve(server),
+            );
+            server.on("connection", (socket: NodeWS.WebSocket) => {
+              socket.on("error", () => {});
+              onConnection(socket);
+            });
+          }),
+      ),
+      (server) =>
+        Effect.promise(() => {
+          const address = server.address();
+          const port = typeof address === "object" && address !== null ? address.port : 0;
+          return use(() => PortSpaceProxy.webSocketFactory(`ws://127.0.0.1:${port}/`));
+        }),
+      (server) =>
+        Effect.sync(() => {
+          for (const client of server.clients) client.terminate();
+          server.close();
+        }),
+    );
+
+  /** Takes one chunk per event-loop turn, so a sender that is not held back always outruns it. */
+  const slowSink = (onChunk: (length: number) => void) =>
+    new NodeStream.Writable({
+      highWaterMark: 1,
+      write(chunk: Buffer, _encoding, done) {
+        onChunk(chunk.length);
+        setImmediate(done);
+      },
+    });
+
+  it.effect(
+    "holds the tunnel's reads while the reader is behind",
+    () =>
+      Effect.gen(function* () {
+        const total = 32 * MIB;
+        yield* withTunnelServer(
+          (socket) => {
+            const chunk = Buffer.alloc(CHUNK_BYTES);
+            for (let sent = 0; sent < total; sent += CHUNK_BYTES) socket.send(chunk);
+            socket.close(1000);
+          },
+          async (open) => {
+            const tunnel = await open();
+            try {
+              let received = 0;
+              let deepest = 0;
+              await new Promise<void>((resolve, reject) => {
+                const sink = slowSink((length) => {
+                  received += length;
+                  deepest = Math.max(deepest, tunnel.readableLength);
+                });
+                NodeStream.pipeline(tunnel, sink, (error) => (error ? reject(error) : resolve()));
+              });
+              assert.strictEqual(received, total);
+              assert.isBelow(deepest, MIB);
+            } finally {
+              tunnel.destroy();
+            }
+          },
+        );
+      }),
+    60_000,
+  );
+
+  it.effect(
+    "holds the sender while the far end is behind",
+    () =>
+      Effect.gen(function* () {
+        const total = 128 * MIB;
+        let consumed = 0;
+        let finish!: (error?: Error | null) => void;
+        const farEndDone = new Promise<void>((resolve, reject) => {
+          finish = (error) => (error ? reject(error) : resolve());
+        });
+        yield* withTunnelServer(
+          (socket) => {
+            const sink = slowSink((length) => {
+              consumed += length;
+            });
+            NodeStream.pipeline(NodeWS.createWebSocketStream(socket), sink, finish);
+          },
+          async (open) => {
+            const tunnel = await open();
+            try {
+              let written = 0;
+              let widest = 0;
+              while (written < total) {
+                if (!tunnel.write(Buffer.alloc(CHUNK_BYTES)))
+                  await NodeEvents.EventEmitter.once(tunnel, "drain");
+                written += CHUNK_BYTES;
+                widest = Math.max(widest, written - consumed);
+              }
+              tunnel.end();
+              await farEndDone;
+              assert.strictEqual(consumed, total);
+              assert.isBelow(widest, 32 * MIB);
+            } finally {
+              tunnel.destroy();
+            }
+          },
+        );
+      }),
+    60_000,
   );
 });
 
