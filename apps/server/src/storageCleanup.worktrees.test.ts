@@ -1,12 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  OrchestrationV2AppThreadJson,
   OrchestrationV2ProviderSessionJson,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionId,
   ThreadId,
+  type OrchestrationV2AppThread,
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ThreadShell,
   type TerminalSummary,
@@ -24,6 +26,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as WorktreeManager from "./git/WorktreeManager.ts";
+import * as WorktreePool from "./git/WorktreePool.ts";
 import { CodexProviderCapabilitiesV2 } from "./orchestration-v2/Adapters/CodexAdapterV2.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
@@ -34,6 +38,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
+import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 
 const DAY_MS = 86_400_000;
@@ -43,6 +48,7 @@ const sessionId = ProviderSessionId.make("session-1");
 const encodeSession = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2ProviderSessionJson),
 );
+const encodeThread = Schema.encodeEffect(Schema.fromJsonString(OrchestrationV2AppThreadJson));
 
 const withScratch = <A, E, R>(
   body: (input: { readonly baseDir: string }) => Effect.Effect<A, E, R>,
@@ -59,11 +65,15 @@ const withScratch = <A, E, R>(
 /**
  * Sweeps one 30-day-old thread whose worktree has uncommitted changes, an
  * ignored file, an open terminal and a live provider session, with a 7-day rule.
+ * `busy: false` leaves it clean and idle. A "deleted" thread is no longer in the
+ * shell snapshot and only survives as a tombstoned projection row.
  */
-const sweepBusyWorktree = (options: {
+const sweepWorktree = (options: {
   readonly force: boolean;
-  readonly threadState: "open" | "settled" | "archived";
+  readonly threadState: "open" | "settled" | "archived" | "deleted";
   readonly threadStatus?: OrchestrationV2ThreadShell["status"];
+  readonly busy?: boolean;
+  readonly reuse?: boolean;
 }) =>
   withScratch(({ baseDir }) =>
     Effect.gen(function* () {
@@ -87,8 +97,11 @@ const sweepBusyWorktree = (options: {
       yield* run(repo, "add", ".");
       yield* run(repo, "-c", "commit.gpgsign=false", "commit", "-m", "init");
       yield* run(repo, "worktree", "add", "-b", "feature", worktree);
-      yield* fileSystem.writeFileString(path.join(worktree, "tracked.txt"), "changed\n");
-      yield* fileSystem.writeFileString(path.join(worktree, "secrets.env"), "TOKEN=1\n");
+      const busy = options.busy ?? true;
+      if (busy) {
+        yield* fileSystem.writeFileString(path.join(worktree, "tracked.txt"), "changed\n");
+        yield* fileSystem.writeFileString(path.join(worktree, "secrets.env"), "TOKEN=1\n");
+      }
 
       const nowMs = yield* Clock.currentTimeMillis;
       const now = DateTime.makeUnsafe(nowMs);
@@ -104,14 +117,61 @@ const sweepBusyWorktree = (options: {
         updatedAt: now,
         lastError: null,
       } satisfies OrchestrationV2ProviderSession;
-      yield* sql`
-        INSERT INTO orchestration_v2_projection_provider_sessions
-          (provider_session_id, thread_id, provider, status, model, updated_at, payload_json)
-        VALUES (
-          ${sessionId}, ${threadId}, 'codex', 'ready', NULL, ${DateTime.formatIso(now)},
-          ${yield* encodeSession(session)}
-        )
-      `;
+      if (busy) {
+        yield* sql`
+          INSERT INTO orchestration_v2_projection_provider_sessions
+            (provider_session_id, thread_id, provider, status, model, updated_at, payload_json)
+          VALUES (
+            ${sessionId}, ${threadId}, 'codex', 'ready', NULL, ${DateTime.formatIso(now)},
+            ${yield* encodeSession(session)}
+          )
+        `;
+      }
+      if (options.threadState === "deleted") {
+        const providerInstanceId = ProviderInstanceId.make("codex");
+        const deletedThread = {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId,
+          title: "Deleted thread",
+          providerInstanceId,
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "feature",
+          worktreePath: worktree,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt: DateTime.makeUnsafe(nowMs - 30 * DAY_MS),
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: now,
+        } satisfies OrchestrationV2AppThread;
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            ${projectId}, 'Project', ${repo}, NULL,
+            '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL
+          )
+        `;
+        yield* sql`
+          INSERT INTO orchestration_v2_projection_threads (
+            thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+            created_at, updated_at, archived_at, deleted_at, payload_json
+          ) VALUES (
+            ${threadId}, ${projectId}, 'Deleted thread', 'codex', 'full-access', 'default',
+            ${DateTime.formatIso(deletedThread.createdAt)}, ${DateTime.formatIso(now)}, NULL,
+            ${DateTime.formatIso(now)}, ${yield* encodeThread(deletedThread)}
+          )
+        `;
+      }
 
       // Only the fields cleanup reads.
       const thread = {
@@ -149,6 +209,16 @@ const sweepBusyWorktree = (options: {
       const closedTerminals: Array<string> = [];
       const closedSessions: Array<string> = [];
       const sweepStarted = yield* Deferred.make<void>();
+      // The real manager and pool sit over the real driver; only the repository
+      // routing and status cache they reach for are faked.
+      const gitManager = Layer.mock(GitManager.GitManager)({ invalidateStatus: () => Effect.void });
+      const registry = Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+        resolve: () => Effect.succeed({ kind: "git" } as never),
+      });
+      const manager = WorktreeManager.layer.pipe(
+        Layer.provide(WorktreePool.layer),
+        Layer.provide(registry),
+      );
       const fakes = Layer.mergeAll(
         Layer.mock(ProjectStore.ProjectStoreV2)({
           listShells: () => Effect.succeed([{ id: projectId, workspaceRoot: repo } as never]),
@@ -157,15 +227,21 @@ const sweepBusyWorktree = (options: {
           getShellSnapshot: (snapshotOptions) =>
             Deferred.succeed(sweepStarted, undefined).pipe(
               Effect.as({
-                threads: snapshotOptions?.location === "archive" ? [] : [thread],
+                threads:
+                  options.threadState === "deleted" || snapshotOptions?.location === "archive"
+                    ? []
+                    : [thread],
               } as never),
             ),
         }),
         Layer.mock(Orchestrator.OrchestratorV2)({ streamDomainEvents: Stream.empty }),
-        Layer.mock(GitManager.GitManager)({ invalidateStatus: () => Effect.void }),
+        gitManager,
+        manager,
         Layer.mock(TerminalManager.TerminalManager)({
           subscribeMetadata: (listener) =>
-            listener({ type: "snapshot", terminals: [terminal] }).pipe(Effect.as(() => {})),
+            listener({ type: "snapshot", terminals: busy ? [terminal] : [] }).pipe(
+              Effect.as(() => {}),
+            ),
           close: (input) => Effect.sync(() => closedTerminals.push(`${input.terminalId}`)),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
@@ -178,17 +254,49 @@ const sweepBusyWorktree = (options: {
       yield* Deferred.await(sweepStarted);
       yield* cleanup.drain;
 
+      const removed = !(yield* fileSystem.exists(worktree));
+      const standby = (yield* sql<{ path: string }>`SELECT path FROM worktree_standby`).map(
+        (row) => row.path,
+      );
+      // What is left on disk when the worktree was kept or parked.
+      const kept = standby[0] ?? (removed ? undefined : worktree);
+      const checkout =
+        kept === undefined
+          ? null
+          : {
+              branch: (yield* run(kept, "branch", "--show-current")).stdout.trim(),
+              tracked: yield* fileSystem.readFileString(path.join(kept, "tracked.txt")),
+              ignoredFileKept: yield* fileSystem.exists(path.join(kept, "secrets.env")),
+            };
+      // Resuming the thread recreates its checkout at the path it recorded.
+      const resumedBranch =
+        standby.length === 0
+          ? null
+          : yield* run(repo, "worktree", "add", worktree, "feature").pipe(
+              Effect.andThen(run(worktree, "branch", "--show-current")),
+              Effect.map((result) => result.stdout.trim()),
+            );
       return {
-        removed: !(yield* fileSystem.exists(worktree)),
+        removed,
         branches: (yield* run(repo, "branch", "--list", "feature")).stdout,
         closedTerminals,
         closedSessions,
+        standby,
+        standbyDirectories: standby.map((parked) => path.dirname(parked)),
+        parkedDirectory: path.join(baseDir, "worktrees", "parked-wt"),
+        checkout,
+        resumedBranch,
       };
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
           ServerSettings.layerTest({
-            storageCleanup: { worktreeAfterDays: 7, worktreeForce: options.force },
+            storageCleanup: {
+              worktreeAfterDays: 7,
+              worktreeForce: options.force,
+              worktreeOnDelete: options.threadState === "deleted",
+            },
+            worktreeReuse: { enabled: options.reuse ?? false },
           }),
           GitVcsDriver.layer.pipe(Layer.provide(VcsProcess.layer)),
         ).pipe(
@@ -201,7 +309,7 @@ const sweepBusyWorktree = (options: {
 
 it.live("keeps a worktree with uncommitted changes, ignored files, a terminal or a session", () =>
   Effect.gen(function* () {
-    const result = yield* sweepBusyWorktree({ force: false, threadState: "settled" });
+    const result = yield* sweepWorktree({ force: false, threadState: "settled" });
     assert.isFalse(result.removed);
     assert.deepStrictEqual(result.closedTerminals, []);
     assert.deepStrictEqual(result.closedSessions, []);
@@ -210,7 +318,7 @@ it.live("keeps a worktree with uncommitted changes, ignored files, a terminal or
 
 it.live("force removal stops a settled thread's terminals and sessions and keeps the branch", () =>
   Effect.gen(function* () {
-    const result = yield* sweepBusyWorktree({ force: true, threadState: "settled" });
+    const result = yield* sweepWorktree({ force: true, threadState: "settled" });
     assert.isTrue(result.removed);
     assert.deepStrictEqual(result.closedTerminals, ["terminal-1"]);
     assert.deepStrictEqual(result.closedSessions, [sessionId]);
@@ -220,14 +328,14 @@ it.live("force removal stops a settled thread's terminals and sessions and keeps
 
 it.live("force removal also applies to an archived thread", () =>
   Effect.gen(function* () {
-    const result = yield* sweepBusyWorktree({ force: true, threadState: "archived" });
+    const result = yield* sweepWorktree({ force: true, threadState: "archived" });
     assert.isTrue(result.removed);
   }),
 );
 
 it.live("force removal keeps the worktree of a thread that is neither settled nor archived", () =>
   Effect.gen(function* () {
-    const result = yield* sweepBusyWorktree({ force: true, threadState: "open" });
+    const result = yield* sweepWorktree({ force: true, threadState: "open" });
     assert.isFalse(result.removed);
     assert.deepStrictEqual(result.closedTerminals, []);
     assert.deepStrictEqual(result.closedSessions, []);
@@ -236,7 +344,7 @@ it.live("force removal keeps the worktree of a thread that is neither settled no
 
 it.live("force removal still keeps a worktree whose thread is running", () =>
   Effect.gen(function* () {
-    const result = yield* sweepBusyWorktree({
+    const result = yield* sweepWorktree({
       force: true,
       threadState: "settled",
       threadStatus: "running",
@@ -244,5 +352,65 @@ it.live("force removal still keeps a worktree whose thread is running", () =>
     assert.isFalse(result.removed);
     assert.deepStrictEqual(result.closedTerminals, []);
     assert.deepStrictEqual(result.closedSessions, []);
+  }),
+);
+
+it.live("parks a deleted thread's worktree for reuse instead of removing it", () =>
+  Effect.gen(function* () {
+    const result = yield* sweepWorktree({ force: true, threadState: "deleted", reuse: true });
+    assert.isTrue(result.removed);
+    assert.deepStrictEqual(result.standbyDirectories, [result.parkedDirectory]);
+    // Detached, reset to the commit, ignored files kept, branch kept for the next claim.
+    assert.deepStrictEqual(result.checkout, {
+      branch: "",
+      tracked: "one\n",
+      ignoredFileKept: true,
+    });
+    assert.deepStrictEqual(result.closedTerminals, ["terminal-1"]);
+    assert.deepStrictEqual(result.closedSessions, [sessionId]);
+    assert.include(result.branches, "feature");
+  }),
+);
+
+it.live("parks a clean deleted thread's worktree without forcing", () =>
+  Effect.gen(function* () {
+    const result = yield* sweepWorktree({
+      force: false,
+      threadState: "deleted",
+      reuse: true,
+      busy: false,
+    });
+    assert.isTrue(result.removed);
+    assert.strictEqual(result.standby.length, 1);
+    assert.strictEqual(result.checkout?.branch, "");
+  }),
+);
+
+it.live("removes a deleted thread's worktree when reuse is off", () =>
+  Effect.gen(function* () {
+    const result = yield* sweepWorktree({ force: true, threadState: "deleted", reuse: false });
+    assert.isTrue(result.removed);
+    assert.deepStrictEqual(result.standby, []);
+    assert.include(result.branches, "feature");
+  }),
+);
+
+it.live("parks a live thread's worktree, which resume recreates on its own branch", () =>
+  Effect.gen(function* () {
+    const result = yield* sweepWorktree({ force: true, threadState: "settled", reuse: true });
+    assert.isTrue(result.removed);
+    assert.deepStrictEqual(result.standbyDirectories, [result.parkedDirectory]);
+    assert.strictEqual(result.checkout?.branch, "");
+    assert.deepStrictEqual(result.closedTerminals, ["terminal-1"]);
+    assert.deepStrictEqual(result.closedSessions, [sessionId]);
+    assert.strictEqual(result.resumedBranch, "feature");
+  }),
+);
+
+it.live("keeps a live thread's worktree with uncommitted changes when cleanup may not force", () =>
+  Effect.gen(function* () {
+    const result = yield* sweepWorktree({ force: false, threadState: "settled", reuse: true });
+    assert.isFalse(result.removed);
+    assert.deepStrictEqual(result.standby, []);
   }),
 );
