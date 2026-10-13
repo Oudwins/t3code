@@ -12,6 +12,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as WorktreeManager from "../git/WorktreeManager.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
@@ -166,9 +168,13 @@ const makeRuntimeLayer = (dbPath: string) => {
       }),
     ),
     Layer.provide(
-      Layer.mock(GitWorkflow.GitWorkflowService)({
-        pruneWorktrees: () => Effect.void,
-      }),
+      Layer.mergeAll(
+        Layer.mock(GitWorkflow.GitWorkflowService)({
+          pruneWorktrees: () => Effect.void,
+        }),
+        Layer.mock(WorktreeManager.WorktreeManager)({}),
+        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
+      ),
     ),
     Layer.provide(platform),
   );

@@ -21,7 +21,9 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderAuthService from "../provider/Services/ProviderAuthService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
@@ -89,7 +91,9 @@ export const layer: Layer.Layer<
   | IdAllocator.IdAllocatorV2
   | FileSystem.FileSystem
   | GitWorkflowService.GitWorkflowService
+  | WorktreeManager.WorktreeManager
   | ProjectService.ProjectService
+  | ProjectSetupScriptRunner.ProjectSetupScriptRunner
   | ProviderAuthService.ProviderAuthService
   | ProjectionStore.ProjectionStoreV2
   | ProviderSessionManager.ProviderSessionManagerV2
@@ -103,7 +107,9 @@ export const layer: Layer.Layer<
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
     const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+    const worktreeManager = yield* WorktreeManager.WorktreeManager;
     const projects = yield* ProjectService.ProjectService;
+    const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
     const providerAuth = yield* ProviderAuthService.ProviderAuthService;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
@@ -454,6 +460,39 @@ export const layer: Layer.Layer<
           return;
         }
       }
+      // The last start attempt fails the run with the provider's own reason
+      // instead of leaving it `starting` after the effect gives up. A run that
+      // already left `starting` is not overwritten, and a failed write returns
+      // its error to the effect worker.
+      const settleStartFailure = (failed: {
+        readonly signal: string;
+        readonly title: string;
+        readonly error: Error;
+      }) =>
+        Effect.gen(function* () {
+          const nestedCause = "cause" in failed.error ? failed.error.cause : undefined;
+          yield* settleRunBeforeStart({
+            signal: failed.signal,
+            status: "failed",
+            now: yield* DateTime.now,
+            providerInstanceId: run.providerInstanceId,
+            itemProviderThreadId: providerThread.id,
+            item: {
+              type: "error",
+              title: failed.title,
+              failure: makeProviderFailure({
+                cause: failed.error,
+                message:
+                  nestedCause instanceof Error
+                    ? nestedCause.message
+                    : typeof nestedCause === "string"
+                      ? nestedCause
+                      : failed.error.message,
+                class: "provider_error",
+              }),
+            },
+          });
+        });
       const { worktreePath, branch } = projection.thread;
       if (worktreePath !== null && branch !== null) {
         const exists = yield* fileSystem
@@ -470,24 +509,65 @@ export const layer: Layer.Layer<
               worktreePath,
               branch,
             });
-            yield* gitWorkflow.pruneWorktrees({ cwd: project.workspaceRoot }).pipe(
-              Effect.andThen(
-                gitWorkflow.createWorktree({
-                  cwd: project.workspaceRoot,
-                  refName: branch,
-                  path: worktreePath,
-                }),
-              ),
-              Effect.catchCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.failCause(cause)
-                  : Effect.logWarning("provider turn start failed to recreate worktree", {
-                      threadId: projection.thread.id,
-                      worktreePath,
-                      cause: Cause.pretty(cause),
-                    }),
-              ),
-            );
+            const recreated = yield* gitWorkflow
+              .pruneWorktrees({ cwd: project.workspaceRoot })
+              .pipe(
+                Effect.andThen(
+                  worktreeManager.createWorktree({
+                    cwd: project.workspaceRoot,
+                    refName: branch,
+                    path: worktreePath,
+                  }),
+                ),
+                Effect.as(true),
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.logWarning("provider turn start failed to recreate worktree", {
+                        threadId: projection.thread.id,
+                        worktreePath,
+                        cause: Cause.pretty(cause),
+                      }).pipe(Effect.as(false)),
+                ),
+              );
+            // A recreated worktree is as bare as a new one, so it gets the same
+            // setup. Like a new thread, the turn waits for a blocking script and
+            // leaves an async one running. Setup that fails, or cannot start,
+            // removes the worktree so the next turn recreates it and runs setup
+            // again; the provider never starts in a checkout that skipped it.
+            if (recreated) {
+              const setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(
+                setupScripts,
+                {
+                  threadId: projection.thread.id,
+                  projectId: project.id,
+                  projectCwd: project.workspaceRoot,
+                  worktreePath,
+                  project: {
+                    id: project.id,
+                    workspaceRoot: project.workspaceRoot,
+                    scripts: project.scripts,
+                  },
+                },
+              ).pipe(
+                Effect.as(undefined),
+                Effect.catch((error) => Effect.succeed(error)),
+              );
+              if (setupFailure !== undefined) {
+                yield* worktreeManager
+                  .removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: true })
+                  .pipe(Effect.ignoreCause({ log: true }));
+                if (input.willRetry === true) {
+                  return yield* new ProviderTurnStartError({ runId, cause: setupFailure.message });
+                }
+                yield* settleStartFailure({
+                  signal: "worktree-setup-failure",
+                  title: "Worktree setup failed",
+                  error: setupFailure,
+                });
+                return;
+              }
+            }
           }
         }
       }
@@ -542,39 +622,6 @@ export const layer: Layer.Layer<
               }),
         }),
       );
-      // The last start attempt fails the run with the provider's own reason
-      // instead of leaving it `starting` after the effect gives up. A run that
-      // already left `starting` is not overwritten, and a failed write returns
-      // its error to the effect worker.
-      const settleStartFailure = (failed: {
-        readonly signal: string;
-        readonly title: string;
-        readonly error: Error;
-      }) =>
-        Effect.gen(function* () {
-          const nestedCause = "cause" in failed.error ? failed.error.cause : undefined;
-          yield* settleRunBeforeStart({
-            signal: failed.signal,
-            status: "failed",
-            now: yield* DateTime.now,
-            providerInstanceId: run.providerInstanceId,
-            itemProviderThreadId: providerThread.id,
-            item: {
-              type: "error",
-              title: failed.title,
-              failure: makeProviderFailure({
-                cause: failed.error,
-                message:
-                  nestedCause instanceof Error
-                    ? nestedCause.message
-                    : typeof nestedCause === "string"
-                      ? nestedCause
-                      : failed.error.message,
-                class: "provider_error",
-              }),
-            },
-          });
-        });
       if (sessionResult._tag === "Failure") {
         if (input.willRetry === true) return yield* sessionResult.failure;
         yield* settleStartFailure({
