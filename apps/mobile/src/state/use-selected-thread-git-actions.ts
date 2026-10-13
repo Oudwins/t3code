@@ -272,6 +272,7 @@ export function useSelectedThreadGitActions() {
               refName: nextWorktree.baseBranch,
               newRefName: sanitizeFeatureBranchName(nextWorktree.newBranch),
               path: null,
+              threadId: thread.id,
             },
           });
           if (AsyncResult.isFailure(result)) {

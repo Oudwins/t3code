@@ -44,7 +44,7 @@ const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-driver-test-",
 });
 const TestLayer = GitVcsDriver.layer.pipe(
-  Layer.provide(ServerConfigLayer),
+  Layer.provideMerge(ServerConfigLayer),
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -2976,6 +2976,427 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         const registered = yield* git(cwd, ["worktree", "list", "--porcelain"]);
         assert.notInclude(registered, "stale");
+      }),
+    );
+
+    it.effect("parks a worktree aside and reclaims it as a new worktree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const { worktreesDir } = yield* ServerConfig.ServerConfig;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* writeTextFile(cwd, ".gitignore", "cache.txt\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "ignore cache"]);
+        const baseSha = yield* git(cwd, ["rev-parse", "HEAD"]);
+        const worktreePath = pathService.join(yield* makeTmpDir("git-worktrees-"), "standby");
+
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/first",
+        });
+        yield* writeTextFile(worktreePath, "work.txt", "committed\n");
+        yield* git(worktreePath, ["add", "."]);
+        yield* git(worktreePath, ["commit", "-m", "work"]);
+        yield* writeTextFile(worktreePath, "scratch.txt", "untracked\n");
+        yield* writeTextFile(worktreePath, "README.md", "dirty\n");
+        yield* writeTextFile(worktreePath, "cache.txt", "keep me\n");
+
+        const parked = yield* driver.parkWorktree({
+          cwd,
+          path: worktreePath,
+          discardChanges: true,
+        });
+
+        assert.equal(pathService.dirname(parked.path), pathService.join(worktreesDir, "parked-wt"));
+        assert.equal(yield* fileSystem.exists(worktreePath), false);
+        assert.equal(yield* git(parked.path, ["branch", "--show-current"]), "");
+        assert.equal(yield* git(parked.path, ["status", "--porcelain"]), "");
+        assert.equal(yield* fileSystem.exists(pathService.join(parked.path, "scratch.txt")), false);
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(parked.path, "cache.txt")),
+          "keep me\n",
+        );
+
+        // Parking frees both the path and the branch, so a thread that
+        // recorded them can recreate its checkout on resume.
+        yield* driver.createWorktree({ cwd, path: worktreePath, refName: "feature/first" });
+        assert.equal(yield* git(worktreePath, ["branch", "--show-current"]), "feature/first");
+        assert.equal(yield* fileSystem.exists(pathService.join(worktreePath, "work.txt")), true);
+
+        const claimedPath = pathService.join(
+          worktreesDir,
+          pathService.basename(cwd),
+          "feature-second",
+        );
+        const reused = yield* driver.reuseWorktree({
+          cwd,
+          standbyPath: parked.path,
+          path: null,
+          refName: initialBranch,
+          newRefName: "feature/second",
+          baseRefName: initialBranch,
+        });
+
+        assert.deepEqual(reused, { worktree: { path: claimedPath, refName: "feature/second" } });
+        assert.equal(yield* fileSystem.exists(parked.path), false);
+        assert.notInclude(
+          yield* git(cwd, ["worktree", "list", "--porcelain"]),
+          pathService.basename(parked.path),
+        );
+        assert.equal(yield* git(claimedPath, ["branch", "--show-current"]), "feature/second");
+        assert.equal(yield* git(claimedPath, ["rev-parse", "HEAD"]), baseSha);
+        assert.equal(yield* fileSystem.exists(pathService.join(claimedPath, "work.txt")), false);
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(claimedPath, "cache.txt")),
+          "keep me\n",
+        );
+        assert.equal(
+          yield* git(cwd, ["config", "branch.feature/second.gh-merge-base"]),
+          initialBranch,
+        );
+      }),
+    );
+
+    it.effect("keeps a parked worktree when its new location is taken", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const { worktreesDir } = yield* ServerConfig.ServerConfig;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const worktreePath = pathService.join(yield* makeTmpDir("git-worktrees-"), "standby");
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/first",
+        });
+        const parked = yield* driver.parkWorktree({ cwd, path: worktreePath });
+
+        const taken = pathService.join(worktreesDir, pathService.basename(cwd), "feature-second");
+        yield* fileSystem.makeDirectory(taken, { recursive: true });
+        const error = yield* driver
+          .reuseWorktree({
+            cwd,
+            standbyPath: parked.path,
+            path: null,
+            refName: initialBranch,
+            newRefName: "feature/second",
+          })
+          .pipe(Effect.flip);
+
+        assert.include(error.detail, "already exists");
+        assert.equal(yield* fileSystem.exists(taken), true);
+        assert.equal(yield* git(parked.path, ["status", "--porcelain"]), "");
+        assert.notInclude(yield* driver.listLocalBranchNames(cwd), "feature/second");
+      }),
+    );
+
+    it.effect("reclaims a parked worktree for an existing branch at the chosen path", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const standbyHome = yield* makeTmpDir("git-worktrees-");
+        const parkedFrom = pathService.join(standbyHome, "standby");
+        const chosenPath = pathService.join(standbyHome, "chosen", "resumed");
+
+        yield* driver.createWorktree({
+          cwd,
+          path: parkedFrom,
+          refName: initialBranch,
+          newRefName: "feature/resumed",
+        });
+        yield* writeTextFile(parkedFrom, "work.txt", "committed\n");
+        yield* git(parkedFrom, ["add", "."]);
+        yield* git(parkedFrom, ["commit", "-m", "work"]);
+        const parked = yield* driver.parkWorktree({ cwd, path: parkedFrom });
+        const workSha = yield* git(cwd, ["rev-parse", "feature/resumed"]);
+
+        const reused = yield* driver.reuseWorktree({
+          cwd,
+          standbyPath: parked.path,
+          path: chosenPath,
+          refName: "feature/resumed",
+        });
+
+        assert.deepEqual(reused, { worktree: { path: chosenPath, refName: "feature/resumed" } });
+        assert.equal(yield* fileSystem.exists(parked.path), false);
+        assert.equal(yield* git(chosenPath, ["branch", "--show-current"]), "feature/resumed");
+        assert.equal(yield* git(chosenPath, ["rev-parse", "HEAD"]), workSha);
+        assert.equal(yield* fileSystem.exists(pathService.join(chosenPath, "work.txt")), true);
+      }),
+    );
+
+    it.effect("does not carry an unfinished rebase into a reused worktree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const worktreePath = pathService.join(yield* makeTmpDir("git-worktrees-"), "standby");
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/first",
+        });
+        yield* writeTextFile(worktreePath, "README.md", "feature\n");
+        yield* git(worktreePath, ["commit", "-am", "feature change"]);
+        yield* writeTextFile(cwd, "README.md", "base\n");
+        yield* git(cwd, ["commit", "-am", "base change"]);
+        yield* git(worktreePath, ["rebase", initialBranch]).pipe(Effect.flip);
+        const rebaseState = (checkout: string) =>
+          git(checkout, ["rev-parse", "--git-path", "rebase-merge"]).pipe(
+            Effect.flatMap((stateDir) =>
+              fileSystem.exists(pathService.resolve(checkout, stateDir)),
+            ),
+          );
+        assert.equal(yield* rebaseState(worktreePath), true);
+
+        const parked = yield* driver.parkWorktree({
+          cwd,
+          path: worktreePath,
+          discardChanges: true,
+        });
+        const { worktree } = yield* driver.reuseWorktree({
+          cwd,
+          standbyPath: parked.path,
+          path: null,
+          refName: initialBranch,
+          newRefName: "feature/second",
+        });
+
+        assert.equal(yield* rebaseState(worktree.path), false);
+        assert.equal(yield* git(worktree.path, ["branch", "--show-current"]), "feature/second");
+        // Aborting would otherwise switch the checkout back to the previous thread's branch.
+        yield* git(worktree.path, ["rebase", "--abort"]).pipe(Effect.flip);
+        assert.equal(yield* git(worktree.path, ["branch", "--show-current"]), "feature/second");
+      }),
+    );
+
+    it.effect("does not carry an untracked nested repository into a reused worktree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const worktreePath = pathService.join(yield* makeTmpDir("git-worktrees-"), "standby");
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/first",
+        });
+        const nested = pathService.join(worktreePath, "previous-repo");
+        yield* fileSystem.makeDirectory(nested);
+        yield* git(nested, ["init"]);
+        yield* writeTextFile(nested, "notes.txt", "from the previous thread\n");
+
+        const refused = yield* driver.parkWorktree({ cwd, path: worktreePath }).pipe(Effect.flip);
+        assert.equal(refused.detail, "worktree has uncommitted changes");
+        assert.equal(yield* fileSystem.exists(nested), true);
+
+        const parked = yield* driver.parkWorktree({
+          cwd,
+          path: worktreePath,
+          discardChanges: true,
+        });
+        const { worktree } = yield* driver.reuseWorktree({
+          cwd,
+          standbyPath: parked.path,
+          path: null,
+          refName: initialBranch,
+          newRefName: "feature/second",
+        });
+
+        assert.equal(yield* git(worktree.path, ["status", "--porcelain"]), "");
+        assert.equal(
+          yield* fileSystem.exists(pathService.join(worktree.path, "previous-repo")),
+          false,
+        );
+      }),
+    );
+
+    it.effect("removes the branch a failed reuse created so the fallback can create it", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const standbyHome = yield* makeTmpDir("git-worktrees-");
+        const park = (name: string) =>
+          Effect.gen(function* () {
+            const worktreePath = pathService.join(standbyHome, name);
+            yield* driver.createWorktree({
+              cwd,
+              path: worktreePath,
+              refName: initialBranch,
+              newRefName: `feature/${name}`,
+            });
+            return yield* driver.parkWorktree({ cwd, path: worktreePath });
+          });
+        const request = (standbyPath: string, newRefName: string) => ({
+          cwd,
+          standbyPath,
+          path: pathService.join(standbyHome, "claimed", newRefName),
+          refName: initialBranch,
+          newRefName,
+          baseRefName: initialBranch,
+        });
+
+        // The merge-base config is written after the checkout, so a locked config fails the reuse late.
+        const parked = yield* park("first");
+        const lock = pathService.join(cwd, ".git", "config.lock");
+        yield* fileSystem.writeFileString(lock, "");
+        yield* driver.reuseWorktree(request(parked.path, "feature/second")).pipe(Effect.flip);
+        yield* fileSystem.remove(lock);
+
+        assert.equal(yield* fileSystem.exists(parked.path), false);
+        assert.notInclude(yield* driver.listLocalBranchNames(cwd), "feature/second");
+        yield* driver.createWorktree({
+          cwd,
+          path: pathService.join(standbyHome, "fallback"),
+          refName: initialBranch,
+          newRefName: "feature/second",
+        });
+
+        // A branch that was already there is not ours to delete.
+        const another = yield* park("another");
+        yield* git(cwd, ["branch", "feature/existing"]);
+        yield* driver.reuseWorktree(request(another.path, "feature/existing")).pipe(Effect.flip);
+        assert.include(yield* driver.listLocalBranchNames(cwd), "feature/existing");
+      }),
+    );
+
+    it.effect("leaves a worktree with submodules in place when git cannot move it", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+
+        // See "checks out submodules in a new worktree" for why the env is set.
+        const previousAllowedProtocol = process.env.GIT_ALLOW_PROTOCOL;
+        process.env.GIT_ALLOW_PROTOCOL = "file";
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (previousAllowedProtocol === undefined) {
+              delete process.env.GIT_ALLOW_PROTOCOL;
+            } else {
+              process.env.GIT_ALLOW_PROTOCOL = previousAllowedProtocol;
+            }
+          }),
+        );
+
+        const submoduleRepo = yield* makeTmpDir("git-submodule-");
+        yield* initRepoWithCommit(submoduleRepo);
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["submodule", "add", submoduleRepo, "shared"]);
+        yield* git(cwd, ["commit", "-m", "add submodule"]);
+        const worktreePath = pathService.join(yield* makeTmpDir("git-worktrees-"), "standby");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/submodules",
+        });
+        yield* writeTextFile(worktreePath, "scratch.txt", "untracked\n");
+
+        yield* driver
+          .parkWorktree({ cwd, path: worktreePath, discardChanges: true })
+          .pipe(Effect.flip);
+
+        assert.equal(yield* git(worktreePath, ["branch", "--show-current"]), "feature/submodules");
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(worktreePath, "scratch.txt")),
+          "untracked\n",
+        );
+      }),
+    );
+
+    it.effect("parks a clean worktree but keeps uncommitted work unless told to discard it", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* writeTextFile(cwd, ".gitignore", "cache.txt\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "ignore cache"]);
+        const worktreePath = pathService.join(yield* makeTmpDir("git-worktrees-"), "standby");
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/first",
+        });
+
+        yield* writeTextFile(worktreePath, "scratch.txt", "untracked\n");
+        const untracked = yield* driver.parkWorktree({ cwd, path: worktreePath }).pipe(Effect.flip);
+        assert.equal(untracked.detail, "worktree has uncommitted changes");
+        yield* fileSystem.remove(pathService.join(worktreePath, "scratch.txt"));
+
+        yield* writeTextFile(worktreePath, "README.md", "dirty\n");
+        const modified = yield* driver.parkWorktree({ cwd, path: worktreePath }).pipe(Effect.flip);
+        assert.equal(modified.detail, "worktree has uncommitted changes");
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(worktreePath, "README.md")),
+          "dirty\n",
+        );
+        assert.equal(yield* git(worktreePath, ["branch", "--show-current"]), "feature/first");
+        yield* git(worktreePath, ["checkout", "--", "README.md"]);
+
+        // Ignored files such as node_modules do not make a worktree dirty.
+        yield* writeTextFile(worktreePath, "cache.txt", "keep me\n");
+        const parked = yield* driver.parkWorktree({ cwd, path: worktreePath });
+        assert.equal(yield* git(parked.path, ["branch", "--show-current"]), "");
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(parked.path, "cache.txt")),
+          "keep me\n",
+        );
+      }),
+    );
+
+    it.effect("refuses to park the main checkout or another repository's worktree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const other = yield* makeTmpDir();
+        const { initialBranch: otherBranch } = yield* initRepoWithCommit(other);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const notLinked = "path is not a linked worktree of this repository";
+
+        yield* writeTextFile(cwd, "mine.txt", "uncommitted\n");
+        const mainError = yield* driver.parkWorktree({ cwd, path: cwd }).pipe(Effect.flip);
+        assert.equal(mainError.detail, notLinked);
+        assert.equal(yield* fileSystem.exists(pathService.join(cwd, "mine.txt")), true);
+
+        const foreign = pathService.join(yield* makeTmpDir("git-worktrees-"), "foreign");
+        yield* driver.createWorktree({
+          cwd: other,
+          path: foreign,
+          refName: otherBranch,
+          newRefName: "feature/foreign",
+        });
+        yield* writeTextFile(foreign, "theirs.txt", "uncommitted\n");
+        const foreignError = yield* driver.parkWorktree({ cwd, path: foreign }).pipe(Effect.flip);
+        assert.equal(foreignError.detail, notLinked);
+        assert.equal(yield* fileSystem.exists(pathService.join(foreign, "theirs.txt")), true);
       }),
     );
   });

@@ -5,8 +5,11 @@ import * as NodeChildProcess from "node:child_process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -41,6 +44,7 @@ import { decodeGitHubPullRequestListJson } from "../sourceControl/gitHubPullRequ
 import * as GitLabCli from "../sourceControl/GitLabCli.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceControlProvider.ts";
 import * as GitLabSourceControlProvider from "../sourceControl/GitLabSourceControlProvider.ts";
@@ -58,6 +62,8 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitManager from "./GitManager.ts";
+import * as WorktreeManager from "./WorktreeManager.ts";
+import * as WorktreePool from "./WorktreePool.ts";
 
 const encodeCliJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeForgejoPullRequest = Schema.decodeEffect(ForgejoPullRequestSchema);
@@ -264,6 +270,22 @@ function createBareRemote(): Effect.Effect<
     const remoteDir = yield* makeTempDir("t3code-git-remote-");
     yield* runGit(remoteDir, ["init", "--bare"]);
     return remoteDir;
+  });
+}
+
+/** A pushed PR branch that `refs/pull/<n>/head` also names, with the repo back on main. */
+function seedPullRequestBranch(repoDir: string, branch: string, prNumber: number) {
+  return Effect.gen(function* () {
+    const remoteDir = yield* createBareRemote();
+    yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+    yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+    yield* runGit(repoDir, ["checkout", "-b", branch]);
+    NodeFS.writeFileSync(NodePath.join(repoDir, "pr-file.txt"), `${branch}\n`);
+    yield* runGit(repoDir, ["add", "pr-file.txt"]);
+    yield* runGit(repoDir, ["commit", "-m", `PR branch ${branch}`]);
+    yield* runGit(repoDir, ["push", "-u", "origin", branch]);
+    yield* runGit(repoDir, ["push", "origin", `HEAD:refs/pull/${prNumber}/head`]);
+    yield* runGit(repoDir, ["checkout", "main"]);
   });
 }
 
@@ -728,20 +750,28 @@ function makeManager(input?: {
     ),
   );
 
-  const managerLayer = Layer.mergeAll(
-    Layer.succeed(TextGeneration.TextGeneration, textGeneration),
-    Layer.mock(ProviderRegistry.ProviderRegistry)({
-      getProviders: Effect.succeed([]),
-    }),
-    Layer.succeed(
-      ProjectSetupScriptRunner.ProjectSetupScriptRunner,
-      input?.setupScriptRunner ?? {
-        runForThread: () => Effect.succeed({ status: "no-script" as const }),
-      },
+  const managerLayer = WorktreeManager.layer.pipe(
+    Layer.provide(WorktreePool.layer),
+    Layer.provide(VcsDriverRegistry.layer),
+    Layer.provideMerge(
+      Layer.mergeAll(
+        Layer.succeed(TextGeneration.TextGeneration, textGeneration),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([]),
+        }),
+        Layer.succeed(
+          ProjectSetupScriptRunner.ProjectSetupScriptRunner,
+          input?.setupScriptRunner ?? {
+            runForThread: () => Effect.succeed({ status: "no-script" as const }),
+          },
+        ),
+        vcsDriverLayer,
+        serverSettingsLayer,
+      ),
     ),
-    vcsDriverLayer,
-    serverSettingsLayer,
-  ).pipe(Layer.provideMerge(sourceControlRegistryLayer), Layer.provideMerge(NodeServices.layer));
+    Layer.provideMerge(sourceControlRegistryLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
   // Built into the test's scope: the manager reads these stores after this returns.
   const storesLayer = Layer.merge(ProjectionStore.layer, ProjectStore.layer).pipe(
     Layer.provideMerge(SqlitePersistenceMemory),
@@ -752,11 +782,13 @@ function makeManager(input?: {
     if (input?.seed !== undefined) {
       yield* input.seed.pipe(Effect.provideContext(stores), Effect.orDie);
     }
+    const services = yield* Layer.build(managerLayer).pipe(Effect.provideContext(stores));
     const manager = yield* GitManager.make.pipe(
-      Effect.provide(managerLayer),
+      Effect.provideContext(services),
       Effect.provideContext(stores),
     );
-    return { manager, ghCalls };
+    const worktreeManager = Context.get(services, WorktreeManager.WorktreeManager);
+    return { manager, worktreeManager, ghCalls };
   });
 }
 
@@ -4759,6 +4791,295 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("prepares a pull request thread in a standby worktree when reuse is on", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/pr-reuse"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "reuse.txt"), "reuse\n");
+      yield* runGit(repoDir, ["add", "reuse.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "PR reuse branch"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-reuse"]);
+      yield* runGit(repoDir, ["push", "origin", "HEAD:refs/pull/78/head"]);
+      yield* runGit(repoDir, ["checkout", "main"]);
+
+      const { manager, worktreeManager } = yield* makeManager({
+        serverSettings: { worktreeReuse: { enabled: true } },
+        ghScenario: {
+          pullRequest: {
+            number: 78,
+            title: "Reuse PR",
+            url: "https://github.com/pingdotgg/codething-mvp/pull/78",
+            baseRefName: "main",
+            headRefName: "feature/pr-reuse",
+            state: "open",
+          },
+        },
+      });
+
+      const previous = NodePath.join(yield* makeTempDir("t3code-git-manager-"), "previous");
+      yield* runGit(repoDir, ["worktree", "add", "-b", "feature/previous", previous, "main"]);
+      yield* worktreeManager.removeWorktree({
+        cwd: repoDir,
+        path: previous,
+        force: true,
+        reuse: true,
+      });
+      const listWorktrees = runGit(repoDir, ["worktree", "list", "--porcelain"]).pipe(
+        Effect.map((result) =>
+          result.stdout
+            .split("\n")
+            .filter((line) => line.startsWith("worktree "))
+            .map((line) => line.slice("worktree ".length)),
+        ),
+      );
+      const parked = (yield* listWorktrees).filter((path) => path.includes("parked-wt"));
+      expect(parked).toHaveLength(1);
+
+      const result = yield* preparePullRequestThread(manager, {
+        cwd: repoDir,
+        reference: "78",
+        mode: "worktree",
+      });
+
+      expect(result.branch).toBe("feature/pr-reuse");
+      expect(NodeFS.existsSync(parked[0] as string)).toBe(false);
+      // The checkout came from the parked worktree, so git still tracks a single linked worktree.
+      const worktrees = yield* listWorktrees;
+      expect(worktrees).toHaveLength(2);
+      expect(
+        worktrees.some((path) => path.endsWith(NodePath.basename(result.worktreePath as string))),
+      ).toBe(true);
+      const worktreeBranch = (yield* runGit(result.worktreePath as string, [
+        "branch",
+        "--show-current",
+      ])).stdout.trim();
+      expect(worktreeBranch).toBe("feature/pr-reuse");
+    }),
+  );
+
+  it.effect("runs the setup script in fresh and reused worktrees created for a thread", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const setupCalls: ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput[] = [];
+      const { manager, worktreeManager } = yield* makeManager({
+        serverSettings: { worktreeReuse: { enabled: true } },
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.sync(() => {
+              setupCalls.push(setupInput);
+              return { status: "no-script" as const };
+            }),
+        },
+      });
+
+      const fresh = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/thread-fresh",
+        path: null,
+        threadId: asThreadId("thread-fresh"),
+      });
+
+      const previous = NodePath.join(yield* makeTempDir("t3code-git-manager-"), "previous");
+      yield* runGit(repoDir, ["worktree", "add", "-b", "feature/previous", previous, "main"]);
+      yield* worktreeManager.removeWorktree({
+        cwd: repoDir,
+        path: previous,
+        force: true,
+        reuse: true,
+      });
+      const reused = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/thread-reused",
+        path: null,
+        threadId: asThreadId("thread-reused"),
+      });
+
+      const worktreeRoots = (yield* runGit(repoDir, ["worktree", "list", "--porcelain"])).stdout
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "));
+      expect(worktreeRoots.some((line) => line.includes("parked-wt"))).toBe(false);
+      expect(setupCalls).toEqual([
+        {
+          threadId: "thread-fresh",
+          projectCwd: repoDir,
+          worktreePath: fresh.worktree.path,
+          observeCompletion: { releaseOnFailure: true },
+        },
+        {
+          threadId: "thread-reused",
+          projectCwd: repoDir,
+          worktreePath: reused.worktree.path,
+          observeCompletion: { releaseOnFailure: true },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("does not run a setup script when no thread is given", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const setupCalls: ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput[] = [];
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.sync(() => {
+              setupCalls.push(setupInput);
+              return { status: "no-script" as const };
+            }),
+        },
+      });
+
+      const created = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/no-thread",
+        path: null,
+      });
+
+      expect(NodeFS.existsSync(created.worktree.path)).toBe(true);
+      expect(setupCalls).toEqual([]);
+    }),
+  );
+
+  it.effect("returns before an async setup script finishes and still drains its completion", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const gate = yield* Deferred.make<void>();
+      const drained = yield* Deferred.make<void>();
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Setup",
+              scriptCommand: "true",
+              terminalId: "setup-terminal",
+              cwd: setupInput.worktreePath,
+              async: true,
+              completion: Deferred.await(gate).pipe(
+                Effect.andThen(Deferred.succeed(drained, undefined)),
+                Effect.as({ exitCode: 0, durationMs: 1 }),
+              ),
+            }),
+        },
+      });
+
+      const created = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/async-setup",
+        path: null,
+        threadId: asThreadId("thread-async"),
+      });
+
+      // The gate is still closed, so the setup script was not waited on.
+      expect(NodeFS.existsSync(created.worktree.path)).toBe(true);
+      yield* Deferred.succeed(gate, undefined);
+      yield* Deferred.await(drained);
+    }),
+  );
+
+  it.effect("waits for a blocking setup script and keeps the worktree when it succeeds", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      const finished = yield* Deferred.make<void>();
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Setup",
+              scriptCommand: "true",
+              terminalId: "setup-terminal",
+              cwd: setupInput.worktreePath,
+              async: false,
+              completion: Deferred.succeed(finished, undefined).pipe(
+                Effect.as({ exitCode: 0, durationMs: 1 }),
+              ),
+            }),
+        },
+      });
+
+      const created = yield* manager.createThreadWorktree({
+        cwd: repoDir,
+        refName: "main",
+        newRefName: "t3code/blocking-setup",
+        path: null,
+        threadId: asThreadId("thread-blocking"),
+      });
+
+      expect(yield* Deferred.isDone(finished)).toBe(true);
+      expect(NodeFS.existsSync(created.worktree.path)).toBe(true);
+    }),
+  );
+
+  it.effect("removes the worktree and its new branch when a blocking setup script fails", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+
+      let worktreePath: string | undefined;
+      const { manager } = yield* makeManager({
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.sync(() => {
+              worktreePath = setupInput.worktreePath;
+              return {
+                status: "started" as const,
+                scriptId: "setup",
+                scriptName: "Install",
+                scriptCommand: "exit 3",
+                terminalId: "setup-terminal",
+                cwd: setupInput.worktreePath,
+                async: false,
+                completion: Effect.succeed({ exitCode: 3, durationMs: 1 }),
+              };
+            }),
+        },
+      });
+
+      const result = yield* manager
+        .createThreadWorktree({
+          cwd: repoDir,
+          refName: "main",
+          newRefName: "t3code/failing-setup",
+          path: null,
+          threadId: asThreadId("thread-failing"),
+        })
+        .pipe(Effect.result);
+
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toBeInstanceOf(GitCommandError);
+        expect(result.failure.message).toContain("Install");
+      }
+      expect(worktreePath).toBeDefined();
+      expect(NodeFS.existsSync(worktreePath as string)).toBe(false);
+      const branches = (yield* runGit(repoDir, [
+        "branch",
+        "--list",
+        "t3code/failing-setup",
+      ])).stdout.trim();
+      expect(branches).toBe("");
+    }),
+  );
+
   it.effect("preserves both branch materialization failures when the fallback also fails", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -4867,6 +5188,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         threadId: "thread-pr-setup",
         projectCwd: repoDir,
         worktreePath: result.worktreePath as string,
+        observeCompletion: { releaseOnFailure: true },
       });
     }),
   );
@@ -5213,6 +5535,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         threadId: "thread-pr-reused-setup",
         projectCwd: repoDir,
         worktreePath: result.worktreePath as string,
+        observeCompletion: { releaseOnFailure: true },
       });
       expect(result.isOnPullRequestHead).toBe(true);
     }),
@@ -5816,21 +6139,167 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("does not fail PR worktree prep when setup terminal startup fails", () =>
+  it.effect("waits for a blocking setup script before returning a new PR worktree", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
-      yield* runGit(repoDir, ["checkout", "-b", "feature/pr-setup-failure"]);
-      NodeFS.writeFileSync(NodePath.join(repoDir, "setup-failure.txt"), "setup failure\n");
-      yield* runGit(repoDir, ["add", "setup-failure.txt"]);
-      yield* runGit(repoDir, ["commit", "-m", "PR setup failure branch"]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-setup-failure"]);
-      yield* runGit(repoDir, ["push", "origin", "HEAD:refs/pull/184/head"]);
-      yield* runGit(repoDir, ["checkout", "main"]);
+      yield* seedPullRequestBranch(repoDir, "feature/pr-blocking-setup", 185);
 
+      const gate = yield* Deferred.make<void>();
+      const finished = yield* Deferred.make<void>();
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          pullRequest: {
+            number: 185,
+            title: "Blocking setup PR",
+            url: "https://github.com/pingdotgg/codething-mvp/pull/185",
+            baseRefName: "main",
+            headRefName: "feature/pr-blocking-setup",
+            state: "open",
+          },
+        },
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Setup",
+              scriptCommand: "true",
+              terminalId: "setup-terminal",
+              cwd: setupInput.worktreePath,
+              async: false,
+              completion: Deferred.await(gate).pipe(
+                Effect.andThen(Deferred.succeed(finished, undefined)),
+                Effect.as({ exitCode: 0, durationMs: 1 }),
+              ),
+            }),
+        },
+      });
+
+      const fiber = yield* Effect.forkChild(
+        preparePullRequestThread(manager, {
+          cwd: repoDir,
+          reference: "185",
+          mode: "worktree",
+          threadId: asThreadId("thread-pr-blocking"),
+        }),
+      );
+      // Unreleased gate: preparation is still waiting on the script.
+      yield* Effect.yieldNow;
+      expect(fiber.pollUnsafe()).toBeUndefined();
+
+      yield* Deferred.succeed(gate, undefined);
+      const result = yield* Fiber.join(fiber);
+      expect(yield* Deferred.isDone(finished)).toBe(true);
+      expect(NodeFS.existsSync(result.worktreePath as string)).toBe(true);
+    }),
+  );
+
+  it.effect("returns before an async setup script finishes for a new PR worktree", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* seedPullRequestBranch(repoDir, "feature/pr-async-setup", 186);
+
+      const gate = yield* Deferred.make<void>();
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          pullRequest: {
+            number: 186,
+            title: "Async setup PR",
+            url: "https://github.com/pingdotgg/codething-mvp/pull/186",
+            baseRefName: "main",
+            headRefName: "feature/pr-async-setup",
+            state: "open",
+          },
+        },
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Setup",
+              scriptCommand: "true",
+              terminalId: "setup-terminal",
+              cwd: setupInput.worktreePath,
+              async: true,
+              completion: Deferred.await(gate).pipe(Effect.as({ exitCode: 0, durationMs: 1 })),
+            }),
+        },
+      });
+
+      const result = yield* preparePullRequestThread(manager, {
+        cwd: repoDir,
+        reference: "186",
+        mode: "worktree",
+        threadId: asThreadId("thread-pr-async"),
+      });
+
+      expect(NodeFS.existsSync(result.worktreePath as string)).toBe(true);
+      yield* Deferred.succeed(gate, undefined);
+    }),
+  );
+
+  it.effect("removes a new PR worktree and fails when a blocking setup script exits non-zero", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* seedPullRequestBranch(repoDir, "feature/pr-setup-exits", 187);
+
+      let worktreePath: string | undefined;
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          pullRequest: {
+            number: 187,
+            title: "Setup exits PR",
+            url: "https://github.com/pingdotgg/codething-mvp/pull/187",
+            baseRefName: "main",
+            headRefName: "feature/pr-setup-exits",
+            state: "open",
+          },
+        },
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.sync(() => {
+              worktreePath = setupInput.worktreePath;
+              return {
+                status: "started" as const,
+                scriptId: "setup",
+                scriptName: "Install",
+                scriptCommand: "exit 3",
+                terminalId: "setup-terminal",
+                cwd: setupInput.worktreePath,
+                async: false,
+                completion: Effect.succeed({ exitCode: 3, durationMs: 1 }),
+              };
+            }),
+        },
+      });
+
+      const error = yield* preparePullRequestThread(manager, {
+        cwd: repoDir,
+        reference: "187",
+        mode: "worktree",
+        threadId: asThreadId("thread-pr-setup-exits"),
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitManagerError",
+        operation: "preparePullRequestThread",
+      });
+      expect(error.message).toContain("Install");
+      expect(worktreePath).toBeDefined();
+      expect(NodeFS.existsSync(worktreePath as string)).toBe(false);
+    }),
+  );
+
+  it.effect("removes a new PR worktree and fails when the setup script cannot start", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* seedPullRequestBranch(repoDir, "feature/pr-setup-failure", 184);
+
+      let worktreePath: string | undefined;
       const { manager } = yield* makeManager({
         ghScenario: {
           pullRequest: {
@@ -5844,27 +6313,100 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         },
         setupScriptRunner: {
           runForThread: (input) =>
-            Effect.fail(
-              new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
-                threadId: input.threadId,
-                worktreePath: input.worktreePath,
-                operation: "openTerminal",
-                cause: new Error("terminal start failed"),
-              }),
+            Effect.sync(() => {
+              worktreePath = input.worktreePath;
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
+                    threadId: input.threadId,
+                    worktreePath: input.worktreePath,
+                    operation: "openTerminal",
+                    cause: new Error("terminal start failed"),
+                  }),
+                ),
+              ),
             ),
         },
       });
 
-      const result = yield* preparePullRequestThread(manager, {
+      const error = yield* preparePullRequestThread(manager, {
         cwd: repoDir,
         reference: "184",
         mode: "worktree",
         threadId: asThreadId("thread-pr-setup-failure"),
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({ _tag: "GitManagerError" });
+      expect(worktreePath).toBeDefined();
+      expect(NodeFS.existsSync(worktreePath as string)).toBe(false);
+    }),
+  );
+
+  it.effect("fails but keeps a reused PR worktree when its setup script fails", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* seedPullRequestBranch(repoDir, "feature/pr-reused-setup-fails", 188);
+      const worktreePath = NodePath.join(
+        repoDir,
+        "..",
+        `pr-reused-setup-fails-${NodePath.basename(repoDir)}`,
+      );
+      yield* runGit(repoDir, ["worktree", "add", worktreePath, "feature/pr-reused-setup-fails"]);
+
+      yield* runGit(repoDir, [
+        "checkout",
+        "-b",
+        "setup-fails-author-push",
+        "feature/pr-reused-setup-fails",
+      ]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "pr-file.txt"), "moved\n");
+      yield* runGit(repoDir, ["add", "pr-file.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "New head"]);
+      yield* runGit(repoDir, [
+        "push",
+        "origin",
+        "setup-fails-author-push:feature/pr-reused-setup-fails",
+      ]);
+      yield* runGit(repoDir, ["push", "origin", "HEAD:refs/pull/188/head"]);
+      yield* runGit(repoDir, ["checkout", "main"]);
+
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          pullRequest: {
+            number: 188,
+            title: "Reused setup fails PR",
+            url: "https://github.com/pingdotgg/codething-mvp/pull/188",
+            baseRefName: "main",
+            headRefName: "feature/pr-reused-setup-fails",
+            state: "open",
+          },
+        },
+        setupScriptRunner: {
+          runForThread: (setupInput) =>
+            Effect.succeed({
+              status: "started" as const,
+              scriptId: "setup",
+              scriptName: "Install",
+              scriptCommand: "exit 1",
+              terminalId: "setup-terminal",
+              cwd: setupInput.worktreePath,
+              async: false,
+              completion: Effect.succeed({ exitCode: 1, durationMs: 1 }),
+            }),
+        },
       });
 
-      expect(result.branch).toBe("feature/pr-setup-failure");
-      expect(result.worktreePath).not.toBeNull();
-      expect(NodeFS.existsSync(result.worktreePath as string)).toBe(true);
+      const error = yield* preparePullRequestThread(manager, {
+        cwd: repoDir,
+        reference: "188",
+        mode: "worktree",
+        threadId: asThreadId("thread-pr-reused-setup-fails"),
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({ _tag: "GitManagerError" });
+      expect(NodeFS.existsSync(worktreePath)).toBe(true);
     }),
   );
 

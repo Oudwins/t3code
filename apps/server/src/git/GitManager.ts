@@ -25,6 +25,8 @@ import {
   GitRunStackedActionInput,
   GitRunStackedActionResult,
   GitStackedAction,
+  type VcsCreateWorktreeInput,
+  type VcsCreateWorktreeResult,
   VcsStatusInput,
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
@@ -64,6 +66,7 @@ import {
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as WorktreeManager from "./WorktreeManager.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { detachStackFrame } from "./detachStackFrame.ts";
@@ -127,6 +130,14 @@ export class GitManager extends Context.Service<
     readonly preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+    /**
+     * Creates a worktree, reusing a standby one when possible. With a
+     * `threadId` the project's setup script then runs in it, and a blocking
+     * script that fails removes the worktree again.
+     */
+    readonly createThreadWorktree: (
+      input: VcsCreateWorktreeInput,
+    ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
     readonly runStackedAction: (
       input: GitRunStackedActionInput,
       options?: GitRunStackedActionOptions,
@@ -701,6 +712,7 @@ export const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration.TextGeneration;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+  const worktreeManager = yield* WorktreeManager.WorktreeManager;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -2333,25 +2345,28 @@ export const make = Effect.gen(function* () {
   const preparePullRequestThread: GitManager["Service"]["preparePullRequestThread"] = Effect.fn(
     "preparePullRequestThread",
   )(function* (input) {
-    const maybeRunSetupScript = (worktreePath: string) => {
+    // A blocking script is awaited and a failure fails the preparation, so the
+    // caller never starts an agent in a checkout whose setup did not finish.
+    const runSetupScript = (worktreePath: string) => {
       if (!input.threadId) {
         return Effect.void;
       }
-      return projectSetupScriptRunner
-        .runForThread({
-          threadId: input.threadId,
-          projectCwd: input.cwd,
-          worktreePath,
-        })
-        .pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("GitManager.preparePullRequestThread setup script failed", {
-              threadId: input.threadId,
-              worktreePath,
-              cause: error,
-            }).pipe(Effect.asVoid),
-          ),
-        );
+      return ProjectSetupScriptRunner.runForThreadSettled(projectSetupScriptRunner, {
+        threadId: input.threadId,
+        projectCwd: input.cwd,
+        worktreePath,
+      }).pipe(
+        Effect.asVoid,
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "preparePullRequestThread",
+              cwd: input.cwd,
+              detail: `The worktree setup script failed: ${cause.message}`,
+              cause,
+            }),
+        ),
+      );
     };
     return yield* Effect.gen(function* () {
       const normalizedReference = normalizePullRequestReference(input.reference);
@@ -2491,7 +2506,7 @@ export const make = Effect.gen(function* () {
         // Only when the checkout actually moved: another thread may be running in this worktree,
         // and re-running the setup script under it buys nothing when the code did not change.
         if (refreshed.moved) {
-          yield* maybeRunSetupScript(worktreePath);
+          yield* runSetupScript(worktreePath);
         }
 
         return {
@@ -2578,7 +2593,7 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const worktree = yield* gitCore.createWorktree(
+      const worktree = yield* worktreeManager.createWorktree(
         {
           cwd: input.cwd,
           refName: localPullRequestBranch,
@@ -2592,8 +2607,17 @@ export const make = Effect.gen(function* () {
           ),
         },
       );
-      yield* ensureExistingWorktreeUpstream(worktree.worktree.path);
-      yield* maybeRunSetupScript(worktree.worktree.path);
+      // The thread is not bound to the worktree until the caller gets it back, so a
+      // failed preparation would otherwise leave a checkout nobody owns. The branch is
+      // the pull request's own and stays.
+      yield* ensureExistingWorktreeUpstream(worktree.worktree.path).pipe(
+        Effect.andThen(runSetupScript(worktree.worktree.path)),
+        Effect.onError(() =>
+          worktreeManager
+            .removeWorktree({ cwd: input.cwd, path: worktree.worktree.path, force: true })
+            .pipe(Effect.ignoreCause({ log: true })),
+        ),
+      );
 
       return {
         pullRequest,
@@ -2602,6 +2626,48 @@ export const make = Effect.gen(function* () {
         isOnPullRequestHead: true,
       };
     }).pipe(Effect.ensuring(invalidateStatus(input.cwd)));
+  });
+
+  const createThreadWorktree: GitManager["Service"]["createThreadWorktree"] = Effect.fn(
+    "createThreadWorktree",
+  )(function* ({ threadId, ...input }) {
+    const created = yield* worktreeManager.createWorktree(input);
+    if (threadId === undefined) return created;
+
+    // The thread is not bound to the worktree until the caller gets it back, so a
+    // failed setup would otherwise leave a checkout and branch nobody owns.
+    const removeCreated = worktreeManager
+      .removeWorktree({ cwd: input.cwd, path: created.worktree.path, force: true })
+      .pipe(
+        Effect.andThen(
+          input.newRefName === undefined
+            ? Effect.void
+            : gitCore.deleteLocalBranch({
+                cwd: input.cwd,
+                refName: created.worktree.refName,
+                force: true,
+              }),
+        ),
+        Effect.ignoreCause({ log: true }),
+      );
+    yield* ProjectSetupScriptRunner.runForThreadSettled(projectSetupScriptRunner, {
+      threadId,
+      projectCwd: input.cwd,
+      worktreePath: created.worktree.path,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation: "GitManager.createThreadWorktree",
+            command: "setup-script",
+            cwd: input.cwd,
+            detail: cause.message,
+            cause,
+          }),
+      ),
+      Effect.onError(() => removeCreated),
+    );
+    return created;
   });
 
   const runFeatureBranchStep = Effect.fn("runFeatureBranchStep")(function* (
@@ -2858,6 +2924,7 @@ export const make = Effect.gen(function* () {
     invalidateStatus,
     resolvePullRequest,
     preparePullRequestThread,
+    createThreadWorktree,
     runStackedAction,
   });
 });

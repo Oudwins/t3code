@@ -6,7 +6,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 
 import type { VcsDriverKind, VcsError, VcsRepositoryIdentity } from "@t3tools/contracts";
-import { VcsUnsupportedOperationError } from "@t3tools/contracts";
+import { GitCommandError, VcsUnsupportedOperationError } from "@t3tools/contracts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import * as VcsProjectConfig from "./VcsProjectConfig.ts";
 import * as VcsDriver from "./VcsDriver.ts";
@@ -35,6 +35,34 @@ export class VcsDriverRegistry extends Context.Service<
     readonly resolve: (input: VcsDriverResolveInput) => Effect.Effect<VcsDriverHandle, VcsError>;
   }
 >()("t3/vcs/VcsDriverRegistry") {}
+
+/** Fails with a `GitCommandError` unless `cwd` is inside a Git repository. */
+export const ensureGitCommand = Effect.fn("VcsDriverRegistry.ensureGitCommand")(function* (
+  registry: VcsDriverRegistry["Service"],
+  operation: string,
+  cwd: string,
+) {
+  const handle = yield* registry.resolve({ cwd }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new GitCommandError({
+          operation,
+          command: "vcs-route",
+          cwd,
+          detail: "Failed to resolve the VCS driver for this Git command.",
+          cause,
+        }),
+    ),
+  );
+  if (handle.kind !== "git") {
+    return yield* new GitCommandError({
+      operation,
+      command: "vcs-route",
+      cwd,
+      detail: `The ${operation} command currently supports Git repositories only; detected ${handle.kind}.`,
+    });
+  }
+});
 
 function detectionCacheKey(input: {
   readonly cwd: string;

@@ -18,6 +18,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
@@ -62,6 +63,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+  const worktreeManager = yield* WorktreeManager.WorktreeManager;
   const setupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
 
@@ -247,18 +249,17 @@ const make = Effect.gen(function* () {
 
     const ids = yield* handoffIds(scope);
 
-    // uninterruptibleMask: only the potentially slow worktree creation itself
-    // stays interruptible (restore). From the moment it succeeds, through the
-    // binding, continuation queue, setup script launch, and result
-    // construction, there is no interruptible gap: a client cancel can
-    // therefore neither orphan the created worktree before the rollback is
-    // armed, nor skip setting up a worktree the thread was just bound to
-    // (once the binding commits, the scheduled session detach can sever this
-    // request's connection and interrupt the fiber).
+    // uninterruptibleMask: only the potentially slow worktree creation and
+    // setup script stay interruptible (restore). Everything after setup, from
+    // the binding through the continuation queue and result construction, has
+    // no interruptible gap (once the binding commits, the scheduled session
+    // detach can sever this request's connection and interrupt the fiber), and
+    // the rollback is armed the moment the worktree exists, so a client cancel
+    // cannot orphan it.
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const worktree = yield* restore(
-          gitWorkflow
+          worktreeManager
             .createWorktree({
               cwd: projectCwd,
               refName: worktreeBaseRef,
@@ -270,8 +271,8 @@ const make = Effect.gen(function* () {
         );
         const worktreePath = worktree.worktree.path;
 
-        // Shared shape for "the handoff already succeeded, so report the failure
-        // in the result instead of failing the call" (continuation, setup script).
+        // "The handoff already succeeded, so report the failure in the result
+        // instead of failing the call."
         const reportFailed = (logMessage: string) =>
           Effect.catchCause((cause: Cause.Cause<unknown>) => {
             const detail = errorMessage(Cause.squash(cause));
@@ -298,6 +299,49 @@ const make = Effect.gen(function* () {
             ),
           ),
         ).pipe(Effect.ignoreCause({ log: true }));
+
+        // Setup finishes before the binding and the continuation, so the resumed
+        // agent never starts in a checkout a blocking script is still preparing
+        // (or that failed to prepare). Any failure, or a cancel, takes the
+        // worktree down again: nothing is bound yet.
+        const runSetupScript: Effect.Effect<WorktreeMcpSetupScriptStatus, WorktreeMcpFailure> =
+          (input.runSetupScript ?? true)
+            ? ProjectSetupScriptRunner.runForThreadSettled(setupScriptRunner, {
+                threadId: scope.thread.threadId,
+                projectId: projection.thread.projectId,
+                projectCwd,
+                worktreePath,
+                project: {
+                  id: project.id,
+                  workspaceRoot: project.workspaceRoot,
+                  scripts: project.scripts,
+                },
+              }).pipe(
+                Effect.map((result): WorktreeMcpSetupScriptStatus =>
+                  result.status === "started"
+                    ? {
+                        status: "started",
+                        scriptName: result.scriptName,
+                        terminalId: result.terminalId,
+                      }
+                    : { status: "no-script" },
+                ),
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause as Cause.Cause<never>)
+                    : Effect.fail(
+                        failure(
+                          "operation_failed",
+                          `The worktree setup script failed, so the handoff was rolled back: ${errorMessage(Cause.squash(cause))}`,
+                        ),
+                      ),
+                ),
+              )
+            : Effect.succeed({ status: "skipped" });
+
+        const setupScript = yield* restore(runSetupScript).pipe(
+          Effect.onError(() => removeCreatedWorktree),
+        );
 
         const recheckAndBind = Effect.gen(function* () {
           // The projection was read before the potentially slow git work
@@ -395,36 +439,6 @@ const make = Effect.gen(function* () {
           .refreshStatus(worktreePath)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach);
 
-        let setupScript: WorktreeMcpSetupScriptStatus = { status: "skipped" };
-        if (input.runSetupScript ?? true) {
-          setupScript = yield* setupScriptRunner
-            .runForThread({
-              threadId: scope.thread.threadId,
-              projectId: projection.thread.projectId,
-              projectCwd,
-              worktreePath,
-              project: {
-                id: project.id,
-                workspaceRoot: project.workspaceRoot,
-                scripts: project.scripts,
-              },
-            })
-            .pipe(
-              Effect.map((result): WorktreeMcpSetupScriptStatus =>
-                result.status === "started"
-                  ? {
-                      status: "started",
-                      scriptName: result.scriptName,
-                      terminalId: result.terminalId,
-                    }
-                  : { status: "no-script" },
-              ),
-              // catchCause via reportFailed: the thread is already re-pointed at the
-              // worktree, so even a defect in the setup runner must not fail the handoff.
-              reportFailed("worktree handoff setup script failed"),
-            );
-        }
-
         const result: WorktreeMcpHandoffResult = {
           worktreePath,
           branch: worktree.worktree.refName,
@@ -504,6 +518,7 @@ export const layer: Layer.Layer<
   | ProjectService.ProjectService
   | ServerSettings.ServerSettingsService
   | GitWorkflowService.GitWorkflowService
+  | WorktreeManager.WorktreeManager
   | ProjectSetupScriptRunner.ProjectSetupScriptRunner
   | VcsStatusBroadcaster.VcsStatusBroadcaster
 > = Layer.effect(WorktreeMcpService, make);

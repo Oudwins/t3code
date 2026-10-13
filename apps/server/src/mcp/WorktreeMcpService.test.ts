@@ -21,6 +21,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as WorktreeManager from "../git/WorktreeManager.ts";
 import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
@@ -92,7 +93,8 @@ interface HarnessOptions {
   readonly currentBranch?: string | null;
   readonly notARepo?: boolean;
   readonly newWorktreesStartFromOrigin?: boolean;
-  readonly setupScript?: "started" | "no-script" | "fails" | "dies";
+  readonly setupScript?: "started" | "async" | "exits-nonzero" | "no-script" | "fails" | "dies";
+  readonly setupGate?: Effect.Effect<void>;
   readonly dispatchFails?: boolean;
   readonly dispatchDies?: boolean;
   readonly dispatchInterrupts?: boolean;
@@ -261,31 +263,45 @@ const makeHarness = (options: HarnessOptions = {}) => {
     }),
   );
   const refreshStatus = vi.fn((_: string) => Effect.die("refreshStatus stub"));
-  const runForThread = vi.fn((input: { readonly worktreePath: string }) => {
-    switch (options.setupScript ?? "started") {
-      case "no-script":
-        return Effect.succeed({ status: "no-script" } as const);
-      case "dies":
-        return Effect.die(new Error("setup runner defect"));
-      case "fails":
-        return Effect.fail(
-          new ProjectSetupScriptRunner.ProjectSetupScriptProjectNotFoundError({
-            threadId,
-            worktreePath: input.worktreePath,
-          }),
-        );
-      default:
-        return Effect.succeed({
-          status: "started",
-          async: false,
-          scriptId: "setup",
-          scriptName: "Setup",
-          scriptCommand: "vp install",
-          terminalId: "setup-terminal",
-          cwd: input.worktreePath,
-        } as const);
-    }
-  });
+  // Runs when the harness's setup script "finishes", so tests can order it
+  // against the binding and the continuation.
+  const setupCompleted = vi.fn();
+  const runForThread = vi.fn(
+    (input: { readonly worktreePath: string; readonly observeCompletion?: unknown }) => {
+      const mode = options.setupScript ?? "started";
+      switch (mode) {
+        case "no-script":
+          return Effect.succeed({ status: "no-script" } as const);
+        case "dies":
+          return Effect.die(new Error("setup runner defect"));
+        case "fails":
+          return Effect.fail(
+            new ProjectSetupScriptRunner.ProjectSetupScriptProjectNotFoundError({
+              threadId,
+              worktreePath: input.worktreePath,
+            }),
+          );
+        default:
+          return Effect.succeed({
+            status: "started",
+            async: mode === "async",
+            scriptId: "setup",
+            scriptName: "Setup",
+            scriptCommand: "vp install",
+            terminalId: "setup-terminal",
+            cwd: input.worktreePath,
+            completion: (options.setupGate ?? Effect.void).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  setupCompleted();
+                  return { exitCode: mode === "exits-nonzero" ? 1 : 0, durationMs: 1 };
+                }),
+              ),
+            ),
+          } as const);
+      }
+    },
+  );
 
   // Optional deterministic Path semantics: providing this BEFORE the general
   // mocks means the service resolves Path here rather than from NodeServices,
@@ -324,10 +340,12 @@ const makeHarness = (options: HarnessOptions = {}) => {
           localStatus,
           fetchRemote,
           resolveRemoteTrackingCommit,
-          createWorktree,
           removeWorktree,
           deleteLocalBranch,
         } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
+        Layer.mock(WorktreeManager.WorktreeManager)({
+          createWorktree,
+        } satisfies Partial<WorktreeManager.WorktreeManager["Service"]>),
         Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
           runForThread,
         } satisfies Partial<ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]>),
@@ -351,6 +369,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     deleteLocalBranch,
     localStatus,
     runForThread,
+    setupCompleted,
   };
 };
 
@@ -426,6 +445,7 @@ describe("t3_worktree_handoff", () => {
         projectCwd: workspaceRoot,
         worktreePath: "/worktrees/project/feature/handoff",
         project: { id: projectId, workspaceRoot, scripts: [] },
+        observeCompletion: { releaseOnFailure: true },
       });
     });
   });
@@ -458,9 +478,10 @@ describe("t3_worktree_handoff", () => {
           creationSource: "mcp",
         }),
       );
-      // The continuation must be durably queued before anything slower runs.
-      expect(harness.sendToThread.mock.invocationCallOrder[0]).toBeLessThan(
-        harness.runForThread.mock.invocationCallOrder[0]!,
+      // The queued run must not start in a checkout a blocking script is still
+      // preparing, so it is queued only after setup has finished.
+      expect(harness.setupCompleted.mock.invocationCallOrder[0]).toBeLessThan(
+        harness.sendToThread.mock.invocationCallOrder[0]!,
       );
     });
   });
@@ -809,9 +830,8 @@ describe("t3_worktree_handoff", () => {
 
       expect(harness.dispatch).toHaveBeenCalledTimes(1);
       expect(harness.sendToThread).toHaveBeenCalledTimes(1);
-      // The setup script must also survive the pending interrupt; otherwise
-      // the continuation run starts in a worktree that was never set up.
       expect(harness.runForThread).toHaveBeenCalledTimes(1);
+      expect(harness.removeWorktree).not.toHaveBeenCalled();
     }),
   );
 
@@ -955,23 +975,114 @@ describe("t3_worktree_handoff", () => {
     });
   });
 
-  it.effect("reports setup script failure without failing the handoff", () => {
-    const harness = makeHarness({ setupScript: "fails" });
+  it.effect("waits for a blocking setup script before binding and queueing the continuation", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        setupGate: Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+        ),
+      });
+
+      const fiber = yield* Effect.forkChild(
+        runHandoff(harness, {
+          branch: "feature/blocking-setup",
+          continuationPrompt: "Keep going.",
+        }),
+      );
+      yield* Deferred.await(started);
+      expect(harness.dispatch).not.toHaveBeenCalled();
+      expect(harness.sendToThread).not.toHaveBeenCalled();
+
+      yield* Deferred.succeed(release, undefined);
+      const result = yield* Fiber.join(fiber);
+      expect(result.setupScript).toMatchObject({ status: "started", scriptName: "Setup" });
+      expect(result.continuation).toEqual({ status: "scheduled", delivery: "queued" });
+      expect(harness.dispatch).toHaveBeenCalledTimes(1);
+      expect(harness.removeWorktree).not.toHaveBeenCalled();
+    }),
+  );
+
+  it.effect("leaves an async setup script running in the background", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        setupScript: "async",
+        setupGate: Deferred.make<void>().pipe(Effect.flatMap(Deferred.await)),
+      });
+
+      const result = yield* runHandoff(harness, {
+        branch: "feature/async-setup",
+        continuationPrompt: "Keep going.",
+      });
+      expect(result.setupScript).toMatchObject({ status: "started" });
+      expect(result.continuation).toEqual({ status: "scheduled", delivery: "queued" });
+      expect(harness.setupCompleted).not.toHaveBeenCalled();
+    }),
+  );
+
+  it.effect("rolls the worktree back when a blocking setup script exits non-zero", () => {
+    const harness = makeHarness({ setupScript: "exits-nonzero" });
     return Effect.gen(function* () {
-      const result = yield* runHandoff(harness, { branch: "feature/setup-fails" });
-      expect(result.setupScript.status).toBe("failed");
-      expect(harness.dispatch).toHaveBeenCalled();
+      const exit = yield* Effect.exit(
+        runHandoff(harness, {
+          branch: "feature/setup-exits",
+          continuationPrompt: "Keep going.",
+        }),
+      );
+      expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "operation_failed" });
+      expect(harness.dispatch).not.toHaveBeenCalled();
+      expect(harness.sendToThread).not.toHaveBeenCalled();
+      expect(harness.removeWorktree).toHaveBeenCalledTimes(1);
+      expect(harness.deleteLocalBranch).toHaveBeenCalledTimes(1);
     });
   });
 
-  it.effect("reports a setup script defect without failing the handoff", () => {
-    const harness = makeHarness({ setupScript: "dies" });
+  it.effect("rolls the worktree back when the setup script cannot start", () => {
+    const harness = makeHarness({ setupScript: "fails" });
     return Effect.gen(function* () {
-      const result = yield* runHandoff(harness, { branch: "feature/setup-dies" });
-      expect(result.setupScript).toEqual({ status: "failed", detail: "setup runner defect" });
-      expect(harness.dispatch).toHaveBeenCalled();
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/setup-fails" }));
+      expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "operation_failed" });
+      expect(harness.dispatch).not.toHaveBeenCalled();
+      expect(harness.removeWorktree).toHaveBeenCalledTimes(1);
     });
   });
+
+  it.effect("rolls the worktree back on a setup runner defect", () => {
+    const harness = makeHarness({ setupScript: "dies" });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/setup-dies" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeMcpFailure",
+        code: "operation_failed",
+        message: expect.stringContaining("setup runner defect"),
+      });
+      expect(harness.dispatch).not.toHaveBeenCalled();
+      expect(harness.removeWorktree).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.effect("rolls the worktree back when interrupted during setup", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        setupGate: Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.make<void>()),
+          Effect.flatMap(Deferred.await),
+        ),
+      });
+
+      const fiber = yield* Effect.forkChild(
+        runHandoff(harness, { branch: "feature/interrupted-setup" }),
+      );
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(fiber);
+
+      expect(harness.dispatch).not.toHaveBeenCalled();
+      expect(harness.removeWorktree).toHaveBeenCalledTimes(1);
+      expect(harness.deleteLocalBranch).toHaveBeenCalledTimes(1);
+    }),
+  );
 });
 
 describe("t3_worktree_status", () => {

@@ -125,8 +125,9 @@ export interface ExecuteGitProgress {
  */
 export interface CreateWorktreeProgress {
   /**
-   * Fires once `git worktree add` has created and registered the directory,
-   * before the (possibly long) submodule step. Git refuses an existing path,
+   * Fires once `git worktree add` has created and registered the directory
+   * (or `reuseWorktree` has moved a parked one into place), before the
+   * (possibly long) checkout and submodule steps. Git refuses an existing path,
    * so a path reported here belongs to this call and is safe to remove on
    * cancel.
    */
@@ -157,6 +158,11 @@ export interface CreateWorktreeOptions {
    */
   readonly submodules?: WorktreeSubmodules | null;
 }
+
+export type ReuseWorktreeInput = VcsCreateWorktreeInput & {
+  /** A parked linked worktree of `cwd`'s repository. */
+  readonly standbyPath: string;
+};
 
 export interface GitCommitProgress {
   readonly onOutputLine?: (input: {
@@ -352,6 +358,34 @@ export class GitVcsDriver extends Context.Service<
       input: VcsCreateWorktreeInput,
       options?: CreateWorktreeOptions,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
+    /**
+     * `createWorktree` served from a parked worktree. It is moved to the path
+     * `createWorktree` would use, checked out the way `createWorktree` would
+     * (a new branch from `refName` when `newRefName` is set, otherwise
+     * `refName` itself) and finished the same way (submodules, merge base).
+     * The result looks like a new worktree, except that ignored files such as
+     * `node_modules` survive from its previous life. Fails when that path is
+     * taken. A failure after the move removes the half-claimed checkout where it
+     * can; one that survives is at the path last given to `onWorktreeClaimed`.
+     */
+    readonly reuseWorktree: (
+      input: ReuseWorktreeInput,
+      options?: CreateWorktreeOptions,
+    ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
+    /**
+     * Moves a linked worktree out of the way, detached from its branch, so it
+     * can wait for `reuseWorktree`, and returns where it went. The old path and
+     * its branch are free to be checked out again. Refuses a worktree with
+     * tracked or untracked changes unless `discardChanges` is set, in which case
+     * they are discarded. Ignored files are kept. Refuses a path that is not a
+     * linked worktree of `cwd`'s repository, and a worktree git cannot move,
+     * such as one with submodules; the worktree is left as it was.
+     */
+    readonly parkWorktree: (input: {
+      readonly cwd: string;
+      readonly path: string;
+      readonly discardChanges?: boolean;
+    }) => Effect.Effect<{ readonly path: string }, GitCommandError>;
     readonly fetchPullRequestBranch: (
       input: GitFetchPullRequestBranchInput,
     ) => Effect.Effect<void, GitCommandError>;

@@ -67,6 +67,9 @@ export class GitWorkflowService extends Context.Service<
     readonly listRefs: (
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>;
+    readonly createThreadWorktree: (
+      input: VcsCreateWorktreeInput,
+    ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
       options?: GitVcsDriver.CreateWorktreeOptions,
@@ -184,31 +187,8 @@ export const make = Effect.gen(function* () {
     }
   });
 
-  const ensureGitCommand = Effect.fn("GitWorkflowService.ensureGitCommand")(function* (
-    operation: string,
-    cwd: string,
-  ) {
-    const handle = yield* registry.resolve({ cwd }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GitCommandError({
-            operation,
-            command: "vcs-route",
-            cwd,
-            detail: "Failed to resolve the VCS driver for this Git command.",
-            cause,
-          }),
-      ),
-    );
-    if (handle.kind !== "git") {
-      return yield* new GitCommandError({
-        operation,
-        command: "vcs-route",
-        cwd,
-        detail: `The ${operation} command currently supports Git repositories only; detected ${handle.kind}.`,
-      });
-    }
-  });
+  const ensureGitCommand = (operation: string, cwd: string) =>
+    VcsDriverRegistry.ensureGitCommand(registry, operation, cwd);
 
   const detectGitRepositoryForStatus = Effect.fn("GitWorkflowService.detectGitRepositoryForStatus")(
     function* (operation: string, cwd: string) {
@@ -345,6 +325,7 @@ export const make = Effect.gen(function* () {
           isGitRepository ? git.listRefs(input) : Effect.succeed(nonRepositoryListRefs()),
         ),
       ),
+    createThreadWorktree: gitManager.createThreadWorktree,
     createWorktree: (input, options) =>
       ensureGitCommand("GitWorkflowService.createWorktree", input.cwd).pipe(
         Effect.andThen(git.createWorktree(input, options)),

@@ -42,6 +42,19 @@ describe("serverSettings helpers", () => {
       logsAfterDays: 30,
     });
   });
+  it("keeps worktree reuse off by default and changes one field at a time", () => {
+    expect(DEFAULT_SERVER_SETTINGS.worktreeReuse).toEqual({
+      enabled: false,
+      maxStandby: 3,
+      standbyHours: 24,
+    });
+    const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      worktreeReuse: { enabled: true },
+    });
+    expect(
+      applyServerSettingsPatch(enabled, { worktreeReuse: { maxStandby: 5 } }).worktreeReuse,
+    ).toEqual({ enabled: true, maxStandby: 5, standbyHours: 24 });
+  });
   it("replaces SSH host lists when saving, editing, and removing hosts", () => {
     const host = { id: "mini", label: "Mac mini", target: "mini" };
     const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { deviceHosts: [host] });
