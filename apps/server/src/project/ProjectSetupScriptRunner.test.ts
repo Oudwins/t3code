@@ -254,22 +254,30 @@ it.effect("ignores the Cursor worktree config when the project has its own actio
 
 /** The runner over a mocked terminal whose script is blocking or async, recording closes. */
 const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFails?: boolean }) => {
-  const open = vi.fn(
-    (openInput: Parameters<TerminalManager.TerminalManager["Service"]["open"]>[0]) =>
-      Effect.succeed({
+  // Like the real manager, opening a terminal that is still open returns its running shell.
+  const shells = new Map<string, { readonly pid: number }>();
+  const opened: Array<{ readonly pid: number; readonly cwd: string }> = [];
+  let nextPid = 100;
+  const open = (openInput: Parameters<TerminalManager.TerminalManager["Service"]["open"]>[0]) =>
+    Effect.sync(() => {
+      const key = `${openInput.threadId}:${openInput.terminalId}`;
+      const shell = shells.get(key) ?? { pid: nextPid++ };
+      shells.set(key, shell);
+      opened.push({ pid: shell.pid, cwd: openInput.cwd });
+      return {
         threadId: openInput.threadId,
         terminalId: openInput.terminalId,
         cwd: openInput.cwd,
         worktreePath: openInput.worktreePath ?? null,
         status: "running" as const,
-        pid: 123,
+        pid: shell.pid,
         history: "",
         exitCode: null,
         exitSignal: null,
         label: "Shell",
         updatedAt: "2026-06-20T00:00:00.000Z",
-      }),
-  );
+      };
+    });
   const write = vi.fn(
     (_input: Parameters<TerminalManager.TerminalManager["Service"]["write"]>[0]) =>
       input.writeFails
@@ -286,6 +294,7 @@ const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFail
   const close = (input: Parameters<TerminalManager.TerminalManager["Service"]["close"]>[0]) =>
     Effect.sync(() => {
       closeCalls.push(input);
+      shells.delete(`${input.threadId}:${input.terminalId}`);
     });
   const closeIdle = (
     input: Parameters<TerminalManager.TerminalManager["Service"]["closeIdle"]>[0],
@@ -349,7 +358,7 @@ const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFail
         data: `__T3_SETUP_DONE___${token}:${exitCode}\n`,
       });
     });
-  return { layer, runInput, closeCalls, closeIdleCalls, finishScript };
+  return { layer, runInput, opened, closeCalls, closeIdleCalls, finishScript };
 };
 
 it.effect("closes a blocking setup terminal, keeping its output, when the script fails", () => {
@@ -368,6 +377,31 @@ it.effect("closes a blocking setup terminal, keeping its output, when the script
     assert.equal(failure._tag, "ProjectSetupScriptFailedError");
     assert.deepEqual(harness.closeCalls, [{ threadId: "thread-1", terminalId: "setup-setup" }]);
     assert.equal(harness.closeIdleCalls.length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("runs a retry after a failed blocking setup in a fresh shell", () => {
+  const harness = makeReleaseHarness({ async: false });
+  return Effect.gen(function* () {
+    const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const first = yield* Effect.forkChild(
+      ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
+    );
+    yield* Effect.yieldNow;
+    yield* harness.finishScript(3);
+    yield* Fiber.join(first).pipe(Effect.flip);
+
+    // The failed checkout is removed and recreated at the same path, so the
+    // retry would reuse the first run's shell if it were still open.
+    const retry = yield* Effect.forkChild(
+      ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
+    );
+    yield* Effect.yieldNow;
+    yield* Fiber.interrupt(retry);
+
+    assert.equal(harness.opened.length, 2);
+    assert.notEqual(harness.opened[0]!.pid, harness.opened[1]!.pid);
+    assert.equal(harness.opened[1]!.cwd, "/repo-worktree");
   }).pipe(Effect.provide(harness.layer));
 });
 
