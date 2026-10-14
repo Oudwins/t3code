@@ -873,7 +873,22 @@ layer("GitHubPullRequestApi.layer", (it) => {
                       deletions: 3,
                       changedFiles: 2,
                       updatedAt: "2026-08-24T12:34:56.000Z",
-                      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+                      commits: {
+                        nodes: [
+                          {
+                            commit: {
+                              statusCheckRollup: {
+                                contexts: {
+                                  nodes: [
+                                    { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+                                  ],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                              },
+                            },
+                          },
+                        ],
+                      },
                     },
                   },
                 },

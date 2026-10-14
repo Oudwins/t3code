@@ -919,6 +919,10 @@ export function SurfaceTabStrip(props: SurfaceTabStripProps) {
     event.preventDefault();
     event.stopPropagation();
     if (!event.repeat) {
+      if (props.onNewTab) {
+        props.onNewTab();
+        return;
+      }
       addSurfaceTriggerRef.current?.focus();
       setAddSurfaceMenuOpen(true);
     }
@@ -1375,11 +1379,12 @@ export function SurfaceTabStrip(props: SurfaceTabStripProps) {
               </TooltipTrigger>
               <TooltipPopup>New tab</TooltipPopup>
             </Tooltip>
-          ) : props.surfaces.length > 0 ? (
+          ) : (
             <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
               <MenuTrigger
                 render={
                   <Button
+                    ref={addSurfaceTriggerRef}
                     aria-label="Add panel surface"
                     className="shrink-0"
                     size="icon-xs"
@@ -1460,7 +1465,7 @@ export function SurfaceTabStrip(props: SurfaceTabStripProps) {
                 })}
               </MenuPopup>
             </Menu>
-          ) : null}
+          )}
         </div>
       </ScrollArea>
       {tabScrollState.hasOverflow ? (

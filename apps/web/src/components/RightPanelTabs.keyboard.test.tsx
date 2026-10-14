@@ -8,7 +8,7 @@ import {
   DEFAULT_RESOLVED_KEYBINDINGS,
 } from "@t3tools/shared/keybindings";
 
-import { RightPanelTabs } from "./RightPanelTabs";
+import { RightPanelTabs, SurfaceTabStrip } from "./RightPanelTabs";
 
 vi.mock("~/hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "light" }) }));
 vi.mock("~/browser/browserDefaults", () => ({ useBrowserDefaults: () => ({ profiles: [] }) }));
@@ -48,10 +48,15 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function renderPanel(overrides: Partial<ComponentProps<typeof RightPanelTabs>> = {}) {
+async function renderPanel(
+  overrides: Partial<ComponentProps<typeof RightPanelTabs>> &
+    Pick<ComponentProps<typeof SurfaceTabStrip>, "onNewTab"> = {},
+) {
+  const Panel = overrides.onNewTab ? SurfaceTabStrip : RightPanelTabs;
   await act(() =>
     root.render(
-      <RightPanelTabs
+      <Panel
+        noDrag={false}
         mode="inline"
         open
         keybindings={DEFAULT_RESOLVED_KEYBINDINGS}
@@ -94,7 +99,7 @@ async function renderPanel(overrides: Partial<ComponentProps<typeof RightPanelTa
         {...overrides}
       >
         content
-      </RightPanelTabs>,
+      </Panel>,
     ),
   );
   await act(() => vi.advanceTimersByTimeAsync(0));
@@ -110,6 +115,16 @@ async function press(key: string, options: KeyboardEventInit = {}) {
 }
 
 describe("right panel new-tab shortcut", () => {
+  it("opens a thread tab instead of the surface menu when the host owns tabs", async () => {
+    const onNewTab = vi.fn();
+    await renderPanel({ onNewTab });
+    expect((await press("t", { metaKey: true })).defaultPrevented).toBe(true);
+    expect(onNewTab).toHaveBeenCalledOnce();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    await press("t", { metaKey: true, repeat: true });
+    expect(onNewTab).toHaveBeenCalledOnce();
+  });
+
   it.each(["MacIntel", "Win32", "Linux x86_64"])(
     "opens the menu on %s and chooses a tab",
     async (platform) => {
