@@ -145,6 +145,13 @@ Settling the thread you have open takes you to the latest thread in the same pro
 is not working, waiting, snoozed, or settled. When there is none, it opens a new thread in
 that project. Snoozing the open thread moves you the same way.
 
+To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
+thread settles** for one of the project's actions, or set `"runOnSettle": true` on a
+`t3.json` script, for example `cargo clean`. It runs each time a thread in its own
+worktree settles, manually or automatically, even if a terminal there still runs a
+command such as a dev server. Threads in the project's main checkout skip it. Its terminal
+closes when the command succeeds and stays open when it fails.
+
 On web and desktop, press a thread's **Settle** button and drag up or down to
 settle every thread in that section between it and the one you release on.
 The **Un-settle** and **Wake** buttons work the same way in their sections.
@@ -220,6 +227,7 @@ snooze limit stops by default. Providers without a reset time offer manual
 retry and the normal snooze choices.
 
 On web and desktop, use **Agents** to follow work delegated to subagents.
+Stop on a thread also stops the subagents it delegated to.
 
 Subagent threads started by the agent can't take messages; message the parent
 thread instead. When such a subagent needs an approval or an answer, the parent

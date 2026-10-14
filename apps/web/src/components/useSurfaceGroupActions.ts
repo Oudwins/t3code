@@ -2,9 +2,16 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { NewThreadTab, PreviewSessionSnapshot, ScopedThreadRef } from "@t3tools/contracts";
+import {
+  AuthPreviewOperateScope,
+  AuthTerminalOperateScope,
+  type NewThreadTab,
+  type PreviewSessionSnapshot,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { getTerminalLabel, nextTerminalId } from "@t3tools/shared/terminalLabels";
+import { readEnvironmentScope } from "../state/session";
 import { useCallback } from "react";
 
 import { BrowserSettingsReadError } from "../browser/openFileInPreview";
@@ -99,7 +106,12 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
 
   const openBrowserTab = useCallback(
     async (profileId?: string) => {
-      if (!threadRef || !groupRef) return;
+      if (
+        !threadRef ||
+        !groupRef ||
+        !readEnvironmentScope(threadRef.environmentId, AuthPreviewOperateScope)
+      )
+        return;
       const result = await addBrowserSurface({
         threadRef,
         groupRef,
@@ -155,7 +167,13 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
 
   const openTerminalTab = useCallback(
     (terminalId: string) => {
-      if (!groupRef || !threadRef || !project) return;
+      if (
+        !groupRef ||
+        !threadRef ||
+        !project ||
+        !readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
+      )
+        return;
       const cwd = gitCwd ?? project.workspaceRoot;
       useRightPanelStore.getState().openTerminal(groupRef, terminalId);
       void openTerminal({
@@ -175,7 +193,13 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     [gitCwd, groupRef, openTerminal, project, threadRef, worktreePath],
   );
   const addTerminal = useCallback(() => {
-    if (!groupRef || !threadRef || !project) return;
+    if (
+      !groupRef ||
+      !threadRef ||
+      !project ||
+      !readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
+    )
+      return;
     openTerminalTab(nextTerminalId(allocatableTerminalIds));
     requestTerminalFocus();
   }, [allocatableTerminalIds, groupRef, openTerminalTab, project, requestTerminalFocus, threadRef]);
@@ -201,6 +225,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
       if (
         !groupRef ||
         !threadRef ||
+        !readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope) ||
         !project ||
         activeSurface?.kind !== "terminal" ||
         activeSurface.terminalIds.length >= MAX_TERMINALS_PER_GROUP
@@ -252,7 +277,13 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
   );
   const closeTerminal = useCallback(
     (terminalId: string) => {
-      if (!groupRef || !threadRef || activeSurface?.kind !== "terminal") return;
+      if (
+        !groupRef ||
+        !threadRef ||
+        !readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope) ||
+        activeSurface?.kind !== "terminal"
+      )
+        return;
       void closeTerminalMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId, terminalId, deleteHistory: true },
@@ -301,7 +332,11 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     (closing: readonly RightPanelSurface[]) => {
       if (!threadRef) return;
       for (const surface of closing) {
-        if (surface.kind === "preview" && surface.resourceId) {
+        if (
+          readEnvironmentScope(threadRef.environmentId, AuthPreviewOperateScope) &&
+          surface.kind === "preview" &&
+          surface.resourceId
+        ) {
           void closePreviewSession({
             closePreview,
             snapshot: previewSessions[surface.resourceId] ?? null,
@@ -309,7 +344,10 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
             threadRef,
           });
         }
-        if (surface.kind === "terminal") {
+        if (
+          surface.kind === "terminal" &&
+          readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
+        ) {
           for (const terminalId of surface.terminalIds) {
             storeCloseTerminal(threadRef, terminalId);
             void closeTerminalMutation({
@@ -353,9 +391,13 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
   const finishClose = useCallback(
     (closing: readonly RightPanelSurface[]) => {
       if (!groupRef) return;
-      cleanupSurfaces(closing);
       const store = useRightPanelStore.getState();
-      for (const surface of closing) {
+      const activeId = selectActiveRightPanelSurface(store.byThreadKey, groupRef)?.id;
+      const ordered = closing.toSorted(
+        (left, right) => Number(left.id === activeId) - Number(right.id === activeId),
+      );
+      for (const surface of ordered) {
+        cleanupSurfaces([surface]);
         store.closeSurface(groupRef, surface.id);
       }
       syncActivePreviewSurface();
@@ -370,7 +412,11 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
         closeAfterAgentBrowserConfirmation([surface], finish);
         return;
       }
-      if (surface.kind !== "terminal") {
+      if (
+        surface.kind !== "terminal" ||
+        !threadRef ||
+        !readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
+      ) {
         finish();
         return;
       }
@@ -384,7 +430,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
         if (confirmed) finish();
       });
     },
-    [closeAfterAgentBrowserConfirmation, finishClose, groupRef, terminalLabelsById],
+    [closeAfterAgentBrowserConfirmation, finishClose, groupRef, terminalLabelsById, threadRef],
   );
   const closeOthers = useCallback(
     (surface: RightPanelSurface) => {

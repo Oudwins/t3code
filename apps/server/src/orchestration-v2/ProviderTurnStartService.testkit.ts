@@ -7,7 +7,7 @@ import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 
-export const worktreeRepairDependenciesTestLayer = Layer.mergeAll(
+export const layer = Layer.mergeAll(
   Layer.mock(GitWorkflow.GitWorkflowService)({
     pruneWorktrees: () => Effect.void,
   }),

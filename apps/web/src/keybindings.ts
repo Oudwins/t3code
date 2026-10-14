@@ -11,33 +11,23 @@ import {
   type ThreadJumpKeybindingCommand,
   type ThreadTabKeybindingCommand,
 } from "@t3tools/contracts";
+import {
+  isMacPlatform,
+  matchesKeybindingShortcut,
+  matchesKeybindingShortcutModifiers,
+  normalizeEventKey,
+  resolveEventKeys,
+  type ShortcutEventLike,
+  type ShortcutModifierStateLike,
+} from "@t3tools/shared/keybindings";
 import { isElectron } from "./env";
 import { isEditableFocused } from "./lib/editableFocus";
 import { isPreviewFocused } from "./lib/previewFocus";
 import { isTerminalFocused } from "./lib/terminalFocus";
-import { isMacPlatform } from "./lib/utils";
+import { projectScriptIdFromCommand } from "./projectScripts";
 
-export interface ShortcutEventLike {
-  getModifierState?: (key: "AltGraph") => boolean;
-  type?: string;
-  code?: string;
-  key: string;
-  repeat?: boolean;
-  metaKey: boolean;
-  ctrlKey: boolean;
-  shiftKey: boolean;
-  altKey: boolean;
-  target?: EventTarget | null;
-  preventDefault?: () => void;
-  stopPropagation?: () => void;
-}
-
-export interface ShortcutModifierStateLike {
-  metaKey: boolean;
-  ctrlKey: boolean;
-  shiftKey: boolean;
-  altKey: boolean;
-}
+export type { ShortcutEventLike, ShortcutModifierStateLike } from "@t3tools/shared/keybindings";
+export { shortcutKeyFromEvent } from "@t3tools/shared/keybindings";
 
 export interface ShortcutMatchContext {
   terminalFocus: boolean;
@@ -66,90 +56,6 @@ const TERMINAL_WORD_FORWARD = "\u001bf";
 const TERMINAL_LINE_START = "\u0001";
 const TERMINAL_LINE_END = "\u0005";
 const TERMINAL_DELETE_TO_LINE_START = "\u0015";
-const EVENT_CODE_SHORTCUT_KEYS: Readonly<Record<string, string>> = {
-  Backquote: "`",
-  Backslash: "\\",
-  BracketLeft: "[",
-  BracketRight: "]",
-  Comma: ",",
-  Digit0: "0",
-  Digit1: "1",
-  Digit2: "2",
-  Digit3: "3",
-  Digit4: "4",
-  Digit5: "5",
-  Digit6: "6",
-  Digit7: "7",
-  Digit8: "8",
-  Digit9: "9",
-  Equal: "=",
-  Minus: "-",
-  Period: ".",
-  Quote: "'",
-  Semicolon: ";",
-  Slash: "/",
-};
-
-function normalizeEventKey(key: string): string {
-  const normalized = key.toLowerCase();
-  if (normalized === "esc") return "escape";
-  return normalized;
-}
-
-export function shortcutKeyFromEvent(event: Pick<ShortcutEventLike, "key" | "code">): string {
-  const layoutKey = normalizeEventKey(event.key);
-  if (/^[a-z]$/.test(layoutKey)) return layoutKey;
-  const physicalKey = event.code ? EVENT_CODE_SHORTCUT_KEYS[event.code] : undefined;
-  return physicalKey ?? layoutKey;
-}
-
-export function resolveEventKeys(event: ShortcutEventLike): Set<string> {
-  const layoutKey = normalizeEventKey(event.key);
-  const keys = new Set([layoutKey]);
-  // The physical-position fallback exists for layouts that type non-Latin
-  // letters (Cyrillic, Greek) and for Option-modified symbols on macOS.
-  // When the layout already produces a Latin letter, match on it alone;
-  // otherwise a remapped physical key triggers shortcuts for two different
-  // letters at once and shadows system shortcuts on non-QWERTY layouts.
-  const letterCode = event.code?.match(/^Key([A-Z])$/)?.[1];
-  if (letterCode && !/^[a-z]$/.test(layoutKey)) {
-    keys.add(letterCode.toLowerCase());
-  }
-  keys.add(shortcutKeyFromEvent(event));
-  return keys;
-}
-
-function matchesShortcutModifiers(
-  event: ShortcutModifierStateLike,
-  shortcut: KeybindingShortcut,
-  platform = navigator.platform,
-): boolean {
-  const useMetaForMod = isMacPlatform(platform);
-  const expectedMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
-  const expectedCtrl = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
-  return (
-    event.metaKey === expectedMeta &&
-    event.ctrlKey === expectedCtrl &&
-    event.shiftKey === shortcut.shiftKey &&
-    event.altKey === shortcut.altKey
-  );
-}
-
-function matchesShortcut(
-  event: ShortcutEventLike,
-  shortcut: KeybindingShortcut,
-  platform = navigator.platform,
-): boolean {
-  if (
-    !isMacPlatform(platform) &&
-    event.getModifierState?.("AltGraph") &&
-    !/^[a-z0-9]$/i.test(event.key)
-  )
-    return false;
-  if (!matchesShortcutModifiers(event, shortcut, platform)) return false;
-  return resolveEventKeys(event).has(shortcut.key);
-}
-
 function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
   return options?.platform ?? navigator.platform;
 }
@@ -219,14 +125,15 @@ function chordConflictKey(
  * shortcut on the same key shadow each other the same way, because
  * `resolveShortcutCommand` lets the later rule win.
  */
-function findEffectiveBindingForCommand(
+function effectiveBindingsForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
   options?: ShortcutMatchOptions,
-): ResolvedKeybindingRule | null {
+): ResolvedKeybindingRule[] {
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
   const claimed = new Set<string>();
+  const effective: ResolvedKeybindingRule[] = [];
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
@@ -245,11 +152,29 @@ function findEffectiveBindingForCommand(
       claimed.add(`l|${leaderKey}`);
     }
     if (binding.command === command) {
-      return binding;
+      effective.push(binding);
     }
   }
 
-  return null;
+  return effective;
+}
+
+function findEffectiveBindingForCommand(
+  keybindings: ResolvedKeybindingsConfig,
+  command: KeybindingCommand,
+  options?: ShortcutMatchOptions,
+): ResolvedKeybindingRule | null {
+  return effectiveBindingsForCommand(keybindings, command, options)[0] ?? null;
+}
+
+export function effectiveShortcutsForCommand(
+  keybindings: ResolvedKeybindingsConfig,
+  command: KeybindingCommand,
+  options?: ShortcutMatchOptions,
+): KeybindingShortcut[] {
+  return effectiveBindingsForCommand(keybindings, command, options).flatMap((binding) =>
+    "shortcut" in binding ? [binding.shortcut] : [],
+  );
 }
 
 function matchesCommandShortcut(
@@ -373,7 +298,7 @@ function pendingChordForEvent(
     (binding) =>
       "chord" in binding &&
       shortcutConflictKey(binding.chord[0], platform) === pending.leaderKey &&
-      matchesShortcut(event, binding.chord[1], platform),
+      matchesKeybindingShortcut(event, binding.chord[1], platform),
   );
   if (!expected) {
     event.preventDefault?.();
@@ -421,10 +346,10 @@ export function resolveShortcutCommand(
       const [leader, next] = binding.chord;
       if (pending) {
         if (shortcutConflictKey(leader, platform) !== pending.leaderKey) continue;
-        if (!matchesShortcut(event, next, platform)) continue;
+        if (!matchesKeybindingShortcut(event, next, platform)) continue;
         return binding.command;
       }
-      if (!matchesShortcut(event, leader, platform)) continue;
+      if (!matchesKeybindingShortcut(event, leader, platform)) continue;
       const startContext = chordStartContext(event, context, options?.context);
       if (!startContext || !matchesWhenClause(binding.whenAst, startContext)) continue;
       beginChord(event, leader, platform);
@@ -432,10 +357,28 @@ export function resolveShortcutCommand(
     }
 
     if (pending) continue;
-    if (!matchesShortcut(event, binding.shortcut, platform)) continue;
+    if (!matchesKeybindingShortcut(event, binding.shortcut, platform)) continue;
     return binding.command;
   }
   return null;
+}
+
+/** App shortcuts use the primary environment; script shortcuts belong to the active project. */
+export function resolveChatShortcutCommand(
+  event: ShortcutEventLike,
+  primaryKeybindings: ResolvedKeybindingsConfig,
+  activeKeybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): KeybindingCommand | null {
+  const primaryCommand = resolveShortcutCommand(event, primaryKeybindings, options);
+  if (primaryCommand !== null && projectScriptIdFromCommand(primaryCommand) === null) {
+    return primaryCommand;
+  }
+
+  const activeCommand = resolveShortcutCommand(event, activeKeybindings, options);
+  return activeCommand !== null && projectScriptIdFromCommand(activeCommand) !== null
+    ? activeCommand
+    : null;
 }
 
 export function formatShortcutKeyLabel(key: string): string {
@@ -563,7 +506,7 @@ export function shouldShowThreadJumpHintsForModifiers(
   for (const command of THREAD_JUMP_KEYBINDING_COMMANDS) {
     const binding = findEffectiveBindingForCommand(keybindings, command, options);
     if (!binding || !("shortcut" in binding)) continue;
-    if (matchesShortcutModifiers(modifiers, binding.shortcut, platform)) {
+    if (matchesKeybindingShortcutModifiers(modifiers, binding.shortcut, platform)) {
       return true;
     }
   }

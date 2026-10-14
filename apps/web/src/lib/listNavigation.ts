@@ -1,4 +1,4 @@
-import { resolveEventKeys } from "../keybindings";
+import { resolveEventKeys } from "@t3tools/shared/keybindings";
 
 export type ListNavigationDirection = "next" | "previous";
 

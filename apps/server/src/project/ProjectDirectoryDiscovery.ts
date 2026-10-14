@@ -84,7 +84,7 @@ const make = Effect.gen(function* () {
   const ensureProject = Effect.fn("ProjectDirectoryDiscovery.ensureProject")(function* (
     workspaceRoot: string,
   ) {
-    const id = yield* crypto.randomUUIDv4;
+    const id = yield* crypto.randomUUIDv4();
     const { created } = yield* projects.bootstrap({
       commandId: CommandId.make(`discovered-project:${id}`),
       projectId: ProjectId.make(id),
