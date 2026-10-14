@@ -7,10 +7,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -44,7 +44,7 @@ const makeLayer = (hooks: { readonly beforeReuse?: Effect.Effect<void> } = {}) =
           resolve: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),
         }),
         ServerSettings.layerTest({ worktreeReuse: { enabled: true } }),
-        SqlitePersistenceMemory,
+        SqlitePersistence.layerMemory,
         BaseLayer,
       ),
     ),

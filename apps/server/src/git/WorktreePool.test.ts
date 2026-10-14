@@ -4,10 +4,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as WorktreePool from "./WorktreePool.ts";
 
-const layer = WorktreePool.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const layer = WorktreePool.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
 
 // Each release lands one second after the previous so recency order is deterministic.
 const release = (path: string, repoRoot = "/repos/app") =>

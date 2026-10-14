@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ThreadShell,
   type TerminalSummary,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -22,7 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
@@ -33,7 +34,7 @@ import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
-import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -224,11 +225,17 @@ const sweepWorktree = (options: {
           listShells: () => Effect.succeed([{ id: projectId, workspaceRoot: repo } as never]),
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadWorktreePaths: () =>
+            Effect.succeed(
+              options.threadState === "deleted" ? [] : [{ threadId, worktreePath: worktree }],
+            ),
+          getThreadShell: () => Effect.succeed(thread as unknown as OrchestrationV2ThreadShell),
           getShellSnapshot: (snapshotOptions) =>
             Deferred.succeed(sweepStarted, undefined).pipe(
               Effect.as({
                 threads:
-                  options.threadState === "deleted" || snapshotOptions?.location === "archive"
+                  options.threadState === "deleted" ||
+                  (snapshotOptions?.location === "archive") !== (options.threadState === "archived")
                     ? []
                     : [thread],
               } as never),
@@ -248,11 +255,9 @@ const sweepWorktree = (options: {
           close: (id) => Effect.sync(() => closedSessions.push(id)),
         }),
       );
-      const cleanup = yield* StorageCleanup.make.pipe(Effect.provide(fakes));
-      yield* cleanup.start();
-      // The first sweep is queued by `start`; reading threads proves it began.
-      yield* Deferred.await(sweepStarted);
-      yield* cleanup.drain;
+      const context = yield* Layer.build(StorageCleanup.layer).pipe(Effect.provide(fakes));
+      const cleanup = Context.get(context, StorageCleanup.StorageCleanup);
+      const report = yield* cleanup.runNow;
 
       const removed = !(yield* fileSystem.exists(worktree));
       const standby = (yield* sql<{ path: string }>`SELECT path FROM worktree_standby`).map(
@@ -277,6 +282,7 @@ const sweepWorktree = (options: {
               Effect.map((result) => result.stdout.trim()),
             );
       return {
+        report,
         removed,
         branches: (yield* run(repo, "branch", "--list", "feature")).stdout,
         closedTerminals,
@@ -300,7 +306,7 @@ const sweepWorktree = (options: {
           }),
           GitVcsDriver.layer.pipe(Layer.provide(VcsProcess.layer)),
         ).pipe(
-          Layer.provideMerge(SqlitePersistenceMemory),
+          Layer.provideMerge(SqlitePersistence.layerMemory),
           Layer.provideMerge(ServerConfig.layerTest(baseDir, baseDir)),
         ),
       ),
@@ -360,6 +366,8 @@ it.live("parks a deleted thread's worktree for reuse instead of removing it", ()
     const result = yield* sweepWorktree({ force: true, threadState: "deleted", reuse: true });
     assert.isTrue(result.removed);
     assert.deepStrictEqual(result.standbyDirectories, [result.parkedDirectory]);
+    assert.strictEqual(result.report.bytesFreed, 0);
+    assert.match(result.report.entries[0]!.reason, /released for reuse/);
     // Detached, reset to the commit, ignored files kept, branch kept for the next claim.
     assert.deepStrictEqual(result.checkout, {
       branch: "",
@@ -400,6 +408,8 @@ it.live("parks a live thread's worktree, which resume recreates on its own branc
     const result = yield* sweepWorktree({ force: true, threadState: "settled", reuse: true });
     assert.isTrue(result.removed);
     assert.deepStrictEqual(result.standbyDirectories, [result.parkedDirectory]);
+    assert.strictEqual(result.report.bytesFreed, 0);
+    assert.match(result.report.entries[0]!.reason, /released for reuse/);
     assert.strictEqual(result.checkout?.branch, "");
     assert.deepStrictEqual(result.closedTerminals, ["terminal-1"]);
     assert.deepStrictEqual(result.closedSessions, [sessionId]);

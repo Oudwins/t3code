@@ -9,8 +9,9 @@ import * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 
 import * as ServerConfig from "../config.ts";
-import { ProjectServiceLayerLive } from "../orchestration-v2/runtimeLayer.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectDirectoryDiscovery from "./ProjectDirectoryDiscovery.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
@@ -74,10 +75,11 @@ const run = <A, E>(
     const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-discovery-" });
     const resolve = (entry: string) => path.join(root, entry);
     const layer = ProjectDirectoryDiscovery.layer.pipe(
-      Layer.provideMerge(ProjectServiceLayerLive),
+      Layer.provideMerge(RuntimeLayer.layerProjectService),
       Layer.provideMerge(enrichmentLayer),
+      Layer.provideMerge(ServerSettings.layerTest()),
       Layer.provideMerge(WorkspacePaths.layer),
-      Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(SqlitePersistence.layerMemory),
       Layer.provideMerge(
         configLayer(path.join(root, "data"), {
           projectParentDirs: (options.parents ?? []).map(resolve),

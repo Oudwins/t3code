@@ -9,9 +9,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -83,7 +83,7 @@ function makeHarness(options: HarnessOptions = {}) {
         }),
         ServerSettings.layerTest({ worktreeReuse: { enabled: true, ...options.reuse } }),
         NodeServices.layer,
-        SqlitePersistenceMemory,
+        SqlitePersistence.layerMemory,
       ),
     ),
   );

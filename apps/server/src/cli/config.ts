@@ -1,4 +1,4 @@
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NetService from "@t3tools/shared/Net";
 import {
   OtlpHeadersFromString,
@@ -19,13 +19,12 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { Argument, Flag } from "effect/unstable/cli";
-import * as CliError from "effect/unstable/cli/CliError";
+import { Argument, Flag } from "effect/cli";
+import * as CliError from "effect/cli/CliError";
 
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
-import { expandHomePath as expandHomePathSync } from "../pathExpansion.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 
 const modeFlag = Flag.Literals("mode", ServerConfig.RuntimeMode.literals).pipe(
@@ -101,12 +100,11 @@ const pathListConfig = (name: string) =>
     Config.withDefault(""),
     Config.mapEffect((value) =>
       Effect.gen(function* () {
-        const platform = yield* HostProcessPlatform;
+        const platform = yield* HostProcess.Platform;
         return value
           .split(platform === "win32" ? ";" : ":")
           .map((entry) => entry.trim())
-          .filter((entry) => entry.length > 0)
-          .map(expandHomePathSync);
+          .filter((entry) => entry.length > 0);
       }),
     ),
   );
@@ -379,8 +377,12 @@ export const resolveServerConfig = (
       () => mode === "desktop",
     );
     const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const desktopBootstrapSecret = bootstrap?.desktopBootstrapSecret;
+    const shellEnvironmentPrepared = bootstrap?.shellEnvironmentPrepared;
     const desktopTelemetryFd = bootstrap?.desktopTelemetryFd;
     const desktopTelemetryControlFd = bootstrap?.desktopTelemetryControlFd;
+    const desktopBrowserFd = bootstrap?.desktopBrowserFd;
+    const desktopBrowserControlFd = bootstrap?.desktopBrowserControlFd;
     const resourceMonitorPath = bootstrap?.resourceMonitorPath;
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
@@ -481,13 +483,17 @@ export const resolveServerConfig = (
       devUrl,
       ...(devAuthToken === undefined ? {} : { devAuthToken }),
       devAllowedOrigins: env.devAllowedOrigins,
-      projectParentDirs: env.projectParentDirs,
-      projectDirs: env.projectDirs,
+      projectParentDirs: yield* Effect.forEach(env.projectParentDirs, expandHomePath),
+      projectDirs: yield* Effect.forEach(env.projectDirs, expandHomePath),
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,
+      ...(desktopBootstrapSecret === undefined ? {} : { desktopBootstrapSecret }),
+      ...(shellEnvironmentPrepared === undefined ? {} : { shellEnvironmentPrepared }),
       desktopTelemetryFd,
       desktopTelemetryControlFd,
+      desktopBrowserFd,
+      desktopBrowserControlFd,
       resourceMonitorPath,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,

@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
 import { ProjectId, TerminalNotRunningError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -33,6 +34,9 @@ it.effect("resolves setup scripts through the standalone project service", () =>
   const write = vi.fn(
     (_input: Parameters<TerminalManager.TerminalManager["Service"]["write"]>[0]) => Effect.void,
   );
+  const closeIdle = vi.fn(
+    (_input: Parameters<TerminalManager.TerminalManager["Service"]["closeIdle"]>[0]) => Effect.void,
+  );
   const listeners: Array<Parameters<TerminalManager.TerminalManager["Service"]["subscribe"]>[0]> =
     [];
   const subscribe: TerminalManager.TerminalManager["Service"]["subscribe"] = (listener) =>
@@ -56,6 +60,14 @@ it.effect("resolves setup scripts through the standalone project service", () =>
         icon: "configure" as const,
         runOnWorktreeCreate: true,
       },
+      {
+        id: "clean",
+        name: "Clean",
+        command: "cargo clean",
+        icon: "build" as const,
+        runOnWorktreeCreate: false,
+        runOnSettle: true,
+      },
     ],
     createdAt: "2026-06-20T00:00:00.000Z",
     updatedAt: "2026-06-20T00:00:00.000Z",
@@ -67,7 +79,7 @@ it.effect("resolves setup scripts through the standalone project service", () =>
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeed(Option.some(project)),
         }),
-        Layer.mock(TerminalManager.TerminalManager)({ open, write, subscribe }),
+        Layer.mock(TerminalManager.TerminalManager)({ open, write, subscribe, closeIdle }),
         ServerSettings.layerTest(),
         NodeServices.layer,
       ),
@@ -121,6 +133,55 @@ it.effect("resolves setup scripts through the standalone project service", () =>
     });
     assert.deepEqual(lines, ["Downloading 10%", "Downloading 20%", "Done"]);
     yield* listener({ type: "closed", threadId: "thread-1", terminalId: "setup-setup" });
+
+    const settle = yield* runner.runForThread({
+      threadId: "thread-1",
+      projectId,
+      worktreePath: "/repo-worktree",
+      trigger: "settle",
+    });
+    const settleTerminalId = settle.status === "started" ? settle.terminalId : "";
+    assert.match(settleTerminalId, /^settle-clean-/);
+    assert.equal(write.mock.calls.at(-1)?.[0].data, "cargo clean\r");
+
+    // A clean run closes its shell once the prompt is back, not at the
+    // sentinel, so the prompt redraw is not taken for new activity.
+    const observedSettle = yield* runner.runForThread({
+      threadId: "thread-1",
+      projectId,
+      worktreePath: "/repo-worktree",
+      trigger: "settle",
+      observeCompletion: {},
+    });
+    const observedTerminalId = observedSettle.status === "started" ? observedSettle.terminalId : "";
+    // Each settle gets its own shell, so a busy one is never typed into.
+    assert.notEqual(observedTerminalId, settleTerminalId);
+    const token = /__T3_SETUP_DONE___(\w+):/.exec(write.mock.calls.at(-1)?.[0].data ?? "")?.[1];
+    const settleListener = listeners.at(-1)!;
+    const completion = yield* Effect.forkChild(
+      observedSettle.status === "started" && observedSettle.completion
+        ? observedSettle.completion
+        : Effect.die("no completion"),
+    );
+    yield* settleListener({
+      type: "output",
+      threadId: "thread-1",
+      terminalId: observedTerminalId,
+      data: `\r\n__T3_SETUP_DONE___${token}:0\r\n`,
+    });
+    yield* Effect.yieldNow;
+    assert.equal(closeIdle.mock.calls.length, 0);
+    yield* settleListener({
+      type: "output",
+      threadId: "thread-1",
+      terminalId: observedTerminalId,
+      data: "$ ",
+    });
+    assert.deepEqual((yield* Fiber.join(completion)).exitCode, 0);
+    assert.deepEqual(closeIdle.mock.calls[0]?.[0], {
+      threadId: "thread-1",
+      terminalId: observedTerminalId,
+    });
   }).pipe(Effect.provide(layer));
 });
 
@@ -278,13 +339,22 @@ const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFail
         updatedAt: "2026-06-20T00:00:00.000Z",
       };
     });
+  let commandWritten = Deferred.makeUnsafe<void>();
+  const waitForWrite = () =>
+    Deferred.await(commandWritten).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          commandWritten = Deferred.makeUnsafe<void>();
+        }),
+      ),
+    );
   const write = vi.fn(
     (_input: Parameters<TerminalManager.TerminalManager["Service"]["write"]>[0]) =>
       input.writeFails
         ? Effect.fail(
             new TerminalNotRunningError({ threadId: "thread-1", terminalId: "setup-setup" }),
           )
-        : Effect.void,
+        : Deferred.succeed(commandWritten, undefined).pipe(Effect.asVoid),
   );
   // Recorded when the effect runs, not when it is built.
   const closeCalls: Array<Parameters<TerminalManager.TerminalManager["Service"]["close"]>[0]> = [];
@@ -355,10 +425,10 @@ const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFail
         type: "output",
         threadId: "thread-1",
         terminalId: "setup-setup",
-        data: `__T3_SETUP_DONE___${token}:${exitCode}\n`,
+        data: `__T3_SETUP_DONE___${token}:${exitCode}\n$ `,
       });
     });
-  return { layer, runInput, opened, closeCalls, closeIdleCalls, finishScript };
+  return { layer, runInput, opened, closeCalls, closeIdleCalls, finishScript, waitForWrite };
 };
 
 it.effect("closes a blocking setup terminal, keeping its output, when the script fails", () => {
@@ -369,7 +439,7 @@ it.effect("closes a blocking setup terminal, keeping its output, when the script
       const fiber = yield* Effect.forkChild(
         ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
       );
-      yield* Effect.yieldNow;
+      yield* harness.waitForWrite();
       yield* harness.finishScript(3);
       return yield* Fiber.join(fiber);
     }).pipe(Effect.flip);
@@ -387,7 +457,7 @@ it.effect("runs a retry after a failed blocking setup in a fresh shell", () => {
     const first = yield* Effect.forkChild(
       ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
     );
-    yield* Effect.yieldNow;
+    yield* harness.waitForWrite();
     yield* harness.finishScript(3);
     yield* Fiber.join(first).pipe(Effect.flip);
 
@@ -396,7 +466,7 @@ it.effect("runs a retry after a failed blocking setup in a fresh shell", () => {
     const retry = yield* Effect.forkChild(
       ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
     );
-    yield* Effect.yieldNow;
+    yield* harness.waitForWrite();
     yield* Fiber.interrupt(retry);
 
     assert.equal(harness.opened.length, 2);
@@ -412,7 +482,7 @@ it.effect("only closes an idle blocking setup terminal when the script succeeds"
     const fiber = yield* Effect.forkChild(
       ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
     );
-    yield* Effect.yieldNow;
+    yield* harness.waitForWrite();
     yield* harness.finishScript(0);
     yield* Fiber.join(fiber);
 
@@ -432,7 +502,7 @@ it.effect("leaves an async setup terminal open when the script fails", () => {
     assert.equal(result.status, "started");
     if (result.status !== "started") return;
     const fiber = yield* Effect.forkChild(result.completion!);
-    yield* Effect.yieldNow;
+    yield* harness.waitForWrite();
     yield* harness.finishScript(1);
     assert.deepEqual(yield* Fiber.join(fiber), { exitCode: 1, durationMs: 0 });
 
@@ -447,7 +517,7 @@ it.effect("closes a blocking setup terminal when the wait is interrupted", () =>
     const fiber = yield* Effect.forkChild(
       ProjectSetupScriptRunner.runForThreadSettled(runner, harness.runInput),
     );
-    yield* Effect.yieldNow;
+    yield* harness.waitForWrite();
     yield* Fiber.interrupt(fiber);
 
     assert.deepEqual(harness.closeCalls, [{ threadId: "thread-1", terminalId: "setup-setup" }]);
