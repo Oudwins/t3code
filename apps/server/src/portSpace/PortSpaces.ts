@@ -14,6 +14,7 @@
 import type { ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
+import type { PortSpaceSpawn, PortSpaceSpawnInput } from "@t3tools/shared/ThreadPortSpace";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -49,13 +50,6 @@ export interface PortSpaceListener {
   readonly process: { readonly name: string; readonly pid: number } | undefined;
 }
 
-export interface PortSpaceSpawn {
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-  /** The complete environment to spawn with. The caller's own variables travel inside the helper's prologue. */
-  readonly env: Record<string, string>;
-}
-
 export class PortSpaceCommandError extends Schema.TaggedError<PortSpaceCommandError>()(
   "PortSpaceCommandError",
   {
@@ -81,15 +75,7 @@ export class PortSpaces extends Context.Service<
      * current user, with the given environment and working directory.
      * Variables whose names a shell cannot export are dropped.
      */
-    readonly wrapSpawn: (
-      threadId: ThreadId,
-      input: {
-        readonly command: string;
-        readonly args: ReadonlyArray<string>;
-        readonly cwd?: string | undefined;
-        readonly env?: Readonly<Record<string, string | undefined>> | undefined;
-      },
-    ) => PortSpaceSpawn;
+    readonly wrapSpawn: (threadId: ThreadId, input: PortSpaceSpawnInput) => PortSpaceSpawn;
     /**
      * The address that means "the host's loopback" from inside the thread's
      * namespace. Use it in place of 127.0.0.1 for anything on the host.

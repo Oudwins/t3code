@@ -2,6 +2,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import type { PortSpaceSpawn } from "@t3tools/shared/ThreadPortSpace";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import { ChildProcessSpawner } from "effect/process";
@@ -71,8 +72,7 @@ const withPortSpaces = <A, E>(
   );
 };
 
-const namespaceIdOf = (spawn: PortSpaces.PortSpaceSpawn) =>
-  spawn.args[spawn.args.indexOf("exec") + 1];
+const namespaceIdOf = (spawn: PortSpaceSpawn) => spawn.args[spawn.args.indexOf("exec") + 1];
 
 describe("PortSpaces.capability", () => {
   it.effect("is unsupported off Linux without touching the helper", () =>

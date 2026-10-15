@@ -31,6 +31,8 @@ import { AgentScope, AgentScopeThreadId, RAISE_OOM_SCORE_LINE } from "@t3tools/s
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
+import { spawnerInPortSpace } from "@t3tools/shared/SpawnerInPortSpace";
+import type { SpawnRewriter } from "@t3tools/shared/ThreadPortSpace";
 import { appendAcpStderrTail, sanitizeAcpStderrExcerpt } from "./stderr.ts";
 import {
   collectSessionConfigOptionValues,
@@ -93,6 +95,8 @@ export interface AcpSpawnInput {
 
 export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
+  /** Starts the agent inside the thread's port space instead of the host network. */
+  readonly rewriteSpawn?: SpawnRewriter;
   readonly cwd: string;
   readonly resumeSessionId?: string;
   readonly resumeMethod?: "load" | "resume";
@@ -1601,7 +1605,11 @@ export const make = (
             ELECTRON_RUN_AS_NODE: "1",
             T3_ACP_CGROUP_WRAPPER: "1",
           };
-    const child = yield* spawner
+    const agentSpawner =
+      options.rewriteSpawn === undefined
+        ? spawner
+        : spawnerInPortSpace(spawner, options.rewriteSpawn);
+    const child = yield* agentSpawner
       .spawn(
         ChildProcess.make(containedSpawnCommand.command, containedSpawnCommand.args, {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),

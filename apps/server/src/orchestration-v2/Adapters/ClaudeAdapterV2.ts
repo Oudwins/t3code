@@ -156,6 +156,8 @@ import {
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { ThreadPortSpace } from "@t3tools/shared/ThreadPortSpace";
+import { claudeMcpServersInPortSpace, claudeSpawnInPortSpace } from "./ClaudePortSpace.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -713,6 +715,7 @@ export const layerQueryRunner: Layer.Layer<
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
     const agentScope = yield* AgentScope;
     const platform = yield* HostProcess.Platform;
+    const threadPortSpace = yield* ThreadPortSpace;
 
     return ClaudeAgentSdkQueryRunner.of({
       allocateSessionId: crypto
@@ -739,7 +742,12 @@ export const layerQueryRunner: Layer.Layer<
         // which every local user can read. They go over the CLI's stdin control
         // channel instead, so header credentials stay out of its argv and out
         // of the environment every command the agent runs inherits.
-        const { mcpServers, ...queryOptions } = input.options;
+        const { mcpServers: requestedMcpServers, ...queryOptions } = input.options;
+        const portSpace = yield* threadPortSpace.resolve(input.threadId);
+        const mcpServers =
+          portSpace === undefined || requestedMcpServers === undefined
+            ? requestedMcpServers
+            : yield* claudeMcpServersInPortSpace(requestedMcpServers, portSpace);
         // The SDK spawns a native binary as `path ...executableArgs ...sdkArgs`,
         // which lets the agent scope wrapper go in front of the CLI. The SDK
         // runs a script entry through node instead, so those launch unwrapped.
@@ -764,10 +772,15 @@ export const layerQueryRunner: Layer.Layer<
                 executableArgs: [...launch.args, ...(queryOptions.executableArgs ?? [])],
               };
         // A spawner the caller passed keeps its process. Windows has no process
-        // groups, so there the SDK spawns the CLI itself.
+        // groups (or port spaces), so there the SDK spawns the CLI itself.
         const spawnClaudeCodeProcess =
           options.spawnClaudeCodeProcess ??
-          (platform === "win32" ? undefined : spawnClaudeProcessGroup);
+          (platform === "win32"
+            ? undefined
+            : portSpace === undefined
+              ? spawnClaudeProcessGroup
+              : (spawnOptions: ClaudeSpawnOptions) =>
+                  spawnClaudeProcessGroup(claudeSpawnInPortSpace(spawnOptions, portSpace.rewrite)));
         // The CLI is running once query() returns, so it is closed if anything
         // before the session is handed out fails or is interrupted.
         const queryRuntime = yield* Effect.uninterruptibleMask((restore) =>

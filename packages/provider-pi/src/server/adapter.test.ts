@@ -37,8 +37,10 @@ import * as ProviderContinuationRequests from "@t3tools/provider-core/server/Pro
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { handoffBudget } from "@t3tools/provider-core/server/handoffBudget";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ThreadPortSpace, type ThreadPortSpaceShape } from "@t3tools/shared/ThreadPortSpace";
 import { toolOutputImages, compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
 import {
   makePiAdapterV2,
@@ -110,7 +112,9 @@ interface FakePi {
   /** Close the fake process stdout stream. */
   readonly closeStdout: Effect.Effect<void>;
   readonly lastSpawn: () => {
+    readonly command: string;
     readonly args: ReadonlyArray<string>;
+    readonly cwd: string | undefined;
     readonly env: NodeJS.ProcessEnv;
   };
 }
@@ -255,15 +259,19 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
       }
     });
 
-  let lastSpawn: { readonly args: ReadonlyArray<string>; readonly env: NodeJS.ProcessEnv } = {
+  let lastSpawn: ReturnType<FakePi["lastSpawn"]> = {
+    command: "",
     args: [],
+    cwd: undefined,
     env: {},
   };
   const spawner = ChildProcessSpawner.make((command) =>
     Effect.sync(() => {
       if (ChildProcess.isStandardCommand(command)) {
         lastSpawn = {
+          command: command.command,
           args: command.args,
+          cwd: command.options.cwd,
           env: command.options.env ?? {},
         };
       }
@@ -347,6 +355,7 @@ const makeAdapter = Effect.fnUntraced(function* (
   launchArgs = "",
   forkFake?: FakePi,
   continuationRequests?: PiAdapterV2Options["continuationRequests"],
+  threadPortSpace: ThreadPortSpaceShape = ThreadPortSpace.defaultValue(),
 ) {
   const spawner =
     forkFake === undefined
@@ -378,7 +387,10 @@ const makeAdapter = Effect.fnUntraced(function* (
     instanceId: PI_INSTANCE_ID,
     settings: { enabled: true, binaryPath: "pi", launchArgs, customModels: [] },
     environment: {},
-  }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+  }).pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Effect.provideService(ThreadPortSpace, threadPortSpace),
+  );
 });
 
 const openRuntime = Effect.fnUntraced(function* (
@@ -1386,6 +1398,61 @@ describe("PiAdapterV2", () => {
       assert.equal(spawn.env.T3_MCP_BEARER_TOKEN, "secret-pi-token");
       assert.equal(spawn.env.T3_PI_RUNTIME_MODE, "full-access");
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect(
+    "runs in the thread's port space and reaches the T3 MCP endpoint through the host",
+    () =>
+      Effect.gen(function* () {
+        yield* (yield* McpProviderSessions.McpProviderSessions).set({
+          environmentId: EnvironmentId.make("environment-pi-port-space"),
+          threadId: THREAD_ID,
+          providerSessionId: "mcp-session-pi-port-space",
+          providerInstanceId: PI_INSTANCE_ID,
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer secret-pi-token",
+          browserToolsAvailable: true,
+        });
+        const host = yield* ProviderHost.ProviderHost;
+        const fake = yield* makeFakePi;
+        const rewritten: Array<{
+          command: string;
+          cwd: string | undefined;
+          mcpUrl: string | undefined;
+        }> = [];
+        const adapter = yield* makeAdapter(fake, "", undefined, undefined, {
+          resolve: () =>
+            Effect.succeed({
+              hostAddress: Effect.succeed("192.168.5.2"),
+              rewrite: (input) => {
+                rewritten.push({
+                  command: input.command,
+                  cwd: input.cwd,
+                  mcpUrl: input.env?.T3_MCP_URL,
+                });
+                return {
+                  command: "sudo",
+                  args: ["-n", "helper", "exec", "ns", "--", input.command, ...input.args],
+                  env: { T3_PORTSPACE_PROLOGUE: "prologue" },
+                };
+              },
+            }),
+        });
+        yield* adapter.openSession({
+          threadId: THREAD_ID,
+          providerSessionId: SESSION_ID,
+          modelSelection: modelSelection("default"),
+          runtimePolicy,
+        });
+        assert.deepEqual(rewritten, [
+          { command: "pi", cwd: host.paths.cwd, mcpUrl: "http://192.168.5.2:43123/mcp" },
+        ]);
+        const spawn = fake.lastSpawn();
+        assert.equal(spawn.command, "sudo");
+        assert.deepEqual(spawn.args.slice(0, 6), ["-n", "helper", "exec", "ns", "--", "pi"]);
+        assert.equal(spawn.cwd, undefined);
+        assert.deepEqual(spawn.env, { T3_PORTSPACE_PROLOGUE: "prologue" });
+      }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("rejects a resume while a turn is active", () =>
