@@ -1045,7 +1045,12 @@ describe("repository access decoding", () => {
     // The one place an unknown answer is not granted: a Merge button a reader cannot use wastes
     // the press, where a missing one still leaves the pull request open on its host.
     expect(expectSuccess(decodeViewerPermissionsJson(repositoryJson())).canWrite).toBe(false);
-    expect(expectSuccess(decodeViewerPermissionsJson(repositoryJson(null))).canWrite).toBe(false);
+  });
+
+  it("grants write and triage to a GitHub App, which GitHub answers with a null permission", () => {
+    const access = expectSuccess(decodeViewerPermissionsJson(repositoryJson(null)));
+    expect(access.canWrite).toBe(true);
+    expect(access.canTriage).toBe(true);
   });
 });
 
@@ -1078,6 +1083,7 @@ describe("viewer permission decoding", () => {
       canTriage: false,
       canUpdate: true,
       didAuthor: true,
+      canDeleteBranch: false,
     });
   });
 
@@ -1097,6 +1103,7 @@ describe("viewer permission decoding", () => {
       canTriage: false,
       canUpdate: false,
       didAuthor: false,
+      canDeleteBranch: false,
     });
   });
 
@@ -1110,6 +1117,7 @@ describe("viewer permission decoding", () => {
       canTriage: false,
       canUpdate: true,
       didAuthor: false,
+      canDeleteBranch: false,
     });
   });
 

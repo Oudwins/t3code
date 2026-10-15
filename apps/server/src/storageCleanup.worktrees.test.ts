@@ -182,6 +182,8 @@ const sweepWorktree = (options: {
         worktreePath: worktree,
         status: options.threadStatus ?? "idle",
         settledOverride: options.threadState === "settled" ? "settled" : null,
+        settledAt:
+          options.threadState === "settled" ? DateTime.makeUnsafe(nowMs - 30 * DAY_MS) : null,
         archivedAt: options.threadState === "archived" ? now : null,
         activeRunId: null,
         pendingBackgroundTasks: [],
@@ -192,6 +194,7 @@ const sweepWorktree = (options: {
         latestRunCompletedAt: null,
         latestUserMessageAt: null,
         createdAt: DateTime.makeUnsafe(nowMs - 30 * DAY_MS),
+        updatedAt: DateTime.makeUnsafe(nowMs - 30 * DAY_MS),
       } satisfies Partial<OrchestrationV2ThreadShell>;
       const terminal = {
         threadId,
