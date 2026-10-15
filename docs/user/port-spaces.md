@@ -33,9 +33,10 @@ affects threads from their next start.
 
 ## Good to know
 
-- **Previews need the desktop app.** The preview tab is where a thread's `localhost` is routed into
-  its port space. The web app and the mobile app have no preview tab, so they can run a thread's
-  terminals and see its servers but cannot open them.
+- **Previews need the desktop app.** Tabs the desktop app draws itself route a thread's `localhost`
+  into its port space. Tabs that run in the environment's browser, which is what the web and mobile
+  apps use and what a desktop tab moved to the environment uses, are not routed yet: there
+  `localhost` is the environment machine's own.
 - **A preview never falls back to your machine.** If the thread's port space is missing or the
   environment is unreachable, the page reports that instead of loading whatever is on your own
   `localhost:3000`. This includes a thread whose terminals are running outside a port space because

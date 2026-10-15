@@ -130,8 +130,10 @@ gets its own session whose proxy sends every loopback request into that thread's
 unchanged `http://localhost:3000` page, its absolute `localhost:4000` API calls, and its WebSockets
 all stay in the namespace the preview was opened from. Navigation never rewrites a URL.
 
-Preview is a desktop surface: it is an Electron `<webview>`, and web and mobile have no equivalent.
-Those clients still show a thread's servers and can run its terminals, but they cannot browse them.
+Only tabs the desktop app draws in its own `<webview>` are routed: a remote environment's tabs,
+which open there by default, and the tabs of the desktop's own server. Tabs that run in the
+environment's server browser (web, mobile, or a desktop tab moved to the environment) are not: that
+browser runs on the host, so its `localhost` is the host's, not the thread's.
 
 - [`PortSpaceProxy`](../../apps/desktop/src/preview/PortSpaceProxy.ts) runs one loopback SOCKS5
   listener per environment and thread in desktop main, attached with `session.setProxy` to a
