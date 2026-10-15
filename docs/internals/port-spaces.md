@@ -52,4 +52,22 @@ A bare namespace has no route out, and agents need the internet. Each namespace 
 ## Cleanup
 
 `release` kills everything in the namespace, deletes it, and removes `/etc/netns/t3-<id>`. Namespaces
-live in `/run/netns` and vanish on reboot.
+live in `/run/netns` and vanish on reboot. Closing a thread's resources (archive, delete) calls it
+after the terminals are closed, only on hosts where port spaces are set up.
+
+## Using them from T3
+
+`enablePortSpaces` is a per-environment server setting, not per thread. When it is on,
+[`ThreadPortSpace`](../../apps/server/src/portSpace/ThreadPortSpace.ts) creates the thread's
+namespace on first spawn and rewrites the spawn through the helper. If the namespace cannot be made
+it logs and spawns in the host network: a terminal that does not open is worse than one that shares
+ports.
+
+Spawning through the helper changes what a caller holds:
+
+- The pty's pid is root-owned `sudo`; the user's shell is its child. The server cannot signal `sudo`
+  (node-pty swallows the `EPERM`), so terminal shutdown signals the user-owned descendants instead,
+  and the subprocess inspector looks one level through `sudo` to find the shell.
+- Spawn failure is not detected by the shell-fallback loop: `sudo` starts fine even when the shell
+  it was asked to run does not exist.
+- Host-side port discovery does not see a namespace's listeners. Use `PortSpaces.listeners`.

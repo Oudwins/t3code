@@ -1218,6 +1218,11 @@ export const ServerSettings = Schema.Struct({
    * not also grant providers control of simulators and emulators.
    */
   enableDeviceSupport: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Whether threads on this Linux server run in their own network namespace so
+   * several can bind the same port. Needs `t3 portspace setup` on the host.
+   */
+  enablePortSpaces: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Whether the server-local Device panel setup flow has been completed. */
   deviceOnboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceHosts: SshDeviceHostConfigs.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
@@ -1606,6 +1611,7 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
+  enablePortSpaces: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
