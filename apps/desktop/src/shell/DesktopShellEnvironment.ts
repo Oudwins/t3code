@@ -88,6 +88,9 @@ const LOGIN_SHELL_ENV_NAMES = [
   "WAYLAND_DISPLAY",
   "CODE_PROJECTS_PARENT_DIRS",
   "CODE_PROJECTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
   "T3CODE_TELEMETRY_ENABLED",
   "__MISE_DIFF",
 ] as const;
@@ -458,6 +461,12 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "WAYLAND_DISPLAY",
       "CODE_PROJECTS_PARENT_DIRS",
       "CODE_PROJECTS",
+      // CA trust set in the shell profile. Without it, a Node or OpenSSL build
+      // that has no bundled roots (a shared-OpenSSL node on PATH) cannot verify
+      // TLS, so provider updaters and agents fail to reach their registries.
+      "SSL_CERT_FILE",
+      "SSL_CERT_DIR",
+      "NODE_EXTRA_CA_CERTS",
       // The telemetry opt-out is documented as a shell variable; GUI launches never see it.
       "T3CODE_TELEMETRY_ENABLED",
     ] as const) {
