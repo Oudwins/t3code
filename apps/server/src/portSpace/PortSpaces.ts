@@ -12,10 +12,11 @@
  */
 
 import type { ThreadId } from "@t3tools/contracts";
-import { HostProcessPlatform, HostProcessUserId } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- the namespace id is derived synchronously at spawn.
 import * as NodeCrypto from "node:crypto";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -151,8 +152,8 @@ const parseListeners = (output: string): ReadonlyArray<PortSpaceListener> => {
 
 export const make = Effect.fn("PortSpaces.make")(function* (environmentId: string) {
   const runner = yield* ProcessRunner.ProcessRunner;
-  const platform = yield* HostProcessPlatform;
-  const uid = yield* HostProcessUserId;
+  const platform = yield* HostProcess.Platform;
+  const uid = yield* HostProcess.UserId;
 
   // `-n` makes a missing sudoers entry fail fast instead of prompting.
   const helperPrefix =

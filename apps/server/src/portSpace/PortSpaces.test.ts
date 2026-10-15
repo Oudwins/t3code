@@ -1,10 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off - the helper scripts are checked by running a real sh.
 import { describe, expect, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
-import { HostProcessPlatform, HostProcessUserId } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -21,7 +21,7 @@ import {
 } from "./PortSpaceHelper.ts";
 import * as PortSpaces from "./PortSpaces.ts";
 
-const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+const windowsHost = HostProcess.Platform.defaultValue() === "win32";
 
 const threadA = ThreadId.make("thread-a");
 const threadB = ThreadId.make("thread-b/with:odd chars");
@@ -66,8 +66,8 @@ const withPortSpaces = <A, E>(
     return yield* use(portSpaces, calls);
   }).pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
-    Effect.provideService(HostProcessPlatform, options.platform ?? "linux"),
-    Effect.provideService(HostProcessUserId, "uid" in options ? options.uid : 1000),
+    Effect.provideService(HostProcess.Platform, options.platform ?? "linux"),
+    Effect.provideService(HostProcess.UserId, "uid" in options ? options.uid : 1000),
   );
 };
 
@@ -396,8 +396,8 @@ describe("PortSpaces.ensure and release", () => {
       expect(String(Exit.isFailure(exit) ? exit.cause : "")).toContain("Port space release failed");
     }).pipe(
       Effect.provideService(ProcessRunner.ProcessRunner, runner),
-      Effect.provideService(HostProcessPlatform, "linux"),
-      Effect.provideService(HostProcessUserId, 1000),
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provideService(HostProcess.UserId, 1000),
     );
   });
 });

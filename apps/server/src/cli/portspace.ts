@@ -1,13 +1,9 @@
-import {
-  HostProcessEnvironment,
-  HostProcessPlatform,
-  HostProcessUserId,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { Command, Flag, Prompt } from "effect/unstable/cli";
+import { Command, Flag, Prompt } from "effect/cli";
 
 import {
   PORT_SPACE_HELPER_PATH,
@@ -61,9 +57,9 @@ const describeCapability = (capability: PortSpaces.PortSpaceCapability) => {
  * `sudo t3 ...` installs for the user who typed it. Plain root needs no entry.
  */
 const resolveInstallTarget = Effect.fn("cli.portspace.resolve_target")(function* () {
-  const platform = yield* HostProcessPlatform;
-  const uid = yield* HostProcessUserId;
-  const environment = yield* HostProcessEnvironment;
+  const platform = yield* HostProcess.Platform;
+  const uid = yield* HostProcess.UserId;
+  const environment = yield* HostProcess.Environment;
   if (platform !== "linux" || uid === undefined) {
     return yield* new CliPortSpaceError({
       reason: "Port spaces need Linux. Run this on the Linux machine that runs your threads.",
@@ -106,7 +102,7 @@ const confirm = (message: string, assumeYes: boolean) =>
   assumeYes
     ? Effect.succeed(true)
     : Prompt.run(Prompt.Confirm({ message, initial: false })).pipe(
-        Effect.catchTag("QuitError", () => Effect.succeed(false)),
+        Effect.catchTags({ QuitError: () => Effect.succeed(false) }),
       );
 
 const statusCommand = Command.make("status").pipe(
