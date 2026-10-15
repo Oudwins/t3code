@@ -42,6 +42,7 @@ import {
   useEnvironmentHttpBaseUrl,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
+import { usePortSpacesEnabled } from "~/state/portSpace";
 import { previewEnvironment } from "~/state/preview";
 import { usePreviewStreamAccess } from "~/state/previewStream";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -162,6 +163,7 @@ export function PreviewView({
   const threadRefRef = useRef(threadRef);
   threadRefRef.current = threadRef;
   const previewState = useThreadPreviewState(threadRef);
+  const portSpacesEnabled = usePortSpacesEnabled(threadRef.environmentId);
   const recentHistoryEntries = useThreadRecentHistory(
     threadRef,
     BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT,
@@ -314,7 +316,7 @@ export function PreviewView({
         const resolved =
           isServerTab || !previewBridge
             ? normalizePreviewUrl(next)
-            : resolveDiscoveredServerUrl(threadRef.environmentId, next);
+            : resolveDiscoveredServerUrl(threadRef.environmentId, next, portSpacesEnabled);
         if (await navigateToResolvedUrl(resolved)) {
           recordVisitForThread(threadRef, next);
         }
@@ -322,7 +324,7 @@ export function PreviewView({
         // Server-side `failed` event renders the unreachable view.
       }
     },
-    [isServerTab, navigateToResolvedUrl, threadRef],
+    [isServerTab, navigateToResolvedUrl, portSpacesEnabled, threadRef],
   );
 
   const handleRefresh = useCallback(() => {
@@ -467,7 +469,7 @@ export function PreviewView({
         ? {
             url:
               moveTarget === "desktop"
-                ? resolveDiscoveredServerUrl(threadRef.environmentId, url)
+                ? resolveDiscoveredServerUrl(threadRef.environmentId, url, portSpacesEnabled)
                 : url,
           }
         : {}),

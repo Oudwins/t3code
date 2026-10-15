@@ -14,11 +14,15 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.25:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "environment-port",
-        port: 5173,
-        path: "/dashboard",
-      }),
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "environment-port",
+          port: 5173,
+          path: "/dashboard",
+        },
+        false,
+      ),
     ).toEqual({
       requestedUrl: "http://localhost:5173/dashboard",
       resolvedUrl: "http://192.168.1.25:5173/dashboard",
@@ -31,10 +35,14 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://100.65.180.100:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "http://localhost:5173/dashboard?mode=test#results",
-      }),
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "http://localhost:5173/dashboard?mode=test#results",
+        },
+        false,
+      ),
     ).toEqual({
       requestedUrl: "http://localhost:5173/dashboard?mode=test#results",
       resolvedUrl: "http://localhost:5173/dashboard?mode=test#results",
@@ -47,10 +55,14 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.50:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "http://127.0.0.1:5999/",
-      }),
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "http://127.0.0.1:5999/",
+        },
+        false,
+      ),
     ).toEqual({
       requestedUrl: "http://127.0.0.1:5999/",
       resolvedUrl: "http://127.0.0.1:5999/",
@@ -63,10 +75,14 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://100.65.180.100:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "http://user:p%40ss@localhost:5173/dashboard",
-      }).resolvedUrl,
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "http://user:p%40ss@localhost:5173/dashboard",
+        },
+        false,
+      ).resolvedUrl,
     ).toBe("http://user:p%40ss@localhost:5173/dashboard");
   });
 
@@ -76,10 +92,14 @@ describe("browser target resolver", () => {
     });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "http://user:p%40ss@localhost:5173/dashboard?mode=test#results",
-      }).resolvedUrl,
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "http://user:p%40ss@localhost:5173/dashboard?mode=test#results",
+        },
+        false,
+      ).resolvedUrl,
     ).toBe("http://user:p%40ss@localhost:5173/dashboard?mode=test#results");
   });
 
@@ -87,10 +107,14 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.25:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "localhost:3000/app",
-      }).resolvedUrl,
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "localhost:3000/app",
+        },
+        false,
+      ).resolvedUrl,
     ).toBe("localhost:3000/app");
   });
 
@@ -98,10 +122,14 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://127.0.0.1:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "localhost:3000/app",
-      }),
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "localhost:3000/app",
+        },
+        false,
+      ),
     ).toEqual({
       requestedUrl: "localhost:3000/app",
       resolvedUrl: "localhost:3000/app",
@@ -114,10 +142,14 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://127.0.0.2:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "http://localhost:3000/app",
-      }),
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "http://localhost:3000/app",
+        },
+        false,
+      ),
     ).toEqual({
       requestedUrl: "http://localhost:3000/app",
       resolvedUrl: "http://localhost:3000/app",
@@ -130,27 +162,35 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "https://relay.example.com" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(() =>
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "environment-port",
-        port: 5173,
-      }),
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "environment-port",
+          port: 5173,
+        },
+        false,
+      ),
     ).toThrow(/authenticated preview gateway/);
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "http://localhost:5173",
-      }),
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "url",
+          url: "http://localhost:5173",
+        },
+        false,
+      ),
     ).toMatchObject({ resolvedUrl: "http://localhost:5173", resolutionKind: "direct" });
   });
 
   it("normalizes schemeless localhost server-picker values", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://localhost:3773" });
     const { resolveDiscoveredServerUrl } = await import("./browserTargetResolver");
-    expect(resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:5173")).toBe(
-      "http://localhost:5173/",
-    );
     expect(
-      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "0.0.0.0:3000/app"),
+      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:5173", false),
+    ).toBe("http://localhost:5173/");
+    expect(
+      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "0.0.0.0:3000/app", false),
     ).toBe("http://localhost:3000/app");
   });
 
@@ -158,7 +198,7 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.25:3773" });
     const { resolveDiscoveredServerUrl } = await import("./browserTargetResolver");
     expect(
-      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:3000/app"),
+      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:3000/app", false),
     ).toBe("http://192.168.1.25:3000/app");
   });
 
@@ -174,7 +214,7 @@ describe("browser target resolver", () => {
       ]) {
         readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://172.24.66.27:3773", target });
         expect(
-          resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:3001/"),
+          resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:3001/", false),
         ).toBe("http://localhost:3001/");
       }
       readPreparedConnection.mockReturnValue({
@@ -182,7 +222,7 @@ describe("browser target resolver", () => {
         target: { _tag: "BearerConnectionTarget", connectionId: "saved:remote" },
       });
       expect(
-        resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:3001/"),
+        resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:3001/", false),
       ).toBe("http://192.168.1.25:3001/");
     } finally {
       env.isElectron = false;
@@ -193,15 +233,19 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://127.0.0.1:3773" });
     const { resolveDiscoveredServerUrl } = await import("./browserTargetResolver");
     expect(
-      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:5173/app?x=1#top"),
+      resolveDiscoveredServerUrl(
+        EnvironmentId.make("environment-1"),
+        "localhost:5173/app?x=1#top",
+        false,
+      ),
     ).toBe("http://localhost:5173/app?x=1#top");
   });
 
   it("normalizes public URLs without treating them as environment ports", async () => {
     const { resolveDiscoveredServerUrl } = await import("./browserTargetResolver");
-    expect(resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "example.com/app")).toBe(
-      "https://example.com/app",
-    );
+    expect(
+      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "example.com/app", false),
+    ).toBe("https://example.com/app");
   });
 
   it("supports private IPv6 environment hosts", async () => {
@@ -210,11 +254,15 @@ describe("browser target resolver", () => {
     });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "environment-port",
-        port: 5173,
-        path: "/app?mode=test",
-      }).resolvedUrl,
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "environment-port",
+          port: 5173,
+          path: "/app?mode=test",
+        },
+        false,
+      ).resolvedUrl,
     ).toBe("http://[fd7a:115c:a1e0::53]:5173/app?mode=test");
   });
 
@@ -222,10 +270,14 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://[::1]:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "environment-port",
-        port: 5173,
-      }).resolvedUrl,
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "environment-port",
+          port: 5173,
+        },
+        false,
+      ).resolvedUrl,
     ).toBe("http://localhost:5173/");
   });
 
@@ -233,17 +285,47 @@ describe("browser target resolver", () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://127.0.0.1:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "environment-port",
-        port: 5173,
-        path: "/app",
-      }).resolvedUrl,
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        {
+          kind: "environment-port",
+          port: 5173,
+          path: "/app",
+        },
+        false,
+      ).resolvedUrl,
     ).toBe("http://localhost:5173/app");
+  });
+
+  it("addresses a port-spaced environment's ports as localhost", async () => {
+    readPreparedConnection.mockReturnValue({ httpBaseUrl: "https://relay.example.com" });
+    const { resolveBrowserNavigationTarget, resolveDiscoveredServerUrl } =
+      await import("./browserTargetResolver");
+    expect(
+      resolveBrowserNavigationTarget(
+        EnvironmentId.make("environment-1"),
+        { kind: "environment-port", port: 3000, path: "/app?x=1" },
+        true,
+      ),
+    ).toEqual({
+      requestedUrl: "http://localhost:3000/app?x=1",
+      resolvedUrl: "http://localhost:3000/app?x=1",
+      resolutionKind: "direct",
+      environmentId: "environment-1",
+    });
+    expect(
+      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:3000/app", true),
+    ).toBe("http://localhost:3000/app");
+    expect(
+      resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "example.com/app", true),
+    ).toBe("https://example.com/app");
   });
 
   it("leaves malformed input for the normal navigation error path", async () => {
     const { resolveDiscoveredServerUrl } = await import("./browserTargetResolver");
-    expect(resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "   ")).toBe("   ");
+    expect(resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "   ", false)).toBe(
+      "   ",
+    );
   });
 
   it("classifies exact private IPv4 and IPv6 boundaries", async () => {

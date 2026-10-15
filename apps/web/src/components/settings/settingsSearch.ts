@@ -741,6 +741,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["xcode android studio sdk avd runtime"],
   },
   {
+    id: "port-spaces",
+    title: "Port spaces",
+    to: "/settings/integrations",
+    searchTerms: [
+      "network namespace isolate same port dev server vite collision linux thread forward proxy",
+    ],
+  },
+  {
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/integrations",

@@ -3,6 +3,7 @@ import type {
   DesktopPreviewBridge,
   DesktopPreviewWebviewConfig,
   EnvironmentId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -47,21 +48,23 @@ export const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
   profileId?: string,
   bridge: PreviewConfigBridge | null = previewBridge,
+  portSpaceThreadId?: ThreadId,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
   if (bridge === null) {
     return Effect.fail(new PreviewWebviewBridgeUnavailableError({ environmentId }));
   }
 
   return Effect.tryPromise({
-    try: () => bridge.getPreviewConfig(environmentId, profileId),
+    try: () => bridge.getPreviewConfig(environmentId, profileId, portSpaceThreadId),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };
 
 /**
- * `Atom.family` keys on its argument, so the environment and profile are
- * folded into one string: passing an object would allocate a fresh entry on
- * every render.
+ * `Atom.family` keys on its argument, so the environment, thread and profile
+ * are folded into one string: passing an object would allocate a fresh entry
+ * on every render. The thread is empty unless the environment's port spaces
+ * are on, which is what gives each thread its own proxied partition.
  *
  * The profile is the tail rather than a second field, so an id containing the
  * delimiter round-trips whole instead of being truncated into a different
@@ -70,22 +73,32 @@ export const loadPreviewWebviewConfig = (
  */
 const CONFIG_KEY_DELIMITER = "\u0000";
 
-const configKey = (environmentId: EnvironmentId, profileId: string | undefined): string =>
-  `${environmentId}${CONFIG_KEY_DELIMITER}${profileId ?? ""}`;
+const configKey = (
+  environmentId: EnvironmentId,
+  threadId: ThreadId | undefined,
+  profileId: string | undefined,
+): string => [environmentId, threadId ?? "", profileId ?? ""].join(CONFIG_KEY_DELIMITER);
 
-const parseConfigKey = (key: string): { environmentId: EnvironmentId; profileId?: string } => {
-  const delimiter = key.indexOf(CONFIG_KEY_DELIMITER);
-  const environmentId = (delimiter === -1 ? key : key.slice(0, delimiter)) as EnvironmentId;
-  const profileId = delimiter === -1 ? "" : key.slice(delimiter + CONFIG_KEY_DELIMITER.length);
+const parseConfigKey = (
+  key: string,
+): { environmentId: EnvironmentId; threadId?: ThreadId; profileId?: string } => {
+  const first = key.indexOf(CONFIG_KEY_DELIMITER);
+  const second = first === -1 ? -1 : key.indexOf(CONFIG_KEY_DELIMITER, first + 1);
+  const environmentId = (first === -1 ? key : key.slice(0, first)) as EnvironmentId;
+  const threadId = first === -1 ? "" : key.slice(first + 1, second === -1 ? undefined : second);
+  const profileId = second === -1 ? "" : key.slice(second + 1);
   return {
     environmentId,
+    ...(threadId === "" ? {} : { threadId: threadId as ThreadId }),
     ...(profileId === "" ? {} : { profileId }),
   };
 };
 
 const previewWebviewConfigAtom = Atom.family((key: string) => {
-  const { environmentId, profileId } = parseConfigKey(key);
-  return Atom.make(loadPreviewWebviewConfig(environmentId, profileId)).pipe(
+  const { environmentId, threadId, profileId } = parseConfigKey(key);
+  return Atom.make(
+    loadPreviewWebviewConfig(environmentId, profileId, previewBridge, threadId),
+  ).pipe(
     Atom.swr({
       staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
       revalidateOnMount: true,
@@ -98,7 +111,10 @@ const previewWebviewConfigAtom = Atom.family((key: string) => {
 export function usePreviewWebviewConfig(
   environmentId: EnvironmentId,
   profileId?: string,
+  portSpaceThreadId?: ThreadId,
 ): DesktopPreviewWebviewConfig | null {
-  const result = useAtomValue(previewWebviewConfigAtom(configKey(environmentId, profileId)));
+  const result = useAtomValue(
+    previewWebviewConfigAtom(configKey(environmentId, portSpaceThreadId, profileId)),
+  );
   return Option.getOrNull(AsyncResult.value(result));
 }

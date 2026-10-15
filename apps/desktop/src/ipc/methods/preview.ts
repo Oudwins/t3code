@@ -2,6 +2,7 @@ import {
   DesktopPreviewAnnotationSendEnabledInputSchema,
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewArtifactInputSchema,
+  DesktopPortSpaceTunnelInputSchema,
   DesktopPreviewConfigInputSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
@@ -32,6 +33,7 @@ import * as NodeURL from "node:url";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as PortSpaceProxy from "../../preview/PortSpaceProxy.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
@@ -284,6 +286,23 @@ export function resolvePartitionScope(
 }
 
 /**
+ * Cookies are shared across ports and `localhost` is every thread's address,
+ * so two threads' apps on :3000 would otherwise see each other's sessions.
+ * Each thread and profile gets its own in-memory partition.
+ */
+export function resolvePortSpacePartitionScope(
+  environmentId: string,
+  threadId: string,
+  profileId: string | undefined,
+) {
+  return {
+    scope: JSON.stringify([environmentId, threadId, profileId ?? DEFAULT_BROWSER_PROFILE_ID]),
+    persistent: false,
+    namespace: "port-space" as const,
+  };
+}
+
+/**
  * Clearing without a profile keeps the historical "everything" behaviour for
  * an explicit all-profiles action; naming a profile confines it to that
  * profile's partition so one profile's sign-out cannot reach the others.
@@ -307,18 +326,39 @@ export const getPreviewConfig = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_GET_CONFIG_CHANNEL,
   payload: DesktopPreviewConfigInputSchema,
   result: DesktopPreviewWebviewConfigSchema,
-  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId, profileId }) {
+  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({
+    environmentId,
+    profileId,
+    portSpaceThreadId,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
-    const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
+    const portSpaceProxy = yield* PortSpaceProxy.PortSpaceProxy;
+    const { scope, persistent, namespace } =
+      portSpaceThreadId === undefined
+        ? resolvePartitionScope(environmentId, profileId)
+        : resolvePortSpacePartitionScope(environmentId, portSpaceThreadId, profileId);
     // Creating the session first is what installs the UA rewrite and permission
     // handlers; a guest that attached to an untouched partition would run with
     // Electron's default UA and Chromium's default permission behaviour.
-    yield* manager.getBrowserSession(scope, persistent, namespace);
+    const browserSession = yield* manager.getBrowserSession(scope, persistent, namespace);
+    if (portSpaceThreadId !== undefined) {
+      yield* portSpaceProxy.attach(browserSession, { environmentId, threadId: portSpaceThreadId });
+    }
     return {
       partition: yield* manager.getBrowserPartition(scope, persistent, namespace),
       webPreferences: PREVIEW_WEBVIEW_PREFERENCES,
       preloadUrl: NodeURL.pathToFileURL(`${__dirname}/preview-pick-preload.cjs`).href,
     };
+  }),
+});
+
+export const setPortSpaceTunnel = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_SET_PORT_SPACE_TUNNEL_CHANNEL,
+  payload: DesktopPortSpaceTunnelInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.setPortSpaceTunnel")(function* (input) {
+    const portSpaceProxy = yield* PortSpaceProxy.PortSpaceProxy;
+    yield* portSpaceProxy.setTunnel(input);
   }),
 });
 
@@ -453,7 +493,6 @@ export const methods = [
   openDevTools,
   clearCookies,
   clearCache,
-  getPreviewConfig,
   setAnnotationTheme,
   setAnnotationSendEnabled,
   pickElement,

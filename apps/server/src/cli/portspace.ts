@@ -7,7 +7,6 @@ import { Command, Flag, Prompt } from "effect/cli";
 
 import {
   PORT_SPACE_HELPER_PATH,
-  PORT_SPACE_SETUP_COMMAND,
   PORT_SPACE_SUDOERS_PATH,
   portSpaceHelperScript,
   portSpaceInstallScript,
@@ -38,18 +37,6 @@ const yesFlag = Flag.Boolean("yes").pipe(
   ),
   Flag.withDefault(false),
 );
-
-const describeCapability = (capability: PortSpaces.PortSpaceCapability) => {
-  if (capability.available) return "Port spaces are ready.";
-  switch (capability.reason) {
-    case "unsupported-platform":
-      return "Port spaces need Linux. Run T3 Code on a Linux machine to use them.";
-    case "needs-setup":
-      return `Port spaces need a one-time setup. Run: ${capability.setupCommand}`;
-    case "missing-tools":
-      return `Port spaces need tools this machine does not have: ${capability.tools.join(", ")}.\nInstall iproute2 (ip, ss), util-linux (nsenter, setpriv) and passt (pasta), then run: ${PORT_SPACE_SETUP_COMMAND}`;
-  }
-};
 
 /**
  * Who the sudoers entry is for, and how to reach root. A normal user goes
@@ -110,7 +97,7 @@ const statusCommand = Command.make("status").pipe(
   Command.withHandler(() =>
     Effect.gen(function* () {
       const portSpaces = yield* PortSpaces.PortSpaces;
-      yield* Console.log(describeCapability(yield* portSpaces.capability));
+      yield* Console.log(PortSpaces.describePortSpaceCapability(yield* portSpaces.capability));
     }).pipe(Effect.provide(runtimeLayer)),
   ),
 );
@@ -153,7 +140,7 @@ const setupCommand = Command.make("setup", { yes: yesFlag }).pipe(
         script: portSpaceInstallScript({ sudoersUid: target.sudoersUid }),
       });
       const portSpaces = yield* PortSpaces.PortSpaces;
-      yield* Console.log(describeCapability(yield* portSpaces.capability));
+      yield* Console.log(PortSpaces.describePortSpaceCapability(yield* portSpaces.capability));
     }).pipe(Effect.provide(runtimeLayer)),
   ),
 );

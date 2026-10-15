@@ -142,6 +142,25 @@ describe("PortSpaces.capability", () => {
   );
 });
 
+describe("PortSpaces.portSpacesStatus", () => {
+  it("says nothing more than ready when available and explains every way it is not", () => {
+    expect(PortSpaces.portSpacesStatus({ available: true })).toEqual({ available: true });
+    expect(
+      PortSpaces.portSpacesStatus({ available: false, reason: "unsupported-platform" }),
+    ).toEqual({ available: false, detail: expect.stringContaining("Linux") });
+    expect(
+      PortSpaces.portSpacesStatus({
+        available: false,
+        reason: "needs-setup",
+        setupCommand: PORT_SPACE_SETUP_COMMAND,
+      }),
+    ).toEqual({ available: false, detail: expect.stringContaining(PORT_SPACE_SETUP_COMMAND) });
+    expect(
+      PortSpaces.portSpacesStatus({ available: false, reason: "missing-tools", tools: ["pasta"] }),
+    ).toEqual({ available: false, detail: expect.stringContaining("pasta") });
+  });
+});
+
 describe("PortSpaces.wrapSpawn", () => {
   it.effect("derives a valid, stable, per-thread namespace id", () =>
     withPortSpaces({}, (portSpaces) =>

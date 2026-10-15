@@ -11,7 +11,7 @@
  * @module PortSpaces
  */
 
-import type { ThreadId } from "@t3tools/contracts";
+import type { PortSpacesStatus, ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import type { PortSpaceSpawn, PortSpaceSpawnInput } from "@t3tools/shared/ThreadPortSpace";
@@ -44,6 +44,23 @@ export type PortSpaceCapability =
       readonly reason: "missing-tools";
       readonly tools: ReadonlyArray<string>;
     };
+
+export const describePortSpaceCapability = (capability: PortSpaceCapability): string => {
+  if (capability.available) return "Port spaces are ready.";
+  switch (capability.reason) {
+    case "unsupported-platform":
+      return "Port spaces need Linux. Run T3 Code on a Linux machine to use them.";
+    case "needs-setup":
+      return `Port spaces need a one-time setup. Run: ${capability.setupCommand}`;
+    case "missing-tools":
+      return `Port spaces need tools this machine does not have: ${capability.tools.join(", ")}.\nInstall iproute2 (ip, ss), util-linux (nsenter, setpriv) and passt (pasta), then run: ${PORT_SPACE_SETUP_COMMAND}`;
+  }
+};
+
+export const portSpacesStatus = (capability: PortSpaceCapability): PortSpacesStatus =>
+  capability.available
+    ? { available: true }
+    : { available: false, detail: describePortSpaceCapability(capability) };
 
 export interface PortSpaceListener {
   readonly address: string;

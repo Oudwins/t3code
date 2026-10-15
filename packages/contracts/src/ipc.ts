@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { SnapShotSource } from "./chatAttachment.ts";
-import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {
   BrowserImportResult,
@@ -1073,7 +1073,19 @@ export const DesktopPreviewConfigInputSchema = Schema.Struct({
    * UA rewrite or permission handlers installed.
    */
   profileId: Schema.optional(BrowserProfileId),
+  /**
+   * Set for a thread whose environment runs port spaces: the session is private
+   * to that thread and every request it makes goes through the thread's proxy.
+   */
+  portSpaceThreadId: Schema.optional(ThreadId),
 });
+
+export const DesktopPortSpaceTunnelInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  /** Credentials for the environment's port tunnel; `null` revokes them. */
+  access: Schema.NullOr(Schema.Struct({ url: Schema.String, ticket: Schema.String })),
+});
+export type DesktopPortSpaceTunnelInput = typeof DesktopPortSpaceTunnelInputSchema.Type;
 
 export const DesktopPreviewClearDataInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
@@ -1318,7 +1330,10 @@ export interface DesktopPreviewBridge {
   getPreviewConfig: (
     environmentId: EnvironmentId,
     profileId?: string,
+    portSpaceThreadId?: ThreadId,
   ) => Promise<DesktopPreviewWebviewConfig>;
+  /** Credentials the thread proxies use to dial an environment's port tunnel. */
+  setPortSpaceTunnel: (input: DesktopPortSpaceTunnelInput) => Promise<void>;
   /** Browsers on this machine whose cookies can be imported. */
   listBrowserImportSources: () => Promise<ReadonlyArray<BrowserImportSource>>;
   importBrowserCookies: (input: {

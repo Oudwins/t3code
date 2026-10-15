@@ -12,6 +12,7 @@ import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
 import { cn, isMacPlatform } from "~/lib/utils";
+import { usePortSpacesEnabled, usePortSpaceTunnelSettled } from "~/state/portSpace";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
 import { useActiveBrowserRecordingTabIds } from "./browserRecording";
@@ -84,7 +85,13 @@ export function HostedBrowserWebview(props: {
     serverRendering,
   } = props;
   const clientSettingsHydrated = useClientSettingsHydrated();
-  const config = usePreviewWebviewConfig(threadRef.environmentId, profileId);
+  const portSpacesEnabled = usePortSpacesEnabled(threadRef.environmentId);
+  const tunnelSettled = usePortSpaceTunnelSettled(threadRef.environmentId, portSpacesEnabled);
+  const config = usePreviewWebviewConfig(
+    threadRef.environmentId,
+    profileId,
+    portSpacesEnabled ? threadRef.threadId : undefined,
+  );
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -155,7 +162,7 @@ export function HostedBrowserWebview(props: {
   useEffect(() => {
     const webview = webviewRef.current;
     const bridge = previewBridge;
-    if (!clientSettingsHydrated || !webview || !config || !bridge) return;
+    if (!clientSettingsHydrated || !tunnelSettled || !webview || !config || !bridge) return;
     let disposed = false;
     let recoveryTimeout: ReturnType<typeof setTimeout> | null = null;
     const register = () => {
@@ -211,7 +218,7 @@ export function HostedBrowserWebview(props: {
       webview.removeEventListener("render-process-gone", recoverGuest);
       webview.removeEventListener("focus", dismissHostPopups);
     };
-  }, [clientSettingsHydrated, config, initialSrc, runtimeTabId, webviewGeneration]);
+  }, [clientSettingsHydrated, config, initialSrc, runtimeTabId, tunnelSettled, webviewGeneration]);
 
   const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;
@@ -296,7 +303,7 @@ export function HostedBrowserWebview(props: {
     wrapper.scrollTo({ left: 0, top: 0 });
   }, [runtimeTabId, viewport._tag, viewportHeight, viewportWidth]);
 
-  if (!clientSettingsHydrated || !config) return null;
+  if (!clientSettingsHydrated || !tunnelSettled || !config) return null;
 
   const renderingActive = active || backgroundActivity || pictureInPicture || recordingActive;
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
@@ -332,7 +339,7 @@ export function HostedBrowserWebview(props: {
           />
         ) : null}
         <webview
-          key={webviewGeneration}
+          key={`${webviewGeneration}:${config.partition}`}
           ref={setWebviewRef}
           // Must be an attribute on the element itself: Electron reads it when the
           // guest attaches, so setting it from the ref callback lands too late and

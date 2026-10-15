@@ -18,4 +18,8 @@ export const PREVIEW_ERROR_CODE_MESSAGES: Readonly<Record<string, string>> = Obj
   ERR_CERT_COMMON_NAME_INVALID: "Certificate hostname mismatch",
   ERR_CERT_DATE_INVALID: "Certificate is expired or not yet valid",
   ERR_TOO_MANY_REDIRECTS: "Too many redirects",
+  ERR_SOCKS_CONNECTION_FAILED:
+    "The thread's port space could not reach this address. It never falls back to this machine's network",
+  ERR_PROXY_CONNECTION_FAILED:
+    "The thread's port space proxy is unavailable. It never falls back to this machine's network",
 });
