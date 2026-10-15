@@ -63,7 +63,11 @@ import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresen
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import { spawnerInPortSpace } from "@t3tools/shared/SpawnerInPortSpace";
-import { type SpawnRewriter, ThreadPortSpace, urlInPortSpace } from "@t3tools/shared/ThreadPortSpace";
+import {
+  type SpawnRewriter,
+  ThreadPortSpace,
+  urlInPortSpace,
+} from "@t3tools/shared/ThreadPortSpace";
 import {
   applyAcpAgentTerminalUpdate,
   acpContentBlockDisplayText,
@@ -1528,7 +1532,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const sessionScope = yield* Effect.scope;
         const portSpace = yield* threadPortSpace.resolve(input.threadId);
         const hostAddress = portSpace === undefined ? undefined : yield* portSpace.hostAddress;
-        const readMcpContext = (threadId: ThreadId | null) => readMcpContextAt(threadId, hostAddress);
+        const readMcpContext = (threadId: ThreadId | null) =>
+          readMcpContextAt(threadId, hostAddress);
         // Persisted ACP threads from before item identity v2 retain their old
         // deterministic ids. Fresh threads scope native ids by instance so
         // separately configured agents cannot collide.
