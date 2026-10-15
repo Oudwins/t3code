@@ -101,7 +101,8 @@ Spawning through the helper changes what a caller holds:
 - Host-side port discovery does not see a namespace's listeners. `PortScanner` asks
   `PortSpaces.listeners` per namespace, keeps loopback-reachable ones, and probes them through
   `PortGateway` (HTTP only), tagging each with its thread. As on the host, only listeners owned by
-  a T3 terminal are probed.
+  a T3 terminal are probed. Process names come from `/proc/<pid>/exe`: `comm` is the thread name
+  and reads `MainThread` for node.
 
 ## Providers
 
@@ -121,6 +122,42 @@ silently leaves every provider on the host network, and the types will not tell 
 - **Not isolated: Codex, OpenCode, OpenCode 2, Cursor.** They serve every thread from one shared
   process, so there is no per-thread process to place. Their threads keep sharing the host's ports.
   Codex needs per-thread sessions first.
+
+## Browsing a thread's ports
+
+The browser session does the routing, not the URL. With port spaces on, a thread's preview webview
+gets its own session whose proxy sends every loopback request into that thread's namespace, so an
+unchanged `http://localhost:3000` page, its absolute `localhost:4000` API calls, and its WebSockets
+all stay in the namespace the preview was opened from. Navigation never rewrites a URL.
+
+Preview is a desktop surface: it is an Electron `<webview>`, and web and mobile have no equivalent.
+Those clients still show a thread's servers and can run its terminals, but they cannot browse them.
+
+- [`PortSpaceProxy`](../../apps/desktop/src/preview/PortSpaceProxy.ts) runs one loopback SOCKS5
+  listener per environment and thread in desktop main, attached with `session.setProxy` to a
+  per-thread partition (`getPreviewConfig` with `portSpaceThreadId`). `localhost`, `127.0.0.1`, and
+  `::1` open a WebSocket to the tunnel route; every other host connects directly; loopback forms the
+  tunnel cannot express (`127.0.0.2`, `0.0.0.0`) are refused rather than sent to the client's own
+  machine. Chromium reports every proxy failure as `ERR_SOCKS_CONNECTION_FAILED`, which the
+  unreachable view words as a failure of that thread's port space.
+- The tunnel needs a credential main cannot mint: relay environments sign with a key that lives in
+  the renderer. The renderer mints a short-lived WebSocket ticket and hands it to main
+  (`setPortSpaceTunnel`), renewing it while a preview is mounted. The webview waits for the first
+  attempt to settle, and loopback requests fail closed whenever main holds no ticket.
+- Chromium has no authentication for SOCKS5, so the listener accepts any local process. While a
+  ticket is held, such a process can open tunnels into that thread's namespace as the signed-in user.
+- The partition is ephemeral. It is keyed by thread so two threads never share cookies or storage for
+  the same `localhost:3000`, which is also why it does not keep sign-ins across restarts and is not
+  touched by clearing a browser profile's cookies.
+- Discovery tags namespace servers with `portSpace.threadId` and clients list only their own
+  thread's. Address-bar input is not special: the same `localhost` rules apply to what is typed.
+
+If the helper is missing, terminals fall back to the host network (see above) while the preview
+proxy has no namespace to dial and reports the failure in that thread. It does not browse the host.
+
+Clients learn whether the helper is usable from `server.getPortSpacesStatus`, a unary RPC. It is not
+part of the config snapshot, which is cached and compat-gated: the answer changes when the user runs
+`t3 portspace setup` in a terminal, so every look re-checks.
 
 A namespace outlives the server by design: it is released when its thread is archived or deleted,
 and recreated lazily when the thread runs again. A thread deleted while the server was down leaves

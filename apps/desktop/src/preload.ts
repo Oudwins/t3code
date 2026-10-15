@@ -353,8 +353,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_COOKIES_CHANNEL, { environmentId, profileId }),
     clearCache: (environmentId, profileId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_CACHE_CHANNEL, { environmentId, profileId }),
-    getPreviewConfig: (environmentId, profileId) =>
-      ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, { environmentId, profileId }),
+    getPreviewConfig: (environmentId, profileId, portSpaceThreadId) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, {
+        environmentId,
+        profileId,
+        portSpaceThreadId,
+      }),
+    setPortSpaceTunnel: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_SET_PORT_SPACE_TUNNEL_CHANNEL, input),
     setAnnotationTheme: (theme) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_ANNOTATION_THEME_CHANNEL, { theme }),
     setAnnotationSendEnabled: (tabId, enabled) =>

@@ -81,6 +81,23 @@ describe("preview IPC methods", () => {
     });
   });
 
+  it("gives each thread's port space its own in-memory partition, per profile", () => {
+    const first = PreviewIpc.resolvePortSpacePartitionScope("env", "thread-a", undefined);
+    const second = PreviewIpc.resolvePortSpacePartitionScope("env", "thread-b", undefined);
+    const incognito = PreviewIpc.resolvePortSpacePartitionScope(
+      "env",
+      "thread-a",
+      INCOGNITO_BROWSER_PROFILE_ID,
+    );
+
+    expect(first).toEqual({
+      scope: JSON.stringify(["env", "thread-a", DEFAULT_BROWSER_PROFILE_ID]),
+      persistent: false,
+      namespace: "port-space",
+    });
+    expect(new Set([first.scope, second.scope, incognito.scope]).size).toBe(3);
+  });
+
   effectIt.effect("targets imports at the same partition tuple as the renderer", () => {
     const received: Array<Parameters<BrowserImport.BrowserImport["Service"]["importCookies"]>[0]> =
       [];

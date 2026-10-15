@@ -191,6 +191,10 @@
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
     },
+    "./state/portSpaceTunnel": {
+      "types": "./src/state/portSpaceTunnel.ts",
+      "default": "./src/state/portSpaceTunnel.ts"
+    },
     "./state/preview": {
       "types": "./src/state/preview.ts",
       "default": "./src/state/preview.ts"

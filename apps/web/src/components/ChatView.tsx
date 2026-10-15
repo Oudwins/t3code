@@ -298,6 +298,7 @@ import { RightPanelEmptyState, RightPanelTabs, SurfaceTabStrip } from "./RightPa
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { ThreadPullRequestsPanel } from "./pullRequest/ThreadPullRequestsPanel";
 import { useDeviceState } from "~/state/device";
+import { readPortSpacesEnabled } from "~/state/portSpace";
 import { DeviceSetup } from "./device/DeviceSetup";
 import { Dialog } from "./ui/dialog";
 import { WizardPopup } from "./ui/wizard";
@@ -5147,7 +5148,11 @@ export default function ChatView(props: ChatViewProps) {
       if (script.autoOpenPreview && script.previewUrl && isPreviewSupportedInRuntime()) {
         const previewResult = await openUrlInPreview({
           threadRef: activeThreadRef,
-          url: resolveDiscoveredServerUrl(activeThreadRef.environmentId, script.previewUrl),
+          url: resolveDiscoveredServerUrl(
+            activeThreadRef.environmentId,
+            script.previewUrl,
+            readPortSpacesEnabled(activeThreadRef.environmentId),
+          ),
           openPreview,
         });
         if (previewResult._tag === "Failure" && !isAtomCommandInterrupted(previewResult)) {

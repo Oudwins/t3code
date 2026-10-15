@@ -1147,6 +1147,13 @@ export function createServerEnvironmentAtoms<R, E>(
       staleTimeMs: 0,
       idleTtlMs: 0,
     }),
+    // The user fixes what is missing in a terminal, so every look re-checks.
+    portSpacesStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:port-spaces-status",
+      tag: WS_METHODS.serverGetPortSpacesStatus,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
     configProjection,
     welcome,
     legacyThreadMigration: createEnvironmentRpcSubscriptionAtomFamily(runtime, {

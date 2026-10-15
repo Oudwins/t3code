@@ -51,6 +51,8 @@ import { cn, randomUUID } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
+import { useEnvironmentQuery } from "~/state/query";
+import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { previewEnvironment } from "~/state/preview";
 import { useServerConfigs } from "~/state/entities";
@@ -890,6 +892,57 @@ function DeviceIntegrationControls({
   );
 }
 
+function PortSpacesStatusNote({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const status = useEnvironmentQuery(
+    serverEnvironment.portSpacesStatus({ environmentId, input: {} }),
+  );
+  if (status.error) return <span>{status.error}</span>;
+  if (status.data === null) return <span>Checking…</span>;
+  if (status.data.available) return <span>Ready.</span>;
+  return (
+    <span className="flex flex-wrap items-center gap-x-2">
+      <span className="whitespace-pre-line">{status.data.detail}</span>
+      <Button size="xs" variant="outline" onClick={status.refresh}>
+        Check again
+      </Button>
+    </span>
+  );
+}
+
+function PortSpacesIntegrationSettings() {
+  const { environment: selected } = useSettingsScope();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const environmentId =
+    selected?.connection.phase === "connected" && selected.serverConfig !== null
+      ? selected.environmentId
+      : null;
+
+  return (
+    <SettingsSection id="port-spaces" title="Port spaces">
+      <SettingsRow
+        {...searchableSetting("port-spaces")}
+        serverScoped
+        settingKeys={["enablePortSpaces"]}
+        description="Give each thread its own network, so several threads and agents can run a server on the same port. Each thread's servers show up in its preview tab, which needs the desktop app. Needs a Linux environment."
+        status={
+          settings.enablePortSpaces && environmentId ? (
+            <PortSpacesStatusNote key={environmentId} environmentId={environmentId} />
+          ) : null
+        }
+        control={
+          <ScopedSwitch
+            settingKeys={["enablePortSpaces"]}
+            checked={settings.enablePortSpaces}
+            onCheckedChange={(checked) => updateSettings({ enablePortSpaces: Boolean(checked) })}
+            aria-label="Port spaces"
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
   const updateSettings = useUpdatePrimarySettings();
@@ -1547,6 +1600,7 @@ export function IntegrationsSettingsPanel() {
         )}
       </SettingsSection>
       <DeviceIntegrationSettings />
+      <PortSpacesIntegrationSettings />
     </SettingsPageContainer>
   );
 }

@@ -1,7 +1,62 @@
-import { CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS, PREVIEW_URL_MAX_LENGTH } from "@t3tools/contracts";
+import {
+  CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
+  PREVIEW_URL_MAX_LENGTH,
+  ThreadId,
+  type DiscoveredLocalServer,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { boundConfiguredLocalServerUrls } from "./portDiscoveryState";
+import {
+  boundConfiguredLocalServerUrls,
+  isThreadPort,
+  threadPreviewServers,
+} from "./portDiscoveryState";
+
+const threadA = ThreadId.make("thread-a");
+const threadB = ThreadId.make("thread-b");
+
+const server = (
+  port: number,
+  owner?: { readonly terminalThread?: ThreadId; readonly portSpaceThread?: ThreadId },
+): DiscoveredLocalServer => ({
+  host: "127.0.0.1",
+  port,
+  url: `http://127.0.0.1:${port}`,
+  processName: "node",
+  pid: null,
+  terminal: owner?.terminalThread
+    ? { threadId: owner.terminalThread, terminalId: "default" }
+    : null,
+  ...(owner?.portSpaceThread ? { portSpace: { threadId: owner.portSpaceThread } } : {}),
+});
+
+describe("isThreadPort", () => {
+  it("claims servers by terminal while port spaces are off", () => {
+    expect(isThreadPort(server(3000, { terminalThread: threadA }), threadA, false)).toBe(true);
+    expect(isThreadPort(server(3000, { portSpaceThread: threadA }), threadA, false)).toBe(false);
+    expect(isThreadPort(server(5000), threadA, false)).toBe(false);
+  });
+
+  it("claims only the thread's own namespace servers once port spaces are on", () => {
+    expect(isThreadPort(server(3000, { portSpaceThread: threadA }), threadA, true)).toBe(true);
+    expect(isThreadPort(server(3000, { portSpaceThread: threadB }), threadA, true)).toBe(false);
+    expect(isThreadPort(server(3000, { terminalThread: threadA }), threadA, true)).toBe(false);
+  });
+});
+
+describe("threadPreviewServers", () => {
+  const own = server(3000, { portSpaceThread: threadA });
+  const other = server(3000, { portSpaceThread: threadB });
+  const plain = server(5173);
+
+  it("lists only the thread's namespace servers when port spaces are on", () => {
+    expect(threadPreviewServers([own, other, plain], threadA, true)).toEqual([own]);
+  });
+
+  it("drops namespace servers and keeps host servers when port spaces are off", () => {
+    expect(threadPreviewServers([own, other, plain], threadA, false)).toEqual([plain]);
+  });
+});
 
 describe("boundConfiguredLocalServerUrls", () => {
   it("keeps subscription payloads within the discovery RPC bounds", () => {

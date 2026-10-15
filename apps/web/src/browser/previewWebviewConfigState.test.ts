@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import {
@@ -56,6 +56,28 @@ describe("loadPreviewWebviewConfig", () => {
       // The partition is derived in main from both, so both have to arrive.
       expect(requested).toEqual({ environmentId, profileId: "work" });
       expect(result).toEqual(config);
+    }),
+  );
+  it.effect("forwards the thread whose port space the partition belongs to", () =>
+    Effect.gen(function* () {
+      let requestedThread: ThreadId | undefined;
+      yield* loadPreviewWebviewConfig(
+        environmentId,
+        undefined,
+        {
+          getPreviewConfig: (_environmentId, _profileId, threadId) => {
+            requestedThread = threadId;
+            return Promise.resolve({
+              partition: "persist:test-preview",
+              webPreferences: "sandbox=yes",
+              preloadUrl: null,
+            });
+          },
+        },
+        ThreadId.make("thread-a"),
+      );
+
+      expect(requestedThread).toBe("thread-a");
     }),
   );
 });

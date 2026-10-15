@@ -8,6 +8,7 @@ import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import type { BrowserSettingsReadError, OpenPreviewMutation } from "~/browser/openFileInPreview";
 import { recordVisitForThread } from "~/browserHistoryStore";
 import { useRightPanelStore } from "~/rightPanelStore";
+import { readPortSpacesEnabled } from "~/state/portSpace";
 import { openPreviewSession } from "./openPreviewSession";
 import { previewRuntimeFor } from "~/browser/previewRuntime";
 
@@ -20,7 +21,11 @@ export async function openDiscoveredPort<E>(input: {
   const resolvedUrl =
     previewRuntimeFor(input.threadRef.environmentId) === "server"
       ? input.port.url
-      : resolveDiscoveredServerUrl(input.threadRef.environmentId, input.port.url);
+      : resolveDiscoveredServerUrl(
+          input.threadRef.environmentId,
+          input.port.url,
+          readPortSpacesEnabled(input.threadRef.environmentId),
+        );
   const result = await openPreviewSession({
     openPreview: input.openPreview,
     threadRef: input.threadRef,

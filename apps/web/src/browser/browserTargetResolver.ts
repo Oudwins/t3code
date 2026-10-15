@@ -64,9 +64,23 @@ const resolveEnvironmentPortTarget = (
   };
 };
 
+/**
+ * With port spaces on, a thread's servers are addressed as plain `localhost`:
+ * the preview session's per-thread proxy decides which namespace answers.
+ */
+const resolveThreadLocalhostTarget = (
+  environmentId: EnvironmentId,
+  target: Extract<BrowserNavigationTarget, { readonly kind: "environment-port" }>,
+): PreviewUrlResolution => {
+  const path = target.path?.startsWith("/") ? target.path : `/${target.path ?? ""}`;
+  const url = `${target.protocol ?? "http"}://localhost:${target.port}${path}`;
+  return { requestedUrl: url, resolvedUrl: url, resolutionKind: "direct", environmentId };
+};
+
 export function resolveBrowserNavigationTarget(
   environmentId: EnvironmentId,
   target: BrowserNavigationTarget,
+  portSpacesEnabled: boolean,
 ): PreviewUrlResolution {
   if (target.kind === "url") {
     return {
@@ -76,7 +90,9 @@ export function resolveBrowserNavigationTarget(
       environmentId,
     };
   }
-  return resolveEnvironmentPortTarget(environmentId, target, readEnvironmentUrl(environmentId));
+  return portSpacesEnabled
+    ? resolveThreadLocalhostTarget(environmentId, target)
+    : resolveEnvironmentPortTarget(environmentId, target, readEnvironmentUrl(environmentId));
 }
 
 /**
@@ -90,11 +106,15 @@ const reachesEnvironmentLoopback = (target: ConnectionTarget): boolean =>
   isElectron &&
   (target._tag === "PrimaryConnectionTarget" || isDesktopLocalConnectionTarget(target));
 
-export function resolveDiscoveredServerUrl(environmentId: EnvironmentId, rawUrl: string): string {
+export function resolveDiscoveredServerUrl(
+  environmentId: EnvironmentId,
+  rawUrl: string,
+  portSpacesEnabled: boolean,
+): string {
   try {
     const normalizedUrl = normalizePreviewUrl(rawUrl);
     const parsed = new URL(normalizedUrl);
-    if (!isLoopbackHost(parsed.hostname)) return normalizedUrl;
+    if (!isLoopbackHost(parsed.hostname) || portSpacesEnabled) return normalizedUrl;
     const target = readPreparedConnection(environmentId)?.target;
     if (target && reachesEnvironmentLoopback(target)) return normalizedUrl;
     return resolveEnvironmentPortTarget(

@@ -1,10 +1,10 @@
-import type { DiscoveredLocalServer } from "@t3tools/contracts";
+import type { DiscoveredLocalServer, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import { useMemo } from "react";
 
-import type { EnvironmentId } from "@t3tools/contracts";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
-import { useDiscoveredPortsState } from "~/portDiscoveryState";
+import { threadPreviewServers, useDiscoveredPortsState } from "~/portDiscoveryState";
+import { usePortSpacesEnabled } from "~/state/portSpace";
 
 export interface PreviewableServer extends DiscoveredLocalServer {
   source: "scanner" | "configured";
@@ -17,30 +17,35 @@ export interface PreviewableServer extends DiscoveredLocalServer {
 
 interface UseDiscoveredLocalServersInput {
   environmentId: EnvironmentId;
+  threadId: ThreadId;
   configuredUrls?: ReadonlyArray<string> | undefined;
 }
 
 /**
  * Enrich the environment-level live server snapshot with matching configured
- * URLs and return a stable sorted list.
+ * URLs and return a stable sorted list. With port spaces on, only the
+ * thread's own namespace servers are listed.
  */
 export function useDiscoveredLocalServers(
   input: UseDiscoveredLocalServersInput,
 ): ReadonlyArray<PreviewableServer> {
   const scannerState = useDiscoveredPortsState(input.environmentId, input.configuredUrls);
+  const portSpacesEnabled = usePortSpacesEnabled(input.environmentId);
 
   return useMemo(
     () =>
       mergeServers({
-        scanner: scannerState.servers.map((server) => ({
-          ...server,
-          url: resolveDiscoveredServerUrl(input.environmentId, server.url),
-          requestedUrl: server.url,
-        })),
+        scanner: threadPreviewServers(scannerState.servers, input.threadId, portSpacesEnabled).map(
+          (server) => ({
+            ...server,
+            url: resolveDiscoveredServerUrl(input.environmentId, server.url, portSpacesEnabled),
+            requestedUrl: server.url,
+          }),
+        ),
         configuredUrls: input.configuredUrls ?? [],
         configuredUrlProbing: scannerState.configuredUrlProbing,
       }),
-    [input.environmentId, scannerState, input.configuredUrls],
+    [input.environmentId, input.threadId, scannerState, input.configuredUrls, portSpacesEnabled],
   );
 }
 

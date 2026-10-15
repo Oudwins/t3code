@@ -19,9 +19,12 @@ const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
  * `will-attach-webview` gate rejects anything it does not recognise.
  */
 const PREVIEW_EPHEMERAL_PARTITION_PREFIX = "t3code-preview-ephemeral-";
-const PROFILE_PARTITION_MARKER = "profile-";
+const PARTITION_NAMESPACE_MARKERS = {
+  profile: "profile-",
+  "port-space": "port-space-",
+} as const;
 
-export type BrowserSessionPartitionNamespace = "profile";
+export type BrowserSessionPartitionNamespace = keyof typeof PARTITION_NAMESPACE_MARKERS;
 
 // Permissions granted to preview web content. `clipboard-sanitized-write` is the
 // Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
@@ -279,10 +282,11 @@ export const make = Effect.gen(function* BrowserSessionMake() {
       ),
     );
     const prefix = persistent ? PREVIEW_PARTITION_PREFIX : PREVIEW_EPHEMERAL_PARTITION_PREFIX;
-    // Legacy/default partitions are prefix + hex digest. The non-hex profile
+    // Legacy/default partitions are prefix + hex digest. A non-hex namespace
     // marker creates a disjoint namespace while leaving every legacy default
     // partition byte-for-byte unchanged.
-    return `${prefix}${namespace === "profile" ? PROFILE_PARTITION_MARKER : ""}${Hex.encode(digest).slice(0, 20)}`;
+    const marker = namespace === undefined ? "" : PARTITION_NAMESPACE_MARKERS[namespace];
+    return `${prefix}${marker}${Hex.encode(digest).slice(0, 20)}`;
   });
 
   const getSession = Effect.fn("BrowserSession.getSession")(function* (

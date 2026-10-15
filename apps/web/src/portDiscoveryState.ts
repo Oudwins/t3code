@@ -9,6 +9,7 @@ import { isLoopbackHost } from "@t3tools/shared/preview";
 import { useMemo } from "react";
 
 import { previewEnvironment } from "./state/preview";
+import { usePortSpacesEnabled } from "./state/portSpace";
 import { useEnvironmentQuery } from "./state/query";
 
 const EMPTY_PORTS: ReadonlyArray<DiscoveredLocalServer> = Object.freeze([]);
@@ -72,16 +73,41 @@ export function useDiscoveredPortsState(
   );
 }
 
+/**
+ * A port-spaced environment reaches a thread's servers only through its own
+ * namespace, so a server on the host network is not the thread's to show.
+ */
+export function isThreadPort(
+  port: DiscoveredLocalServer,
+  threadId: ThreadId,
+  portSpacesEnabled: boolean,
+): boolean {
+  return portSpacesEnabled
+    ? port.portSpace?.threadId === threadId
+    : port.terminal?.threadId === threadId;
+}
+
+export function threadPreviewServers<T extends DiscoveredLocalServer>(
+  servers: ReadonlyArray<T>,
+  threadId: ThreadId,
+  portSpacesEnabled: boolean,
+): ReadonlyArray<T> {
+  if (!portSpacesEnabled) return servers.filter((server) => server.portSpace === undefined);
+  return servers.filter((server) => server.portSpace?.threadId === threadId);
+}
+
 export function useThreadDiscoveredPorts(input: {
   readonly environmentId: EnvironmentId | null;
   readonly threadId: ThreadId | null;
 }): ReadonlyArray<DiscoveredLocalServer> {
   const ports = useDiscoveredPorts(input.environmentId);
+  const portSpacesEnabled = usePortSpacesEnabled(input.environmentId);
+  const threadId = input.threadId;
   return useMemo(
     () =>
-      input.threadId
-        ? ports.filter((port) => port.terminal?.threadId === input.threadId)
+      threadId
+        ? ports.filter((port) => isThreadPort(port, threadId, portSpacesEnabled))
         : EMPTY_PORTS,
-    [input.threadId, ports],
+    [threadId, ports, portSpacesEnabled],
   );
 }

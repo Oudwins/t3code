@@ -5,6 +5,7 @@ import { readEnvironmentScope, useEnvironmentsWithScope } from "../../state/sess
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { AppText as Text } from "../../components/AppText";
 import {
+  type EnvironmentId,
   type ResponseStreamingMode,
   type ServerSettings,
   type ServerSettingsPatch,
@@ -18,6 +19,7 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RUNTIME_MODE_CHOICES } from "../threads/thread-settings-options";
+import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -136,6 +138,31 @@ export function SettingsEnvironmentAgentBehaviorRouteScreen() {
 
 export function SettingsEnvironmentMaintenanceRouteScreen() {
   return <ServerSettingsDetail page="maintenance" />;
+}
+
+function PortSpacesSwitchRow(props: {
+  /** The one environment to report on, when port spaces are on for it. */
+  readonly statusEnvironmentId: EnvironmentId | null;
+  readonly value: boolean | null;
+  readonly disabled: boolean;
+  readonly onValueChange: (value: boolean) => void;
+}) {
+  const status = useEnvironmentQuery(
+    props.statusEnvironmentId === null
+      ? null
+      : serverEnvironment.portSpacesStatus({ environmentId: props.statusEnvironmentId, input: {} }),
+  );
+  const note = status.error ?? (status.data?.available === false ? status.data.detail : null);
+  return (
+    <SettingsSwitchRow
+      icon="point.3.connected.trianglepath.dotted"
+      label="Port spaces"
+      subtitle={`Give each thread its own network, so threads can use the same port. Needs a Linux environment.${note ? `\n${note}` : ""}`}
+      value={props.value}
+      disabled={props.disabled}
+      onValueChange={props.onValueChange}
+    />
+  );
 }
 
 function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
@@ -421,6 +448,18 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       value={uniform("enableAgentBrowserAccess")}
                       disabled={disabledFor("enableAgentBrowserAccess")}
                       onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
+                    />
+                  </SettingsSection>
+                  <SettingsSection title="Port spaces">
+                    <PortSpacesSwitchRow
+                      statusEnvironmentId={
+                        targets.length === 1 && uniform("enablePortSpaces") === true
+                          ? (targets[0]?.environment.environmentId ?? null)
+                          : null
+                      }
+                      value={uniform("enablePortSpaces")}
+                      disabled={disabledFor("enablePortSpaces")}
+                      onValueChange={(value) => write({ enablePortSpaces: value })}
                     />
                   </SettingsSection>
                 </>

@@ -18,6 +18,12 @@ const mocks = vi.hoisted(() => ({
   registerWebview: vi.fn<DesktopPreviewBridge["registerWebview"]>(),
   getPreviewConfig: vi.fn<DesktopPreviewBridge["getPreviewConfig"]>(),
   activeRecordings: new Set<string>(),
+  portSpace: { enabled: false, settled: true },
+}));
+
+vi.mock("~/state/portSpace", () => ({
+  usePortSpacesEnabled: () => mocks.portSpace.enabled,
+  usePortSpaceTunnelSettled: () => mocks.portSpace.settled,
 }));
 
 vi.mock("~/localApi", () => ({
@@ -70,6 +76,8 @@ beforeEach(() => {
   mocks.createTab.mockReset().mockResolvedValue(undefined);
   mocks.closeTab.mockReset().mockResolvedValue(undefined);
   mocks.registerWebview.mockReset().mockResolvedValue(undefined);
+  mocks.portSpace.enabled = false;
+  mocks.portSpace.settled = true;
   mocks.getPreviewConfig.mockReset().mockResolvedValue({
     partition: "persist:t3-preview-work",
     webPreferences: "contextIsolation=yes",
@@ -175,7 +183,11 @@ describe("HostedBrowserWebview settings hydration", () => {
     });
 
     expect(acquire).toHaveBeenCalledExactlyOnceWith(runtimeTabId, undefined);
-    expect(mocks.getPreviewConfig).toHaveBeenCalledExactlyOnceWith(threadRef.environmentId, "work");
+    expect(mocks.getPreviewConfig).toHaveBeenCalledExactlyOnceWith(
+      threadRef.environmentId,
+      "work",
+      undefined,
+    );
     expect(createGuest).toHaveBeenCalledOnce();
     expect(createGuest).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -196,5 +208,61 @@ describe("HostedBrowserWebview settings hydration", () => {
     expect(mocks.registerWebview).toHaveBeenCalledExactlyOnceWith(runtimeTabId, 41);
     expect(mocks.closeTab).not.toHaveBeenCalled();
     expect(mocks.setClientSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("HostedBrowserWebview port spaces", () => {
+  it("scopes the session to the thread and waits for the tunnel ticket before mounting", async () => {
+    mocks.portSpace.enabled = true;
+    mocks.portSpace.settled = false;
+    mocks.getClientSettings.mockResolvedValue({ ...DEFAULT_CLIENT_SETTINGS });
+    const createGuest = vi.fn((_attributes: unknown) =>
+      Object.assign(new EventTarget(), { getWebContentsId: () => 7 }),
+    );
+    const threadRef = {
+      environmentId: EnvironmentId.make("host-port-space"),
+      threadId: ThreadId.make("thread-port-space"),
+    };
+    const element = () => (
+      <HostedBrowserWebview
+        threadRef={threadRef}
+        tabId="server-tab"
+        runtimeTabId="port-space-tab"
+        initialUrl="http://localhost:3000"
+        viewport={FILL_PREVIEW_VIEWPORT}
+        pictureInPicture={false}
+        profileId={undefined}
+        zoomFactor={1}
+      />
+    );
+    const nodeMock = (node: { readonly type: unknown; readonly props: unknown }) =>
+      node.type === "webview"
+        ? createGuest(node.props)
+        : { scrollLeft: 0, scrollTop: 0, scrollTo: () => undefined };
+
+    await act(async () => {
+      renderer = create(element(), { createNodeMock: nodeMock });
+      await ensureClientSettingsHydrated();
+    });
+
+    expect(mocks.getPreviewConfig).toHaveBeenCalledExactlyOnceWith(
+      threadRef.environmentId,
+      undefined,
+      threadRef.threadId,
+    );
+    expect(createGuest).not.toHaveBeenCalled();
+
+    mocks.portSpace.settled = true;
+    await act(async () => {
+      renderer?.update(element());
+    });
+
+    expect(createGuest).toHaveBeenCalledOnce();
+    expect(createGuest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        partition: "persist:t3-preview-work",
+        src: "http://localhost:3000",
+      }),
+    );
   });
 });

@@ -122,6 +122,19 @@ describe("BrowserSession", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("keeps port space partitions disjoint from profile partitions and in memory", () =>
+    Effect.gen(function* () {
+      const browserSessions = yield* BrowserSession.BrowserSession;
+
+      const profile = yield* browserSessions.getPartition("a::b", false, "profile");
+      const portSpace = yield* browserSessions.getPartition("a::b", false, "port-space");
+
+      assert.strictEqual(portSpace, "t3code-preview-ephemeral-port-space-78f0be89237d77f7a70e");
+      assert.notStrictEqual(portSpace, profile);
+      assert.isTrue(browserSessions.isPartition(portSpace));
+    }).pipe(Effect.provide(layer)),
+  );
+
   // A rewritten session UA — any variant, even ones that keep the Electron
   // token — makes Cloudflare Turnstile loop with error 600010 (#5002), so
   // the guest must end up with Electron's native User-Agent. The mock applies
