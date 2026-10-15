@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
 import * as PortSpaces from "../portSpace/PortSpaces.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 
@@ -32,13 +33,14 @@ const withService = <A, E>(
           }),
   });
   const terminals = Layer.mock(TerminalManager.TerminalManager)({});
+  const previews = Layer.mock(PreviewManager.PreviewManager)({});
   return Effect.gen(function* () {
     const service = yield* ResourceCleanupService.ResourceCleanupService;
     return yield* use(service, released);
   }).pipe(
     Effect.provide(
-      ResourceCleanupService.live.pipe(
-        Layer.provideMerge(Layer.mergeAll(portSpaces, terminals)),
+      ResourceCleanupService.layer.pipe(
+        Layer.provideMerge(Layer.mergeAll(portSpaces, terminals, previews)),
         Layer.provideMerge(ServerConfig.layerTest("/tmp", { prefix: "t3-cleanup-" })),
         Layer.provideMerge(NodeServices.layer),
       ),

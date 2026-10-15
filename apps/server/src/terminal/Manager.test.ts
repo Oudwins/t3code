@@ -1882,7 +1882,7 @@ it.layer(
             { pid: 200, ppid: 9001, name: "zsh" },
             { pid: 201, ppid: 200, name: "node" },
           ]),
-        }).pipe(Effect.provide(withHostPlatform("linux")));
+        }).pipe(Effect.provide(layerWithHostPlatform("linux")));
         yield* manager.open(openInput({ terminalId: "idle" }));
         yield* manager.open(openInput({ terminalId: "dev-server" }));
 
@@ -1912,7 +1912,7 @@ it.layer(
             { pid: 100, ppid: 9000, name: "zsh" },
             { pid: 101, ppid: 100, name: "node" },
           ]),
-        }).pipe(Effect.provide(withHostPlatform("linux")));
+        }).pipe(Effect.provide(layerWithHostPlatform("linux")));
         yield* manager.open(openInput());
 
         const closeFiber = yield* manager.close({ threadId: "thread-1" }).pipe(Effect.forkScoped);
@@ -1946,7 +1946,7 @@ it.layer(
             { pid: 9000, ppid: 1, name: "zsh" },
             { pid: 100, ppid: 9000, name: "node" },
           ]),
-        }).pipe(Effect.provide(withHostPlatform("linux")));
+        }).pipe(Effect.provide(layerWithHostPlatform("linux")));
         yield* manager.open(openInput());
 
         const closeFiber = yield* manager.close({ threadId: "thread-1" }).pipe(Effect.forkScoped);

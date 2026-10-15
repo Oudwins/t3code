@@ -414,8 +414,8 @@ describe("PortSpaces.ensure and release", () => {
       expect(otherThreadOverlapped).toBe(true);
     }).pipe(
       Effect.provideService(ProcessRunner.ProcessRunner, runner),
-      Effect.provideService(HostProcessPlatform, "linux"),
-      Effect.provideService(HostProcessUserId, 1000),
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provideService(HostProcess.UserId, 1000),
     );
   });
 
