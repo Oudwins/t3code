@@ -1,9 +1,11 @@
 import * as NodeNet from "node:net";
 
 import { it as effectIt } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
   PREVIEW_URL_MAX_LENGTH,
+  ThreadId,
   type DiscoveredLocalServer,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -15,6 +17,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
@@ -22,6 +25,8 @@ import * as Tracer from "effect/Tracer";
 import { expect } from "vite-plus/test";
 import { FetchHttpClient } from "effect/http";
 
+import { PortGateway, PortGatewayError } from "../portSpace/PortGateway.ts";
+import { PortSpaces, type PortSpaceListener } from "../portSpace/PortSpaces.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "./PortScanner.ts";
 const processProbeFailure: ProcessRunner.ProcessRunner["Service"]["run"] = (input) =>
@@ -37,6 +42,42 @@ const processProbeFailure: ProcessRunner.ProcessRunner["Service"]["run"] = (inpu
         description: "PowerShell is not installed in the test environment",
       }),
     }),
+  );
+
+interface PortSpaceFixture {
+  readonly listeners: Readonly<Record<string, ReadonlyArray<PortSpaceListener>>>;
+  /** Per thread, the local TCP port that stands in for each port inside its namespace. */
+  readonly servers: Readonly<Record<string, Readonly<Record<number, number>>>>;
+}
+
+const makePortSpaceLayers = (fixture: PortSpaceFixture = { listeners: {}, servers: {} }) =>
+  Layer.mergeAll(
+    Layer.mock(PortSpaces)({
+      threads: Effect.succeed(Object.keys(fixture.listeners).map((id) => ThreadId.make(id))),
+      listeners: (threadId) => Effect.succeed(fixture.listeners[threadId] ?? []),
+      wrapSpawn: () => {
+        throw new Error("the scanner never spawns in a port space");
+      },
+    }),
+    Layer.mock(PortGateway)({
+      dial: (threadId, target) => {
+        const port = fixture.servers[threadId]?.[target.port];
+        return port === undefined
+          ? Effect.fail(new PortGatewayError({ threadId, reason: "refused" }))
+          : Effect.acquireRelease(
+              Effect.callback<NodeNet.Socket>((resume) => {
+                const socket = NodeNet.connect({ host: "127.0.0.1", port });
+                socket.on("error", () => socket.destroy());
+                socket.once("connect", () => {
+                  socket.pause();
+                  resume(Effect.succeed(socket));
+                });
+              }),
+              (socket) => Effect.sync(() => socket.destroy()),
+            );
+      },
+    }),
+    Path.layer,
   );
 
 const layerTestProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
@@ -57,6 +98,7 @@ const layerProbeFailure = (
         fileSystem,
         Layer.succeed(ProcessRunner.ProcessRunner, { run }),
         Layer.succeed(HostProcess.Platform, "linux"),
+        makePortSpaceLayers(),
         FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
       ),
     ),
@@ -68,6 +110,7 @@ const layerTestPortDiscovery = PortScanner.layer.pipe(
       layerNoProc,
       layerTestProcessRunner,
       Layer.succeed(HostProcess.Platform, "win32"),
+      makePortSpaceLayers(),
       FetchHttpClient.layer,
     ),
   ),
@@ -89,6 +132,7 @@ const layerLsofScanner = (input: {
   readonly pid: () => number;
   readonly fetch: typeof globalThis.fetch;
   readonly stdout?: () => string;
+  readonly portSpaces?: PortSpaceFixture;
 }) =>
   PortScanner.layer.pipe(
     Layer.provide(
@@ -108,6 +152,7 @@ const layerLsofScanner = (input: {
             }),
         }),
         Layer.succeed(HostProcess.Platform, "linux"),
+        makePortSpaceLayers(input.portSpaces),
         FetchHttpClient.layer.pipe(
           Layer.provide(Layer.succeed(FetchHttpClient.Fetch, input.fetch)),
         ),
@@ -239,6 +284,123 @@ effectIt.effect("revalidates a successful HTML probe after its cache entry expir
     ]);
   }).pipe(Effect.provide(layer));
 });
+
+const httpServer = (response: string) =>
+  Effect.acquireRelease(
+    openServer(0, (socket) => {
+      socket.on("error", () => undefined);
+      socket.once("data", () => socket.end(response));
+    }).pipe(
+      Effect.flatMap((server) =>
+        server === null
+          ? Effect.die(new Error("could not open a test server"))
+          : Effect.succeed(server),
+      ),
+    ),
+    closeServer,
+  ).pipe(Effect.map((server) => (server.address() as NodeNet.AddressInfo).port));
+
+const httpResponse = (status: number, contentType: string, body: string) =>
+  `HTTP/1.1 ${status} X\r\nContent-Type: ${contentType}\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n${body}`;
+
+const NAMESPACE_PID = 999_999_999;
+
+const namespaceListener = (port: number, address = "127.0.0.1"): PortSpaceListener => ({
+  address,
+  port,
+  process: { name: "MainThread", pid: NAMESPACE_PID },
+});
+
+/** Scans with the host's and the namespace's listener processes owned by a T3 terminal. */
+const scanWith = (layer: ReturnType<typeof layerLsofScanner>) =>
+  Effect.gen(function* () {
+    const scanner = yield* ownedScanner([1234, NAMESPACE_PID]);
+    return yield* scanner.scan();
+  }).pipe(Effect.provide(layer));
+
+effectIt.effect(
+  "lists the same port in two threads and on the host as separate servers",
+  Effect.fn("PortScannerTest.listsPortSpaceServers")(function* () {
+    const threadA = ThreadId.make("thread-a");
+    const threadB = ThreadId.make("thread-b");
+    const page = httpResponse(200, "text/html", "page");
+    const serverA = yield* httpServer(page);
+    const serverB = yield* httpServer(page);
+    const hostRequests: string[] = [];
+    const fetchFn = ((input: Parameters<typeof globalThis.fetch>[0]) => {
+      hostRequests.push(String(input));
+      return Promise.resolve(new Response("host", { headers: { "content-type": "text/html" } }));
+    }) as typeof globalThis.fetch;
+
+    const servers = yield* scanWith(
+      layerLsofScanner({
+        pid: () => 1234,
+        fetch: fetchFn,
+        portSpaces: {
+          listeners: {
+            [threadA]: [namespaceListener(LSOF_TEST_PORT)],
+            [threadB]: [namespaceListener(LSOF_TEST_PORT)],
+          },
+          servers: {
+            [threadA]: { [LSOF_TEST_PORT]: serverA },
+            [threadB]: { [LSOF_TEST_PORT]: serverB },
+          },
+        },
+      }),
+    );
+
+    expect(
+      servers.map((server) => [server.url, server.portSpace?.threadId, server.pid] as const),
+    ).toEqual([
+      [`http://localhost:${LSOF_TEST_PORT}`, undefined, 1234],
+      [`http://localhost:${LSOF_TEST_PORT}`, threadA, NAMESPACE_PID],
+      [`http://localhost:${LSOF_TEST_PORT}`, threadB, NAMESPACE_PID],
+    ]);
+    expect(hostRequests).toEqual([`http://localhost:${LSOF_TEST_PORT}/`]);
+  }, Effect.scoped),
+);
+
+effectIt.effect(
+  "keeps only namespace listeners that serve web pages on a loopback-reachable address",
+  Effect.fn("PortScannerTest.filtersPortSpaceListeners")(function* () {
+    const thread = ThreadId.make("thread-mixed");
+    const page = yield* httpServer(httpResponse(200, "text/html", "app"));
+    const api = yield* httpServer(httpResponse(200, "application/json", "{}"));
+    const missing = yield* httpServer(httpResponse(404, "text/html", "nope"));
+    const redirect = yield* httpServer(
+      "HTTP/1.1 302 Found\r\nLocation: /app\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+    const notFoundOnHost = (() =>
+      Promise.resolve(new Response("", { status: 404 }))) as typeof globalThis.fetch;
+
+    const servers = yield* scanWith(
+      layerLsofScanner({
+        pid: () => 1234,
+        fetch: notFoundOnHost,
+        portSpaces: {
+          listeners: {
+            [thread]: [
+              namespaceListener(3001, "*"),
+              namespaceListener(3002),
+              namespaceListener(3003),
+              namespaceListener(3004, "::1"),
+              namespaceListener(3005, "10.0.2.15"),
+              namespaceListener(3006),
+            ],
+          },
+          servers: {
+            [thread]: { 3001: page, 3002: api, 3003: missing, 3004: redirect, 3005: page },
+          },
+        },
+      }),
+    );
+
+    expect(servers.map((server) => [server.url, server.portSpace?.threadId] as const)).toEqual([
+      ["http://localhost:3001", thread],
+      ["http://localhost:3004", thread],
+    ]);
+  }, Effect.scoped),
+);
 
 effectIt.effect("keeps a full configured URL when the discovered server root fails", () => {
   const requests: string[] = [];

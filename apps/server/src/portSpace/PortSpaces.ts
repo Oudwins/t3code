@@ -18,6 +18,7 @@ import type { PortSpaceSpawn, PortSpaceSpawnInput } from "@t3tools/shared/Thread
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- the namespace id is derived synchronously at spawn.
 import * as NodeCrypto from "node:crypto";
@@ -70,6 +71,8 @@ export class PortSpaces extends Context.Service<
     readonly capability: Effect.Effect<PortSpaceCapability>;
     /** Creates the thread's namespace if it does not exist. Idempotent. */
     readonly ensure: (threadId: ThreadId) => Effect.Effect<void, PortSpaceCommandError>;
+    /** Threads this server process has made a namespace for and not yet released. */
+    readonly threads: Effect.Effect<ReadonlyArray<ThreadId>>;
     /**
      * Rewrites a command so it runs inside the thread's namespace as the
      * current user, with the given environment and working directory.
@@ -203,12 +206,17 @@ export const make = Effect.fn("PortSpaces.make")(function* (environmentId: strin
   // Two terminals opening at once must not race `ip netns add`.
   const threadLocks = yield* KeyedLock.make<string>();
 
+  const live = yield* Ref.make<ReadonlySet<ThreadId>>(new Set());
+
   const ensure = Effect.fn("PortSpaces.ensure")(function* (threadId: ThreadId) {
     yield* threadLocks.withLock(
       threadId,
       runHelper("ensure", ["create", portSpaceId(environmentId, threadId)]),
     );
+    yield* Ref.update(live, (threads) => new Set(threads).add(threadId));
   });
+
+  const threads = Ref.get(live).pipe(Effect.map((current) => [...current]));
 
   const wrapSpawn: PortSpaces["Service"]["wrapSpawn"] = (threadId, input) => {
     const env = input.env ?? {};
@@ -254,9 +262,14 @@ export const make = Effect.fn("PortSpaces.make")(function* (environmentId: strin
       threadId,
       runHelper("release", ["delete", portSpaceId(environmentId, threadId)]),
     );
+    yield* Ref.update(live, (current) => {
+      const next = new Set(current);
+      next.delete(threadId);
+      return next;
+    });
   });
 
-  return PortSpaces.of({ capability, ensure, wrapSpawn, hostAddress, listeners, release });
+  return PortSpaces.of({ capability, ensure, threads, wrapSpawn, hostAddress, listeners, release });
 });
 
 export const layer = Layer.effect(

@@ -71,6 +71,8 @@ import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
 import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
+import * as PortGateway from "./portSpace/PortGateway.ts";
+import * as PortTunnelRoute from "./portSpace/PortTunnelRoute.ts";
 import * as PortSpaces from "./portSpace/PortSpaces.ts";
 import * as ThreadPortSpace from "./portSpace/ThreadPortSpace.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -415,11 +417,17 @@ const layerVcs = Layer.empty.pipe(
 
 const layerCheckpointStore = CheckpointStore.layer.pipe(Layer.provide(layerVcsDriverRegistry));
 
-const layerPortScanner = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
-
 const layerPortSpaces = PortSpaces.layer.pipe(
   Layer.provide(ProcessRunner.layer),
   Layer.provide(ServerEnvironment.layerIdentity),
+);
+
+const layerPortGateway = PortGateway.layer.pipe(Layer.provide(layerPortSpaces));
+
+const layerPortScanner = PortScanner.layer.pipe(
+  Layer.provide(ProcessRunner.layer),
+  Layer.provide(layerPortGateway),
+  Layer.provide(layerPortSpaces),
 );
 
 const layerThreadPortSpace = ThreadPortSpace.layer.pipe(
@@ -627,7 +635,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(layerGit),
   Layer.provideMerge(layerVcs),
   Layer.provideMerge(layerWorktreeManager),
-  Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice, layerPortSpaces)),
+  Layer.provideMerge(
+    Layer.mergeAll(layerTerminal, layerPreview, layerDevice, layerPortSpaces, layerPortGateway),
+  ),
   Layer.provideMerge(layerPersistence),
   // Both read a user-owned file out of the state directory and stream changes
   // to clients; neither depends on the other.
@@ -746,6 +756,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     DeviceHubProxy.layer,
+    PortTunnelRoute.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,

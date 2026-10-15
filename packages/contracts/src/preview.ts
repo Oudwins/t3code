@@ -397,8 +397,17 @@ export const DiscoveredLocalServer = Schema.Struct({
       terminalId: TrimmedNonEmptyString,
     }),
   ),
+  /**
+   * Set when the server listens inside a thread's port space. `host` and
+   * `port` are the address it binds there, and only that thread's preview
+   * reaches it.
+   */
+  portSpace: Schema.optional(Schema.Struct({ threadId: ThreadId })),
 });
 export type DiscoveredLocalServer = typeof DiscoveredLocalServer.Type;
+
+/** WebSocket route that carries one TCP connection into a thread's port space. */
+export const PORT_SPACE_TUNNEL_PATH = "/api/port-space/tunnel";
 
 export const DiscoveredLocalServerList = Schema.Struct({
   servers: Schema.Array(DiscoveredLocalServer),
