@@ -55,6 +55,34 @@ A bare namespace has no route out, and agents need the internet. Each namespace 
 live in `/run/netns` and vanish on reboot. Closing a thread's resources (archive, delete) calls it
 after the terminals are closed, only on hosts where port spaces are set up.
 
+## Reaching a thread's ports
+
+Nothing outside a namespace can reach what runs in it, and nothing listens on the host on its
+behalf: no published port, no alternate port number, no machine address to hand a browser. Two
+threads that both run an app on `localhost:3000` stay distinguishable because the client picks the
+namespace per request, so the same URL means each thread's own app.
+
+- [`PortRelay`](../../apps/server/src/portSpace/PortRelay.ts) runs inside the namespace
+  (`t3 portspace-relay`) and listens on a unix socket in an owner-only temp directory. A path-based
+  unix socket is visible from every network namespace, which is the only reason the host can reach it.
+  A connection opens with `<4|6|L> <port>`, then the relay answers one status byte before raw bytes.
+  `L` means `localhost`, resolved inside the namespace, so a browser's own `localhost` rules apply
+  instead of the server guessing an address family.
+- [`PortGateway`](../../apps/server/src/portSpace/PortGateway.ts) keeps one relay per thread and
+  `dial`s it. The status byte is what lets a caller tell a refused port from a working one before it
+  commits to anything. `dial` never creates a namespace and never falls back to the host network.
+  A thread without a namespace fails with `no-port-space`, which clients show as a failure in that
+  thread rather than loading whatever is on their own `localhost:3000`.
+- [`PortTunnelRoute`](../../apps/server/src/portSpace/PortTunnelRoute.ts) exposes `dial` at
+  `/api/port-space/tunnel`: one WebSocket is one TCP connection. It rides the same authenticated
+  environment transport as every other `/api` route (ticket or bearer, `terminal:operate`), so local,
+  Tailscale, SSH-forwarded, and relayed environments need nothing exposed beyond T3. Only loopback
+  targets exist. The dial happens before the upgrade, so failures are HTTP statuses (404, 502, 503).
+  There is no half-close; either side closing ends both.
+
+A namespace made before the server restarted is not in `PortSpaces.threads`, and `dial` only serves
+namespaces this process created, so dials fail until a terminal in that thread starts again.
+
 ## Using them from T3
 
 `enablePortSpaces` is a per-environment server setting, not per thread. When it is on,
@@ -70,7 +98,10 @@ Spawning through the helper changes what a caller holds:
   and the subprocess inspector looks one level through `sudo` to find the shell.
 - Spawn failure is not detected by the shell-fallback loop: `sudo` starts fine even when the shell
   it was asked to run does not exist.
-- Host-side port discovery does not see a namespace's listeners. Use `PortSpaces.listeners`.
+- Host-side port discovery does not see a namespace's listeners. `PortScanner` asks
+  `PortSpaces.listeners` per namespace, keeps loopback-reachable ones, and probes them through
+  `PortGateway` (HTTP only), tagging each with its thread. As on the host, only listeners owned by
+  a T3 terminal are probed.
 
 ## Providers
 

@@ -13,6 +13,10 @@
  *
  * Listening ports are published only after a bounded HTTP(S) probe finds a
  * successful HTML document or a redirect to one.
+ *
+ * Servers inside a thread's port space are listed too, tagged with the thread.
+ * They are not on the host network, so they are probed over `PortGateway` (http
+ * only) and the client reaches them through the thread's proxied preview.
  * Positive and negative results are cached briefly by candidate URL and listener identity,
  * limiting repeated requests without leaving stale classifications around.
  *
@@ -36,12 +40,15 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import { FetchHttpClient, HttpClient } from "effect/http";
 
+import { PortGateway } from "../portSpace/PortGateway.ts";
+import { PortSpaces, type PortSpaceListener } from "../portSpace/PortSpaces.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 export class PortDiscovery extends Context.Service<
@@ -81,6 +88,7 @@ const WEB_PROBE_TIMEOUT = Duration.seconds(1);
 const WEB_PROBE_CACHE_TTL_MS = Duration.toMillis(Duration.seconds(15));
 const WEB_PROBE_CONCURRENCY = 16;
 const NAVIGATION_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_RESPONSE_HEAD_BYTES = 16 * 1024;
 
 type Listener = (servers: ReadonlyArray<DiscoveredLocalServer>) => Effect.Effect<void>;
 
@@ -139,16 +147,38 @@ const parseConfiguredUrl = (raw: string): URL | null => {
   }
 };
 
-const localServerKey = (host: string, port: number): string =>
-  `${isLoopbackHost(host) ? "loopback" : host.toLowerCase()}:${port}`;
+const localServerKey = (host: string, port: number, threadId?: string): string =>
+  `${threadId === undefined ? "" : `${threadId}\u0000`}${isLoopbackHost(host) ? "loopback" : host.toLowerCase()}:${port}`;
 
 const urlPort = (url: URL): number =>
   url.port.length > 0 ? Number.parseInt(url.port, 10) : url.protocol === "http:" ? 80 : 443;
 
-const webProbeCacheKey = (raw: string): string => {
+const webProbeCacheKey = (raw: string, threadId?: string): string => {
   const url = new URL(raw);
   url.hash = "";
-  return url.href;
+  return threadId === undefined ? url.href : `${threadId}\u0000${url.href}`;
+};
+
+const isWebResponse = (
+  status: number,
+  location: string | undefined,
+  contentType: string | undefined,
+): boolean => {
+  if (NAVIGATION_REDIRECT_STATUSES.has(status) && location) return true;
+  if (status < 200 || status >= 300 || status === 204 || status === 205) return false;
+  const type = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  return type === "text/html" || type === "application/xhtml+xml";
+};
+
+const parseResponseHead = (head: string): boolean => {
+  const [statusLine = "", ...lines] = head.split("\r\n");
+  const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(statusLine)?.[1]);
+  const header = (name: string) =>
+    lines
+      .find((line) => line.slice(0, name.length + 1).toLowerCase() === `${name}:`)
+      ?.slice(name.length + 1)
+      .trim();
+  return isWebResponse(status, header("location"), header("content-type"));
 };
 
 const normalizeConfiguredUrls = (urls: ReadonlyArray<string>): ReadonlyArray<string> => [
@@ -180,7 +210,7 @@ const projectWebProbeSnapshot = (
     if (configured) visibleByServer.set(serverKey, { ...configured, url: raw });
   }
   for (const server of snapshot.discovered) {
-    const key = localServerKey(server.host, server.port);
+    const key = localServerKey(server.host, server.port, server.portSpace?.threadId);
     if (!visibleByServer.has(key)) visibleByServer.set(key, server);
   }
   return [...visibleByServer.values()].toSorted((left, right) => left.port - right.port);
@@ -317,6 +347,14 @@ const parseProcNetTcp = (
   return listeners;
 };
 
+/** Which namespace listeners the thread's loopback can reach. */
+const isLoopbackReachable = (address: string): boolean =>
+  address === "*" ||
+  address === "0.0.0.0" ||
+  address === "::" ||
+  address === "::1" ||
+  address.startsWith("127.");
+
 const serversEqual = (
   left: ReadonlyArray<DiscoveredLocalServer>,
   right: ReadonlyArray<DiscoveredLocalServer>,
@@ -333,7 +371,8 @@ const serversEqual = (
       a.processName !== b.processName ||
       a.pid !== b.pid ||
       a.terminal?.threadId !== b.terminal?.threadId ||
-      a.terminal?.terminalId !== b.terminal?.terminalId
+      a.terminal?.terminalId !== b.terminal?.terminalId ||
+      a.portSpace?.threadId !== b.portSpace?.threadId
     ) {
       return false;
     }
@@ -349,6 +388,9 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const fileSystem = yield* FileSystem.FileSystem;
   const hostPlatform = yield* HostProcess.Platform;
+  const portSpaces = yield* PortSpaces;
+  const gateway = yield* PortGateway;
+  const path = yield* Path.Path;
   const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
   const stateRef = yield* Ref.make<ScannerState>({
     listeners: new Map(),
@@ -460,17 +502,15 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
 
   const probeWebUrl = Effect.fn("PortDiscovery.probeWebUrl")((url: string) =>
     httpClient.get(url).pipe(
-      Effect.map((response) => {
-        const location = response.headers.location?.trim();
-        if (NAVIGATION_REDIRECT_STATUSES.has(response.status) && location) return url;
-        if (response.status < 200 || response.status >= 300) return null;
-        if (response.status === 204 || response.status === 205) return null;
-        const contentType = response.headers["content-type"]
-          ?.split(";", 1)[0]
-          ?.trim()
-          .toLowerCase();
-        return contentType === "text/html" || contentType === "application/xhtml+xml" ? url : null;
-      }),
+      Effect.map((response) =>
+        isWebResponse(
+          response.status,
+          response.headers.location?.trim(),
+          response.headers["content-type"],
+        )
+          ? url
+          : null,
+      ),
       Effect.scoped,
       Effect.timeoutOption(WEB_PROBE_TIMEOUT),
       Effect.map(Option.getOrNull),
@@ -479,12 +519,88 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     ),
   );
 
+  const probeNamespaceUrl = Effect.fn("PortDiscovery.probeNamespaceUrl")(
+    (threadId: ThreadId, url: string) =>
+      gateway.dial(threadId, { family: "localhost", port: urlPort(new URL(url)) }).pipe(
+        Effect.flatMap((socket) =>
+          Effect.callback<boolean>((resume) => {
+            let head = "";
+            socket.on("data", (chunk: Buffer) => {
+              head += chunk.toString("latin1");
+              const end = head.indexOf("\r\n\r\n");
+              if (end >= 0) resume(Effect.succeed(parseResponseHead(head.slice(0, end))));
+              else if (head.length > MAX_RESPONSE_HEAD_BYTES) resume(Effect.succeed(false));
+            });
+            socket.once("close", () => resume(Effect.succeed(false)));
+            socket.write(
+              `GET / HTTP/1.1\r\nHost: localhost:${urlPort(new URL(url))}\r\nAccept: text/html\r\nConnection: close\r\n\r\n`,
+            );
+            socket.resume();
+          }),
+        ),
+        Effect.scoped,
+        Effect.timeoutOption(WEB_PROBE_TIMEOUT),
+        Effect.map((result) => (Option.getOrElse(result, () => false) ? url : null)),
+        Effect.orElseSucceed(() => null),
+      ),
+  );
+
+  // `ss` names the thread ("MainThread" for Node); lsof names the executable, so match it.
+  const executableName = (process: PortSpaceListener["process"]) =>
+    process === undefined
+      ? Effect.succeed(null)
+      : fileSystem.readLink(`/proc/${process.pid}/exe`).pipe(
+          Effect.map((target) => path.basename(target)),
+          Effect.orElseSucceed(() => process.name),
+        );
+
+  const probePortSpaces = Effect.fn("PortDiscovery.probePortSpaces")(function* (
+    terminalByProcessId: ReadonlyMap<number, TerminalProcessOwner>,
+  ) {
+    const threads = yield* portSpaces.threads;
+    const perThread = yield* Effect.forEach(
+      threads,
+      (threadId) =>
+        portSpaces.listeners(threadId).pipe(
+          Effect.flatMap((listeners) => {
+            const byPort = new Map<number, PortSpaceListener>();
+            for (const listener of listeners) {
+              if (isLoopbackReachable(listener.address) && !byPort.has(listener.port)) {
+                byPort.set(listener.port, listener);
+              }
+            }
+            return Effect.forEach([...byPort.values()], (listener) =>
+              executableName(listener.process).pipe(
+                Effect.map<string | null, DiscoveredLocalServer>((processName) => ({
+                  host: "localhost",
+                  port: listener.port,
+                  url: `http://localhost:${listener.port}`,
+                  processName,
+                  pid: listener.process?.pid ?? null,
+                  terminal:
+                    listener.process === undefined
+                      ? null
+                      : (terminalByProcessId.get(listener.process.pid) ?? null),
+                  portSpace: { threadId },
+                })),
+              ),
+            );
+          }),
+          Effect.orElseSucceed(() => []),
+        ),
+      { concurrency: 4 },
+    );
+    return perThread.flat();
+  });
+
   const makeWebProbeGroups = (
     servers: ReadonlyArray<DiscoveredLocalServer>,
     configuredUrls: ReadonlyArray<string>,
   ): ReadonlyArray<WebProbeGroup> => {
     const serversByKey = new Map(
-      servers.map((server) => [localServerKey(server.host, server.port), server] as const),
+      servers
+        .filter((server) => server.portSpace === undefined)
+        .map((server) => [localServerKey(server.host, server.port), server] as const),
     );
     const groups: WebProbeGroup[] = [];
     const configuredResources = new Set<string>();
@@ -516,7 +632,10 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       if (server.terminal === null) continue;
       groups.push({
         server,
-        urls: [`http://${server.host}:${server.port}`, `https://${server.host}:${server.port}`],
+        urls:
+          server.portSpace === undefined
+            ? [`http://${server.host}:${server.port}`, `https://${server.host}:${server.port}`]
+            : [`http://localhost:${server.port}`],
         configuredKey: null,
       });
     }
@@ -536,8 +655,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       Effect.Effect<{ readonly probe: WebProbeCacheEntry; readonly fresh: boolean }>
     >();
     const batchProbeSemaphore = yield* Semaphore.make(1);
-    const getProbe = (url: string, pid: number | null) => {
-      const key = webProbeCacheKey(url);
+    const getProbe = (url: string, pid: number | null, threadId: ThreadId | undefined) => {
+      const key = webProbeCacheKey(url, threadId);
       const identity = `${key}\u0000${pid ?? ""}`;
       return batchProbeSemaphore
         .withPermits(1)(
@@ -550,7 +669,10 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
             const memoized = yield* Effect.cached(
               cachedIsCurrent
                 ? Effect.succeed({ probe: cachedProbe, fresh: false })
-                : probeWebUrl(url).pipe(
+                : (threadId === undefined
+                    ? probeWebUrl(url)
+                    : probeNamespaceUrl(threadId, url)
+                  ).pipe(
                     Effect.map((result) => ({
                       probe: { pid, isWeb: result !== null, expiresAtMillis: 0 },
                       fresh: true,
@@ -570,8 +692,9 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           const probes: Array<readonly [string, WebProbeCacheEntry, boolean]> = [];
           let visibleUrl: string | null = null;
           for (const url of group.urls) {
-            const key = webProbeCacheKey(url);
-            const { probe, fresh } = yield* getProbe(url, group.server.pid);
+            const threadId = group.server.portSpace?.threadId;
+            const key = webProbeCacheKey(url, threadId);
+            const { probe, fresh } = yield* getProbe(url, group.server.pid, threadId);
             probes.push([key, probe, fresh]);
             if (probe.isWeb) {
               visibleUrl = url;
@@ -622,6 +745,12 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
         terminalByProcessId.set(processId, registration.owner);
       }
     }
+    const probeListeners = (listeners: ReadonlyArray<DiscoveredLocalServer>) =>
+      probePortSpaces(terminalByProcessId).pipe(
+        Effect.flatMap((spaceServers) =>
+          probeWebServers([...listeners, ...spaceServers], configuredUrls),
+        ),
+      );
     if (hostPlatform === "win32") {
       const recoverWindowsProbeFailure = recoverProcessProbeFailure("windows-listeners");
       const command =
@@ -643,13 +772,13 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
             ProcessTimeoutError: recoverWindowsProbeFailure,
           }),
         );
-      if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
-      return yield* probeWebServers([], configuredUrls);
+      if (listeners !== null) return yield* probeListeners(listeners);
+      return yield* probeListeners([]);
     }
     const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
     if (yield* Ref.get(lsofMissingRef)) {
       const fromProc = yield* scanProcListeners(terminalByProcessId);
-      return yield* probeWebServers(fromProc ?? [], configuredUrls);
+      return yield* probeListeners(fromProc ?? []);
     }
     const lsofResult = yield* processRunner
       .run({
@@ -673,9 +802,9 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           ProcessTimeoutError: recoverLsofProbeFailure,
         }),
       );
-    if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
+    if (lsofResult !== null) return yield* probeListeners(lsofResult);
     const fromProc = yield* scanProcListeners(terminalByProcessId);
-    return yield* probeWebServers(fromProc ?? [], configuredUrls);
+    return yield* probeListeners(fromProc ?? []);
   });
 
   const scanSnapshot = Effect.fn("PortDiscovery.scanSnapshot")(

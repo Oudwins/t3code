@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
+import * as PortGateway from "../portSpace/PortGateway.ts";
 import * as PortSpaces from "../portSpace/PortSpaces.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -17,9 +18,11 @@ const withService = <A, E>(
   use: (
     service: typeof ResourceCleanupService.ResourceCleanupService.Service,
     released: Array<string>,
+    relaysStopped: Array<string>,
   ) => Effect.Effect<A, E>,
 ) => {
   const released: Array<string> = [];
+  const relaysStopped: Array<string> = [];
   const portSpaces = Layer.mock(PortSpaces.PortSpaces)({
     wrapSpawn: (_threadId, input) => ({ command: input.command, args: input.args, env: {} }),
     capability: options.capability,
@@ -32,15 +35,21 @@ const withService = <A, E>(
             released.push(threadId);
           }),
   });
+  const portGateway = Layer.mock(PortGateway.PortGateway)({
+    release: (threadId) =>
+      Effect.sync(() => {
+        relaysStopped.push(threadId);
+      }),
+  });
   const terminals = Layer.mock(TerminalManager.TerminalManager)({});
   const previews = Layer.mock(PreviewManager.PreviewManager)({});
   return Effect.gen(function* () {
     const service = yield* ResourceCleanupService.ResourceCleanupService;
-    return yield* use(service, released);
+    return yield* use(service, released, relaysStopped);
   }).pipe(
     Effect.provide(
       ResourceCleanupService.layer.pipe(
-        Layer.provideMerge(Layer.mergeAll(portSpaces, terminals, previews)),
+        Layer.provideMerge(Layer.mergeAll(portSpaces, portGateway, terminals, previews)),
         Layer.provideMerge(ServerConfig.layerTest("/tmp", { prefix: "t3-cleanup-" })),
         Layer.provideMerge(NodeServices.layer),
       ),
@@ -50,11 +59,14 @@ const withService = <A, E>(
 
 describe("ResourceCleanupService.releasePortSpace", () => {
   it.effect("releases the thread's namespace where port spaces are set up", () =>
-    withService({ capability: Effect.succeed({ available: true }) }, (service, released) =>
-      Effect.gen(function* () {
-        yield* service.releasePortSpace("thread-1");
-        expect(released).toEqual(["thread-1"]);
-      }),
+    withService(
+      { capability: Effect.succeed({ available: true }) },
+      (service, released, relaysStopped) =>
+        Effect.gen(function* () {
+          yield* service.releasePortSpace("thread-1");
+          expect(released).toEqual(["thread-1"]);
+          expect(relaysStopped).toEqual(["thread-1"]);
+        }),
     ),
   );
 

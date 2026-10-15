@@ -345,6 +345,29 @@ describe("DiscoveredLocalServer", () => {
       }),
     ).toThrow();
   });
+
+  it("decodes the thread whose port space a server listens in", () => {
+    const server = decodeServer({
+      host: "localhost",
+      port: 3000,
+      url: "http://localhost:3000",
+      processName: "vite",
+      pid: 4321,
+      terminal: null,
+      portSpace: { threadId: "thread-1" },
+    });
+    expect(server.portSpace).toEqual({ threadId: "thread-1" });
+    expect(
+      decodeServer({
+        host: "localhost",
+        port: 3000,
+        url: "http://localhost:3000",
+        processName: null,
+        pid: null,
+        terminal: null,
+      }).portSpace,
+    ).toBeUndefined();
+  });
 });
 
 describe("ConfiguredLocalServerUrls", () => {

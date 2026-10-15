@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as PortGateway from "../portSpace/PortGateway.ts";
 import * as PortSpaces from "../portSpace/PortSpaces.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 
@@ -25,7 +26,7 @@ export class ResourceCleanupService extends Context.Reference<{
   readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   /** Closes every preview session of the thread; server browser tabs end with them. */
   readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
-  /** Kills whatever still runs in the thread's port space and deletes the namespace. */
+  /** Stops the thread's relay, kills whatever still runs in its port space and deletes the namespace. */
   readonly releasePortSpace: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
@@ -45,12 +46,15 @@ export const layer = Layer.effect(
     const terminals = yield* TerminalManager.TerminalManager;
     const previews = yield* PreviewManager.PreviewManager;
     const portSpaces = yield* PortSpaces.PortSpaces;
+    const portGateway = yield* PortGateway.PortGateway;
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
     return {
-      // Hosts that never set port spaces up have nothing to release.
+      // The relay goes first: once the namespace is released it would only dial nothing.
+      // Hosts that never set port spaces up have no namespace to release.
       releasePortSpace: (threadId: string) =>
-        portSpaces.capability.pipe(
+        portGateway.release(ThreadId.make(threadId)).pipe(
+          Effect.andThen(portSpaces.capability),
           Effect.flatMap((capability) =>
             capability.available ? portSpaces.release(ThreadId.make(threadId)) : Effect.void,
           ),

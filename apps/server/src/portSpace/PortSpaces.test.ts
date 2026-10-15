@@ -363,6 +363,29 @@ describe("PortSpaces.ensure and release", () => {
     ),
   );
 
+  it.effect("track the threads that have a namespace", () =>
+    withPortSpaces({}, (portSpaces) =>
+      Effect.gen(function* () {
+        expect(yield* portSpaces.threads).toEqual([]);
+        yield* portSpaces.ensure(threadA);
+        yield* portSpaces.ensure(threadA);
+        yield* portSpaces.ensure(threadB);
+        expect(yield* portSpaces.threads).toEqual([threadA, threadB]);
+        yield* portSpaces.release(threadA);
+        expect(yield* portSpaces.threads).toEqual([threadB]);
+      }),
+    ),
+  );
+
+  it.effect("do not track a thread whose namespace could not be created", () =>
+    withPortSpaces({ reply: () => output(2, "", "refused") }, (portSpaces) =>
+      Effect.gen(function* () {
+        yield* Effect.exit(portSpaces.ensure(threadA));
+        expect(yield* portSpaces.threads).toEqual([]);
+      }),
+    ),
+  );
+
   it.effect("surface the helper's stderr when it refuses", () =>
     withPortSpaces(
       { reply: () => output(2, "", "t3-portspace: invalid port space id\n") },

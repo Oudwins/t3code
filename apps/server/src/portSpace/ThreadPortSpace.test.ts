@@ -15,6 +15,7 @@ const stubPortSpaces = (
   PortSpaces.of({
     capability: Effect.succeed({ available: true }),
     ensure,
+    threads: Effect.succeed([]),
     wrapSpawn: () => wrapped,
     hostAddress: () => hostAddress,
     listeners: () => Effect.succeed([]),
