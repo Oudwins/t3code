@@ -8043,6 +8043,13 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "composer.machine") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) branchToolbarRef.current?.openMachinePicker();
+        return;
+      }
+
       if (command === "composer.cycleHost") {
         if (envLocked || !draftId || !hasMultipleEnvironments) return;
         event.preventDefault();

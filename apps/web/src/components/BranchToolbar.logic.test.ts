@@ -1,6 +1,7 @@
 import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  buildMachinePaletteOptions,
   buildWorkspacePaletteOptions,
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
@@ -108,6 +109,64 @@ describe("resolvePreviousWorktreeLabel", () => {
     expect(resolvePreviousWorktreeLabel({ branch: null, worktreePath: "/wt" })).toBe(
       "Previous worktree",
     );
+  });
+});
+
+describe("buildMachinePaletteOptions", () => {
+  const environments = [
+    {
+      environmentId: localEnvironmentId,
+      projectId: null,
+      label: "MacBook",
+      isPrimary: true,
+      machine: "laptop" as const,
+    },
+    {
+      environmentId: remoteEnvironmentId,
+      projectId: null,
+      label: "Build box",
+      isPrimary: false,
+      machine: "server" as const,
+    },
+  ];
+
+  it("lists the machines, marks the current one, and reports the chosen id", () => {
+    const select = vi.fn();
+    const options = buildMachinePaletteOptions({
+      environments,
+      environmentId: remoteEnvironmentId,
+      autoEnvironmentLabel: undefined,
+      onAutoEnvironment: undefined,
+      select,
+    });
+
+    expect(options.map(({ id, description, selected }) => ({ id, description, selected }))).toEqual(
+      [
+        { id: localEnvironmentId, description: "This device", selected: false },
+        { id: remoteEnvironmentId, description: null, selected: true },
+      ],
+    );
+    options[0]?.select();
+    expect(select.mock.calls).toEqual([[localEnvironmentId]]);
+  });
+
+  it("leads with auto balance and marks it current while it picks the machine", () => {
+    const onAutoEnvironment = vi.fn();
+    const options = buildMachinePaletteOptions({
+      environments,
+      environmentId: remoteEnvironmentId,
+      autoEnvironmentLabel: "Auto: Build box",
+      onAutoEnvironment,
+      select: () => {},
+    });
+
+    expect(options.map(({ id, label, selected }) => ({ id, label, selected }))).toEqual([
+      { id: "auto", label: "Auto: Build box", selected: true },
+      { id: localEnvironmentId, label: "MacBook", selected: false },
+      { id: remoteEnvironmentId, label: "Build box", selected: false },
+    ]);
+    options[0]?.select();
+    expect(onAutoEnvironment).toHaveBeenCalledOnce();
   });
 });
 
