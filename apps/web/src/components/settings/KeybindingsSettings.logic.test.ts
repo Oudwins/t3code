@@ -30,6 +30,7 @@ describe("KeybindingsSettings.logic", () => {
       "thread.steerQueuedMessage",
       "thread.editQueuedMessage",
       "composer.host",
+      "composer.machine",
       "composer.effort",
       "composer.mode",
       "composer.workspace",

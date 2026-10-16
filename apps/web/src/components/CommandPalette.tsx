@@ -78,6 +78,8 @@ import {
   PaletteIcon,
   PlusIcon,
   RotateCcwIcon,
+  ScaleIcon,
+  ServerIcon,
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
@@ -531,6 +533,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openAddProject();
         } else if (detail.workspace !== undefined) {
           dispatch({ _tag: "OpenWorkspace", options: detail.workspace });
+        } else if (detail.machine !== undefined) {
+          dispatch({ _tag: "OpenMachine", options: detail.machine });
         } else if (detail.query !== undefined) {
           dispatch({
             _tag: "OpenSearch",
@@ -2058,6 +2062,19 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  if (branchToolbarHandleRef?.current?.canPickMachine) {
+    actionItems.push({
+      kind: "action",
+      value: "action:select-machine",
+      searchTerms: ["machine", "host", "environment", "run on", "server", "remote"],
+      title: "Select machine",
+      icon: <ServerIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      shortcutCommand: "composer.machine",
+      run: async () => branchToolbarHandleRef.current?.openMachinePicker(),
+    });
+  }
+
   if (
     activeThread !== null &&
     threadPullRequestLinkMode(activeThreadServerConfig?.environment.capabilities) !== "unsupported"
@@ -2341,6 +2358,54 @@ function OpenCommandPaletteDialog(props: {
               title: option.label,
               ...(option.description ? { description: option.description } : {}),
               icon: WORKSPACE_OPTION_ICONS[option.icon],
+              ...(option.selected
+                ? {
+                    titleTrailingContent: (
+                      <span className="text-xs text-muted-foreground/70">Current</span>
+                    ),
+                  }
+                : {}),
+              run: async () => option.select(),
+            })),
+          ),
+        },
+      ],
+    });
+  }, [browseNavigation, clearOpenIntent, openIntent, pushPaletteView]);
+
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "machine") return;
+    clearOpenIntent();
+    browseNavigation.invalidate();
+    cloneLookupGeneration.current += 1;
+    setIsRemoteProjectLookingUp(false);
+    setAddProjectCloneFlow(null);
+    setNewProjectFlow(null);
+    setViewStack([]);
+    pushPaletteView({
+      addonIcon: <ServerIcon className={ADDON_ICON_CLASS} />,
+      groups: [
+        {
+          value: "machines",
+          label: "Select machine",
+          items: enumerateCommandPaletteItems(
+            openIntent.options.map((option): CommandPaletteActionItem => ({
+              kind: "action",
+              value: `machine:${option.id}`,
+              searchTerms: [
+                option.label,
+                "machine",
+                "host",
+                ...(option.description ? [option.description] : []),
+              ],
+              title: option.label,
+              ...(option.description ? { description: option.description } : {}),
+              icon:
+                option.machine === null ? (
+                  <ScaleIcon className={ITEM_ICON_CLASS} />
+                ) : (
+                  <EnvironmentMachineIcon kind={option.machine} className={ITEM_ICON_CLASS} />
+                ),
               ...(option.selected
                 ? {
                     titleTrailingContent: (

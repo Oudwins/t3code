@@ -287,6 +287,11 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: { kind: "workspace", options: [] },
     });
+    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenMachine", options: [] })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "machine", options: [] },
+    });
   });
 
   it("preserves the mode on close and resets it on open", () => {

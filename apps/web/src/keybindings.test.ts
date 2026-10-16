@@ -1816,6 +1816,20 @@ describe("chord shortcuts", () => {
     assert.isNull(getPendingChordLabel());
   });
 
+  it("opens the machine picker from the default ctrl+x m chord", () => {
+    const context = { terminalFocus: false };
+    assert.isNull(
+      resolveShortcutCommand(keyDown({ key: "x", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform,
+        context,
+      }),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(plainPress("m"), DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+      "composer.machine",
+    );
+  });
+
   it("lets every listener resolve the same event, including the follow-up key", () => {
     const rules = compileRules([{ key: "mod+g x", command: "terminal.toggle" }]);
     const leader = leaderPress();

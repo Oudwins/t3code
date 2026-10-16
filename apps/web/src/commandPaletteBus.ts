@@ -1,4 +1,8 @@
-import type { EnvironmentId, PullRequestLinkedThreadsResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  EnvironmentMachineKind,
+  PullRequestLinkedThreadsResult,
+} from "@t3tools/contracts";
 
 export interface CommandPaletteLinkedThreads {
   readonly environmentId: EnvironmentId;
@@ -19,11 +23,23 @@ export interface WorkspacePaletteOption {
   readonly select: () => void;
 }
 
+/** One row of the machine picker; the composer that opens it owns what selecting does. */
+export interface MachinePaletteOption {
+  readonly id: EnvironmentId | "auto";
+  readonly label: string;
+  readonly description: string | null;
+  /** Null for the auto-balance row. */
+  readonly machine: EnvironmentMachineKind | null;
+  readonly selected: boolean;
+  readonly select: () => void;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
   readonly query?: string;
   readonly linkedThreads?: CommandPaletteLinkedThreads;
   readonly workspace?: ReadonlyArray<WorkspacePaletteOption>;
+  readonly machine?: ReadonlyArray<MachinePaletteOption>;
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {

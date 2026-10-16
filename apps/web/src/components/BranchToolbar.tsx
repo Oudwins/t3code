@@ -29,6 +29,7 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
+  buildMachinePaletteOptions,
   buildWorkspacePaletteOptions,
   type EnvMode,
   type EnvironmentOption,
@@ -78,6 +79,9 @@ export interface BranchToolbarHandle {
   /** False when the workspace is fixed (existing thread, no git, forced new worktree). */
   canPickWorkspace: boolean;
   openWorkspacePicker: () => void;
+  /** False when the machine is fixed (started thread, only one machine). */
+  canPickMachine: boolean;
+  openMachinePicker: () => void;
   usePreviousWorktree: () => void;
 }
 
@@ -698,12 +702,38 @@ export const BranchToolbar = memo(function BranchToolbar({
     previousWorktreeSeed,
   ]);
 
+  const showEnvironmentPicker = Boolean(
+    availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
+  );
+  const canPickMachine = showEnvironmentPicker && !envLocked;
+  const openMachinePicker = useCallback(() => {
+    if (!canPickMachine || !availableEnvironments || !onEnvironmentChange) return;
+    openCommandPalette({
+      machine: buildMachinePaletteOptions({
+        environments: availableEnvironments,
+        environmentId,
+        autoEnvironmentLabel,
+        onAutoEnvironment,
+        select: onEnvironmentChange,
+      }),
+    });
+  }, [
+    autoEnvironmentLabel,
+    availableEnvironments,
+    canPickMachine,
+    environmentId,
+    onAutoEnvironment,
+    onEnvironmentChange,
+  ]);
+
   useImperativeHandle(
     ref,
     () => ({
       openBranchPicker: () => branchSelectorRef.current?.open(),
       canPickWorkspace,
       openWorkspacePicker,
+      canPickMachine,
+      openMachinePicker,
       usePreviousWorktree: () => {
         if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
         onUsePreviousWorktree();
@@ -711,19 +741,18 @@ export const BranchToolbar = memo(function BranchToolbar({
       },
     }),
     [
+      canPickMachine,
       canPickWorkspace,
       canUsePreviousWorktree,
       onComposerFocusRequest,
       onUsePreviousWorktree,
+      openMachinePicker,
       openWorkspacePicker,
       previousWorktreeSeed,
       showGitControls,
     ],
   );
 
-  const showEnvironmentPicker = Boolean(
-    availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
-  );
   const activeEnvironmentOption =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;
   const showEnvironmentIndicator = shouldShowEnvironmentIndicator({
