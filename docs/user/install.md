@@ -186,6 +186,11 @@ instance can have its own environment variables, such as API keys or a custom
 base URL. Mark secret values as sensitive; after saving, T3 Code does not display
 their original values.
 
+On macOS and Linux, the desktop app also reads the variables your shell profile
+exports, such as API keys or a token your MCP server config references, and
+passes them to every provider. A value set on the instance wins. Restart the app
+after you change your profile.
+
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 [Claude](./providers-claude.md), [OpenCode](./providers-opencode.md),
 [Antigravity](./providers-antigravity.md), [Pi](./providers-pi.md), and
