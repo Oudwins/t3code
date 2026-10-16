@@ -24,6 +24,11 @@ const isDesktopShellEnvironmentCommandError = Schema.is(
 );
 
 function envOutput(values: Readonly<Record<string, string>>): string {
+  const entries = Object.entries(values).map(([name, value]) => `${name}=${value}\0`);
+  return `__T3CODE_ENV_START__${entries.join("")}__T3CODE_ENV_END__`;
+}
+
+function powershellEnvOutput(values: Readonly<Record<string, string>>): string {
   return Object.entries(values)
     .flatMap(([name, value]) => [
       `__T3CODE_ENV_${name}_START__`,
@@ -438,6 +443,76 @@ describe("DesktopShellEnvironment", () => {
     }),
   );
 
+  it.effect(
+    "imports everything else the login shell exports without replacing inherited values",
+    () =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+          ANTHROPIC_API_KEY: "inherited-key",
+        };
+
+        yield* runShellEnvironment({
+          env,
+          platform: "darwin",
+          handler: () =>
+            `Last login: Fri Oct 16\n${envOutput({
+              PATH: "/usr/bin",
+              EXECUTOR_MCP_TOKEN: "token=with=equals",
+              MULTILINE_VALUE: "first\nsecond",
+              ANTHROPIC_API_KEY: "shell-key",
+            })}`,
+        });
+
+        assert.equal(env.EXECUTOR_MCP_TOKEN, "token=with=equals");
+        assert.equal(env.MULTILINE_VALUE, "first\nsecond");
+        assert.equal(env.ANTHROPIC_API_KEY, "inherited-key");
+      }),
+  );
+
+  it.effect("keeps shell session state and the app's own runtime settings out of the import", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = { SHELL: "/bin/bash", PATH: "/usr/bin" };
+
+      yield* runShellEnvironment({
+        env,
+        platform: "linux",
+        handler: () =>
+          envOutput({
+            PATH: "/usr/bin",
+            PWD: "/home/me",
+            SHLVL: "1",
+            _: "/usr/bin/env",
+            TERM: "xterm-256color",
+            NODE_OPTIONS: "--inspect",
+            ELECTRON_RUN_AS_NODE: "1",
+            VITE_DEV_SERVER_URL: "http://localhost:5733",
+            T3CODE_HOME: "/home/me/.t3-dev",
+            T3CODE_TELEMETRY_ENABLED: "false",
+            LANG: "de_DE.UTF-8",
+            LC_ALL: "de_DE.UTF-8",
+          }),
+      });
+
+      for (const name of [
+        "PWD",
+        "SHLVL",
+        "_",
+        "TERM",
+        "NODE_OPTIONS",
+        "ELECTRON_RUN_AS_NODE",
+        "VITE_DEV_SERVER_URL",
+        "T3CODE_HOME",
+        "LANG",
+        "LC_ALL",
+      ]) {
+        assert.notProperty(env, name);
+      }
+      assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
+    }),
+  );
+
   it.effect("falls back to launchctl PATH on macOS when shell probing does not return one", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = {
@@ -477,12 +552,12 @@ describe("DesktopShellEnvironment", () => {
           if (command._tag !== "StandardCommand") return "";
           const loadProfile = !command.args.includes("-NoProfile");
           return loadProfile
-            ? envOutput({
+            ? powershellEnvOutput({
                 PATH: "C:\\Profile\\Node;C:\\Windows\\System32",
                 FNM_DIR: "C:\\Users\\testuser\\AppData\\Roaming\\fnm",
                 FNM_MULTISHELL_PATH: "C:\\Users\\testuser\\AppData\\Local\\fnm_multishells\\123",
               })
-            : envOutput({ PATH: 'C:\\Custom\\Bin;C:";C:\\Windows\\System32' });
+            : powershellEnvOutput({ PATH: 'C:\\Custom\\Bin;C:";C:\\Windows\\System32' });
         },
       });
 

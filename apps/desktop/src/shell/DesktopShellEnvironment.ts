@@ -68,32 +68,41 @@ export class DesktopShellEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/shell/DesktopShellEnvironment") {}
 
-const LOGIN_SHELL_ENV_NAMES = [
-  "PATH",
+// Login-shell values that replace inherited ones: the inherited values are
+// stale session hints, or must stay paired with the shell's PATH.
+const SHELL_PREFERRED_ENV_NAMES = [
   "DBUS_SESSION_BUS_ADDRESS",
-  "DISPLAY",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "SSH_AUTH_SOCK",
-  "HOMEBREW_PREFIX",
-  "HOMEBREW_CELLAR",
-  "HOMEBREW_REPOSITORY",
-  "XDG_CONFIG_HOME",
   "XDG_CURRENT_DESKTOP",
-  "XDG_DATA_HOME",
-  "XDG_RUNTIME_DIR",
   "XDG_SESSION_DESKTOP",
   "XDG_SESSION_TYPE",
-  "WAYLAND_DISPLAY",
-  "CODE_PROJECTS_PARENT_DIRS",
-  "CODE_PROJECTS",
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "NODE_EXTRA_CA_CERTS",
-  "T3CODE_TELEMETRY_ENABLED",
+  // mise's record of the PATH entries it added. It must travel with the
+  // shell's PATH, or `mise x` can rebuild PATH behind a same-named wrapper
+  // (`exec mise x claude -- claude`) that then re-runs itself forever.
   "__MISE_DIFF",
 ] as const;
+// Login-shell variables never copied into the app: the probe shell's own
+// session state, a terminal the app does not have, and settings for the
+// Electron/Node runtime. PATH and the locale have their own merge rules.
+const NOT_IMPORTED_ENV_NAMES = new Set([
+  "PATH",
+  "PWD",
+  "OLDPWD",
+  "SHLVL",
+  "_",
+  "TERM",
+  "COLORTERM",
+  "NODE_OPTIONS",
+]);
+const isImportedShellEnvName = (name: string): boolean =>
+  !NOT_IMPORTED_ENV_NAMES.has(name) &&
+  name !== "LANG" &&
+  name !== "LANGUAGE" &&
+  !name.startsWith("LC_") &&
+  !name.startsWith("ELECTRON_") &&
+  !name.startsWith("VITE_") &&
+  // T3 Code's own configuration comes from how the app was launched, except
+  // the telemetry opt-out, which is documented as a shell profile variable.
+  (!name.startsWith("T3CODE_") || name === "T3CODE_TELEMETRY_ENABLED");
 const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as const;
 const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
 const FALLBACK_LC_CTYPE = "en_US.UTF-8";
@@ -200,16 +209,34 @@ const logShellEnvironmentCommandError = (
     }),
   );
 
-const capturePosixEnvironmentCommand = (names: ReadonlyArray<string>) =>
-  names
-    .map((name) => {
-      return [
-        `printf '%s\\n' '${startMarker(name)}'`,
-        `printenv ${name} || true`,
-        `printf '%s\\n' '${endMarker(name)}'`,
-      ].join("; ");
-    })
-    .join("; ");
+const POSIX_ENV_START_MARKER = "__T3CODE_ENV_START__";
+const POSIX_ENV_END_MARKER = "__T3CODE_ENV_END__";
+// NUL-separated, so values may hold newlines. The markers fence the dump off
+// from anything the shell profile prints.
+const CAPTURE_POSIX_ENVIRONMENT_COMMAND = [
+  `printf '%s' '${POSIX_ENV_START_MARKER}'`,
+  "env -0",
+  `printf '%s' '${POSIX_ENV_END_MARKER}'`,
+].join("; ");
+
+const parsePosixEnvironment = (output: string): EnvironmentPatch => {
+  const start = output.indexOf(POSIX_ENV_START_MARKER);
+  if (start === -1) return {};
+  const valuesStart = start + POSIX_ENV_START_MARKER.length;
+  const end = output.indexOf(POSIX_ENV_END_MARKER, valuesStart);
+  if (end === -1) return {};
+
+  const environment: EnvironmentPatch = {};
+  for (const entry of output.slice(valuesStart, end).split("\0")) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) continue;
+    const value = entry.slice(separator + 1);
+    if (value.length > 0) {
+      environment[entry.slice(0, separator)] = value;
+    }
+  }
+  return environment;
+};
 
 const captureWindowsEnvironmentCommand = (names: ReadonlyArray<string>) =>
   [
@@ -314,16 +341,13 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
 
 const readLoginShellEnvironment = (
   shell: string,
-  names: ReadonlyArray<string>,
 ): Effect.Effect<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> =>
-  names.length === 0
-    ? Effect.succeed({})
-    : runCommandOutput({
-        probe: "login-shell",
-        command: shell,
-        args: ["-ilc", capturePosixEnvironmentCommand(names)],
-        timeout: LOGIN_SHELL_TIMEOUT,
-      }).pipe(Effect.map((output) => extractEnvironment(output, names)));
+  runCommandOutput({
+    probe: "login-shell",
+    command: shell,
+    args: ["-ilc", CAPTURE_POSIX_ENVIRONMENT_COMMAND],
+    timeout: LOGIN_SHELL_TIMEOUT,
+  }).pipe(Effect.map(parsePosixEnvironment));
 
 const readLaunchctlPath = runCommandOutput({
   probe: "launchctl-path",
@@ -411,10 +435,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
     const shellEnvironment: EnvironmentPatch = {};
 
     for (const shell of listLoginShellCandidates(config.platform, config.env.SHELL)) {
-      Object.assign(
-        shellEnvironment,
-        yield* readLoginShellEnvironment(shell, LOGIN_SHELL_ENV_NAMES),
-      );
+      Object.assign(shellEnvironment, yield* readLoginShellEnvironment(shell));
       if (shellEnvironment.PATH) break;
     }
 
@@ -430,48 +451,19 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
     if (Option.isSome(mergedPath)) {
       config.env.PATH = mergedPath.value;
     }
-    if (!config.env.SSH_AUTH_SOCK && shellEnvironment.SSH_AUTH_SOCK) {
-      config.env.SSH_AUTH_SOCK = shellEnvironment.SSH_AUTH_SOCK;
-    }
-
-    const shellPreferredEnvNames = [
-      "DBUS_SESSION_BUS_ADDRESS",
-      "XDG_CURRENT_DESKTOP",
-      "XDG_SESSION_DESKTOP",
-      "XDG_SESSION_TYPE",
-      // mise's record of the PATH entries it added. It must travel with the
-      // shell's PATH, or `mise x` can rebuild PATH behind a same-named wrapper
-      // (`exec mise x claude -- claude`) that then re-runs itself forever.
-      "__MISE_DIFF",
-    ] as const;
-    for (const name of shellPreferredEnvNames) {
+    for (const name of SHELL_PREFERRED_ENV_NAMES) {
       if (shellEnvironment[name]) {
         config.env[name] = shellEnvironment[name];
       }
     }
 
-    for (const name of [
-      "DISPLAY",
-      "HOMEBREW_PREFIX",
-      "HOMEBREW_CELLAR",
-      "HOMEBREW_REPOSITORY",
-      "XDG_CONFIG_HOME",
-      "XDG_DATA_HOME",
-      "XDG_RUNTIME_DIR",
-      "WAYLAND_DISPLAY",
-      "CODE_PROJECTS_PARENT_DIRS",
-      "CODE_PROJECTS",
-      // CA trust set in the shell profile. Without it, a Node or OpenSSL build
-      // that has no bundled roots (a shared-OpenSSL node on PATH) cannot verify
-      // TLS, so provider updaters and agents fail to reach their registries.
-      "SSL_CERT_FILE",
-      "SSL_CERT_DIR",
-      "NODE_EXTRA_CA_CERTS",
-      // The telemetry opt-out is documented as a shell variable; GUI launches never see it.
-      "T3CODE_TELEMETRY_ENABLED",
-    ] as const) {
-      if (!config.env[name] && shellEnvironment[name]) {
-        config.env[name] = shellEnvironment[name];
+    // A GUI launch inherits almost nothing, so agents and the tools they run
+    // would miss what the shell profile exports: API keys, tokens referenced
+    // by MCP configs, CA trust, project folders. Inherited values still win,
+    // so a launch from a terminal keeps that terminal's environment.
+    for (const [name, value] of Object.entries(shellEnvironment)) {
+      if (!config.env[name] && isImportedShellEnvName(name)) {
+        config.env[name] = value;
       }
     }
 
