@@ -12,7 +12,6 @@ import {
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { getTerminalLabel, nextTerminalId } from "@t3tools/shared/terminalLabels";
 import { readEnvironmentScope } from "../state/session";
-import { useMemo } from "react";
 
 import { BrowserSettingsReadError } from "../browser/openFileInPreview";
 import { useDiffPanelStore } from "../diffPanelStore";
@@ -416,46 +415,24 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
   const closeOthersStable = useStableCallback(closeOthers);
   const closeToRightStable = useStableCallback(closeToRight);
   const closeAllStable = useStableCallback(closeAll);
-  return useMemo(
-    () => ({
-      addBrowser: addBrowserStable,
-      addDiff: addDiffStable,
-      addFiles: addFilesStable,
-      addPullRequest: addPullRequestStable,
-      addPullRequests: addPullRequestsStable,
-      addDevice: addDeviceStable,
-      addTerminal: addTerminalStable,
-      seedTabs: seedTabsStable,
-      splitTerminal: splitTerminalStable,
-      splitTerminalVertical: splitTerminalVerticalStable,
-      activateTerminal: activateTerminalStable,
-      closeTerminal: closeTerminalStable,
-      requestCloseTerminal: requestCloseTerminalStable,
-      activate: activateStable,
-      close: closeStable,
-      closeOthers: closeOthersStable,
-      closeToRight: closeToRightStable,
-      closeAll: closeAllStable,
-    }),
-    [
-      addBrowserStable,
-      addDiffStable,
-      addFilesStable,
-      addPullRequestStable,
-      addPullRequestsStable,
-      addDeviceStable,
-      addTerminalStable,
-      seedTabsStable,
-      splitTerminalStable,
-      splitTerminalVerticalStable,
-      activateTerminalStable,
-      closeTerminalStable,
-      requestCloseTerminalStable,
-      activateStable,
-      closeStable,
-      closeOthersStable,
-      closeToRightStable,
-      closeAllStable,
-    ],
-  );
+  return {
+    addBrowser: addBrowserStable,
+    addDiff: addDiffStable,
+    addFiles: addFilesStable,
+    addPullRequest: addPullRequestStable,
+    addPullRequests: addPullRequestsStable,
+    addDevice: addDeviceStable,
+    addTerminal: addTerminalStable,
+    seedTabs: seedTabsStable,
+    splitTerminal: splitTerminalStable,
+    splitTerminalVertical: splitTerminalVerticalStable,
+    activateTerminal: activateTerminalStable,
+    closeTerminal: closeTerminalStable,
+    requestCloseTerminal: requestCloseTerminalStable,
+    activate: activateStable,
+    close: closeStable,
+    closeOthers: closeOthersStable,
+    closeToRight: closeToRightStable,
+    closeAll: closeAllStable,
+  };
 }

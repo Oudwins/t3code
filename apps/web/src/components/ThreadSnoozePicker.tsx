@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { CalendarClockIcon, ClockIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { useClientSettings } from "../hooks/useSettings";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -52,37 +52,35 @@ function SnoozePickerContent(props: {
   // Resolved once per open so a picker left idle does not offer stale wake times.
   const [presets] = useState(() => resolveSnoozePresets(new Date(), timestampFormat));
 
-  const items = useMemo<CommandPaletteActionItem[]>(() => {
-    const needle = query.trim().toLowerCase();
-    const presetItems = presets
-      .map<CommandPaletteActionItem>((preset) => ({
-        kind: "action",
-        value: `snooze:${preset.id}`,
-        searchTerms: [preset.label, preset.whenLabel],
-        title: preset.label,
-        timestamp: preset.whenLabel,
-        icon: <ClockIcon className={ITEM_ICON_CLASS} />,
-        run: async () => onSelect({ snoozedUntil: preset.snoozedUntil }),
-      }))
-      .filter(
-        (item) =>
-          needle === "" || item.searchTerms.some((term) => term.toLowerCase().includes(needle)),
-      );
-    return [
-      ...presetItems,
-      {
-        kind: "action",
-        value: "snooze:custom",
-        searchTerms: ["custom"],
-        title: "Custom…",
-        icon: <CalendarClockIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          const choice = await requestCustomSnooze();
-          if (choice) onSelect(choice);
-        },
+  const needle = query.trim().toLowerCase();
+  const presetItems = presets
+    .map<CommandPaletteActionItem>((preset) => ({
+      kind: "action",
+      value: `snooze:${preset.id}`,
+      searchTerms: [preset.label, preset.whenLabel],
+      title: preset.label,
+      timestamp: preset.whenLabel,
+      icon: <ClockIcon className={ITEM_ICON_CLASS} />,
+      run: async () => onSelect({ snoozedUntil: preset.snoozedUntil }),
+    }))
+    .filter(
+      (item) =>
+        needle === "" || item.searchTerms.some((term) => term.toLowerCase().includes(needle)),
+    );
+  const items: CommandPaletteActionItem[] = [
+    ...presetItems,
+    {
+      kind: "action",
+      value: "snooze:custom",
+      searchTerms: ["custom"],
+      title: "Custom…",
+      icon: <CalendarClockIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const choice = await requestCustomSnooze();
+        if (choice) onSelect(choice);
       },
-    ];
-  }, [onSelect, presets, query]);
+    },
+  ];
 
   return (
     <CommandPaletteContent
