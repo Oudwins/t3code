@@ -226,6 +226,7 @@ const sweepWorktree = (options: {
       const fakes = Layer.mergeAll(
         Layer.mock(ProjectStore.ProjectStoreV2)({
           listShells: () => Effect.succeed([{ id: projectId, workspaceRoot: repo } as never]),
+          list: () => Effect.succeed([{ id: projectId, workspaceRoot: repo } as never]),
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadWorktreePaths: () =>
