@@ -27,14 +27,17 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
+import * as ServerConfig from "../config.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -48,9 +51,31 @@ import * as RuntimePolicy from "./RuntimePolicy.ts";
 
 const isDomainEvent = Schema.is(OrchestrationV2DomainEvent);
 
+const managedWorktreesDir = "/tmp/provider-turn-start-worktrees";
+// fs.realpath applies `..` and `.` before following symlinks.
+const normalize = (target: string) => {
+  const parts: Array<string> = [];
+  for (const part of target.split("/")) {
+    if (part === "..") parts.pop();
+    else if (part !== "" && part !== ".") parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+};
+const layerWorktreeLocation = (worktreesDir = managedWorktreesDir) =>
+  Layer.mergeAll(
+    Path.layer,
+    Layer.mock(ServerConfig.ServerConfig)({ worktreesDir } as ServerConfig.ServerConfig["Service"]),
+    ServerSettings.layerTest(),
+  );
+
+const missingWorktreePath = `${managedWorktreesDir}/project/feature-restore`;
+
 // The projection read after a missing worktree is recreated fails, so the turn
 // stops before any provider work and only the recreate side effects remain.
 async function startAfterMissingWorktree(options?: {
+  readonly worktreePath?: string;
+  /** Paths that exist on the fake disk, mapped to where their symlinks lead. */
+  readonly realPaths?: Record<string, string>;
   readonly recreateFails?: boolean;
   readonly setup?: Effect.Effect<
     ProjectSetupScriptRunner.ProjectSetupScriptRunnerResult,
@@ -58,6 +83,11 @@ async function startAfterMissingWorktree(options?: {
   >;
   readonly willRetry?: boolean;
 }) {
+  const worktreePath = options?.worktreePath ?? missingWorktreePath;
+  const realPaths = options?.realPaths ?? {
+    [managedWorktreesDir]: managedWorktreesDir,
+    [`${managedWorktreesDir}/project`]: `${managedWorktreesDir}/project`,
+  };
   const threadId = ThreadId.make("thread_provider_turn_start_projection_failure");
   const runId = RunId.make("run_provider_turn_start_projection_failure");
   const attemptId = RunAttemptId.make("attempt_provider_turn_start_projection_failure");
@@ -77,7 +107,7 @@ async function startAfterMissingWorktree(options?: {
       id: threadId,
       projectId: ProjectId.make("project_provider_turn_start_projection_failure"),
       branch: "feature/restore",
-      worktreePath: "/tmp/missing-provider-turn-start-worktree",
+      worktreePath,
     },
     runs: [
       {
@@ -134,8 +164,21 @@ async function startAfterMissingWorktree(options?: {
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
-        Path.layer,
-        FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
+        Layer.succeed(FileSystem.FileSystem, {
+          exists: () => Effect.succeed(false),
+          realPath: (target: string) =>
+            normalize(target) in realPaths
+              ? Effect.succeed(realPaths[normalize(target)])
+              : Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "NotFound",
+                    module: "FileSystem",
+                    method: "realPath",
+                    pathOrDescriptor: target,
+                  }),
+                ),
+        } as never),
+        layerWorktreeLocation(),
         Layer.mock(GitWorkflow.GitWorkflowService)({ pruneWorktrees }),
         Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree, removeWorktree }),
         Layer.mock(ProjectService.ProjectService)({
@@ -206,7 +249,7 @@ it("does not commit running state when inherited background routing cannot be re
   expect(result.createWorktree).toHaveBeenCalledWith({
     cwd: "/tmp/provider-turn-start-project",
     refName: "feature/restore",
-    path: "/tmp/missing-provider-turn-start-worktree",
+    path: missingWorktreePath,
   });
   expect(result.writeIfRunCurrent).not.toHaveBeenCalled();
   expect(result.startRootRun).not.toHaveBeenCalled();
@@ -220,7 +263,7 @@ it("runs the project setup script in a missing worktree it recreated", async () 
     threadId: "thread_provider_turn_start_projection_failure",
     projectId: result.project.id,
     projectCwd: "/tmp/provider-turn-start-project",
-    worktreePath: "/tmp/missing-provider-turn-start-worktree",
+    worktreePath: missingWorktreePath,
     project: result.project,
     observeCompletion: { releaseOnFailure: true },
   });
@@ -243,7 +286,7 @@ const startedSetup = (input: {
     scriptName: "Install",
     scriptCommand: "exit 3",
     terminalId: "setup-terminal",
-    cwd: "/tmp/missing-provider-turn-start-worktree",
+    cwd: missingWorktreePath,
     async: input.async,
     completion: Effect.succeed({ exitCode: input.exitCode, durationMs: 1 }),
   });
@@ -256,7 +299,7 @@ it("fails the run and removes the worktree when a blocking setup script fails", 
   expect(result.error).toBeUndefined();
   expect(result.removeWorktree).toHaveBeenCalledWith({
     cwd: "/tmp/provider-turn-start-project",
-    path: "/tmp/missing-provider-turn-start-worktree",
+    path: missingWorktreePath,
     force: true,
   });
   expect(result.writeIfRunCurrent).toHaveBeenCalledTimes(1);
@@ -289,7 +332,7 @@ const setupOperationFailure = (operation: "openTerminal" | "writeCommand") =>
   Effect.fail(
     new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
       threadId: "thread_provider_turn_start_projection_failure",
-      worktreePath: "/tmp/missing-provider-turn-start-worktree",
+      worktreePath: missingWorktreePath,
       operation,
       cause: new Error(`simulated ${operation} failure`),
     }),
@@ -305,7 +348,7 @@ it.each(setupOperations)(
     expect(result.error).toBeUndefined();
     expect(result.removeWorktree).toHaveBeenCalledWith({
       cwd: "/tmp/provider-turn-start-project",
-      path: "/tmp/missing-provider-turn-start-worktree",
+      path: missingWorktreePath,
       force: true,
     });
     expect(result.writeIfRunCurrent).toHaveBeenCalledTimes(1);
@@ -363,25 +406,77 @@ it("does not let an async setup script fail the turn", async () => {
   expect(result.projectionReadCount).toBe(3);
 });
 
+it.each([
+  {
+    label: "<managed>/<repo>/<branch>",
+    worktreePath: `${managedWorktreesDir}/project/feature-restore`,
+    recreated: true,
+  },
+  {
+    label: "the real path of a symlinked managed folder",
+    worktreePath: "/real-worktrees/project/feature-restore",
+    realPaths: { [managedWorktreesDir]: "/real-worktrees", "/real-worktrees": "/real-worktrees" },
+    recreated: true,
+  },
+  {
+    label: "a path outside the managed folder",
+    worktreePath: "/tmp/provider-turn-start-project/.git/hooks",
+    recreated: false,
+  },
+  {
+    label: "a symlink inside the managed folder that leads out",
+    worktreePath: `${managedWorktreesDir}/project/hooks`,
+    realPaths: {
+      [managedWorktreesDir]: managedWorktreesDir,
+      [`${managedWorktreesDir}/project`]: "/tmp/provider-turn-start-project/.git",
+    },
+    recreated: false,
+  },
+  {
+    label: "a folder nested below a worktree",
+    worktreePath: `${managedWorktreesDir}/project/feature-restore/link/hooks`,
+    recreated: false,
+  },
+  {
+    label: "'..' out of the managed folder",
+    worktreePath: `${managedWorktreesDir}/project/../../outside`,
+    recreated: false,
+  },
+  {
+    // Left raw on purpose: git follows `link` before applying `..`.
+    label: "'..' after a symlink inside the managed folder",
+    worktreePath: `${managedWorktreesDir}/project/x/link/../../hooks`,
+    realPaths: {
+      [managedWorktreesDir]: managedWorktreesDir,
+      [`${managedWorktreesDir}/project`]: `${managedWorktreesDir}/project`,
+      [`${managedWorktreesDir}/project/x`]: `${managedWorktreesDir}/project/x`,
+      [`${managedWorktreesDir}/project/x/link`]: "/tmp/provider-turn-start-project/.git/refs/heads",
+    },
+    recreated: false,
+  },
+  { label: "a relative path", worktreePath: "project/feature-restore", recreated: false },
+])("recreates a missing worktree only at the managed location: $label", async (input) => {
+  const result = await startAfterMissingWorktree({
+    worktreePath: input.worktreePath,
+    ...(input.realPaths ? { realPaths: input.realPaths } : {}),
+  });
+  expect(result.createWorktree).toHaveBeenCalledTimes(input.recreated ? 1 : 0);
+});
+
 function makeLocalCommandHarness(input: {
   readonly text: string;
   readonly worktreePath?: string;
+  readonly worktreesDir?: string;
   readonly fileSystem?: FileSystem.FileSystem;
   readonly previousNativeSession?: boolean;
   readonly previousMessages?: ReadonlyArray<string>;
   readonly logoutFailure?: string;
   readonly openFailure?: unknown;
-  /** Opens the session, then fails loading its provider thread. */
   readonly ensureThreadFailure?: unknown;
-  /**
-   * Resumes a thread that has a native ref: resume fails, the fresh-thread
-   * fallback succeeds, then reading history for its handoff fails.
-   */
   readonly historyReadFailureAfterFallback?: unknown;
   readonly interruptOpen?: boolean;
   readonly interruptRunBeforeOpenFailure?: boolean;
   readonly writeFailure?: unknown;
-  /** Loads the thread and starts the run, then fails every later state read. */
   readonly failReadsAfterRunning?: boolean;
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
@@ -722,7 +817,7 @@ function makeLocalCommandHarness(input: {
         }),
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
-        Path.layer,
+        layerWorktreeLocation(input.worktreesDir),
         input.fileSystem === undefined
           ? FileSystem.layerNoop({ exists: () => Effect.succeed(true) })
           : Layer.succeed(FileSystem.FileSystem, input.fileSystem),
@@ -803,13 +898,14 @@ effectIt.effect.each(["cleanup-first", "startup-first"])(
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-start-" });
-      const worktreePath = path.join(workspaceRoot, "worktree");
-      yield* fileSystem.makeDirectory(worktreePath);
+      const worktreePath = path.join(workspaceRoot, "project", "worktree");
+      yield* fileSystem.makeDirectory(worktreePath, { recursive: true });
       const release = yield* Deferred.make<void>();
       const openEntered = yield* Deferred.make<void>();
       const harness = makeLocalCommandHarness({
         text: "Continue",
         worktreePath,
+        worktreesDir: workspaceRoot,
         fileSystem,
         failReadsAfterRunning: true,
       });
@@ -1127,8 +1223,6 @@ effectIt.effect(
 
       const error = yield* harness.start.pipe(Effect.flip);
 
-      // The provider succeeded; the failing stage is the projection read, so
-      // the run is not failed as a provider error on the last attempt.
       expect(error._tag).toBe("ProviderTurnStartError");
       expect((error.cause as { _tag?: string } | undefined)?._tag).toBe("ProjectionStoreReadError");
       expect(harness.writeIfRunCurrent).not.toHaveBeenCalled();
@@ -1147,8 +1241,6 @@ effectIt.effect("does not mistake a failed state read for a superseded run", () 
     const controls = harness.startRootRun.mock.calls[0]?.[0];
     expect(controls).toBeDefined();
     if (controls === undefined) return;
-    // "false" would skip the provider turn or the terminal write and leave the
-    // run active. A read failure must reach the caller instead.
     const startCheck = yield* Effect.flip(controls.shouldStartProviderTurn!());
     const finalizeCheck = yield* Effect.flip(controls.shouldFinalizeRun!());
     expect(startCheck._tag).toBe("ProjectionStoreReadError");

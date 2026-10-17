@@ -24,7 +24,6 @@ export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupErro
 
 export class ResourceCleanupService extends Context.Reference<{
   readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
-  /** Closes every preview session of the thread; server browser tabs end with them. */
   readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   /** Stops the thread's relay, kills whatever still runs in its port space and deletes the namespace. */
   readonly releasePortSpace: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;

@@ -1,6 +1,5 @@
 import type { DiscoveredLocalServer, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
-import { useMemo } from "react";
 
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import { threadPreviewServers, useDiscoveredPortsState } from "~/portDiscoveryState";
@@ -21,32 +20,24 @@ interface UseDiscoveredLocalServersInput {
   configuredUrls?: ReadonlyArray<string> | undefined;
 }
 
-/**
- * Enrich the environment-level live server snapshot with matching configured
- * URLs and return a stable sorted list. With port spaces on, only the
- * thread's own namespace servers are listed.
- */
 export function useDiscoveredLocalServers(
   input: UseDiscoveredLocalServersInput,
 ): ReadonlyArray<PreviewableServer> {
   const scannerState = useDiscoveredPortsState(input.environmentId, input.configuredUrls);
   const portSpacesEnabled = usePortSpacesEnabled(input.environmentId);
 
-  return useMemo(
-    () =>
-      mergeServers({
-        scanner: threadPreviewServers(scannerState.servers, input.threadId, portSpacesEnabled).map(
-          (server) => ({
-            ...server,
-            url: resolveDiscoveredServerUrl(input.environmentId, server.url, portSpacesEnabled),
-            requestedUrl: server.url,
-          }),
-        ),
-        configuredUrls: input.configuredUrls ?? [],
-        configuredUrlProbing: scannerState.configuredUrlProbing,
+  // With port spaces on, only the thread's own namespace servers are listed.
+  return mergeServers({
+    scanner: threadPreviewServers(scannerState.servers, input.threadId, portSpacesEnabled).map(
+      (server) => ({
+        ...server,
+        url: resolveDiscoveredServerUrl(input.environmentId, server.url, portSpacesEnabled),
+        requestedUrl: server.url,
       }),
-    [input.environmentId, input.threadId, scannerState, input.configuredUrls, portSpacesEnabled],
-  );
+    ),
+    configuredUrls: input.configuredUrls ?? [],
+    configuredUrlProbing: scannerState.configuredUrlProbing,
+  });
 }
 
 export function mergeServers(input: {

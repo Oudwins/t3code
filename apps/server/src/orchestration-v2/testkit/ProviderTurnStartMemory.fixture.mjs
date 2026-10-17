@@ -30,6 +30,8 @@ const [
   Auth,
   Worktrees,
   SetupScripts,
+  Config,
+  Settings,
 ] = await Promise.all([
   app("orchestration-v2/ProviderTurnStartService"),
   app("orchestration-v2/ProjectionStore"),
@@ -44,6 +46,8 @@ const [
   app("provider/ProviderAuthService"),
   app("git/WorktreeManager"),
   app("project/ProjectSetupScriptRunner"),
+  app("config"),
+  app("serverSettings"),
 ]);
 let current;
 let fullReads = 0;
@@ -71,6 +75,8 @@ const dependencies = Layer.mergeAll(
   Layer.mock(SetupScripts.ProjectSetupScriptRunner)({}),
   Layer.mock(Project.ProjectService)({}),
   Layer.mock(Auth.ProviderAuthService)({}),
+  Layer.mock(Config.ServerConfig)({ worktreesDir: "/synthetic-worktrees" }),
+  Settings.layerTest(),
   Layer.mock(Projection.ProjectionStoreV2)({
     getThreadProjection: () =>
       Effect.sync(() => {
@@ -195,7 +201,6 @@ await Effect.runPromise(
     for (let i = 0; i < count; i++) {
       current = fixture(i);
       yield* service.start({ threadId: "thread", runId: "run:" + i });
-      // The run worker must keep checking current durable state, not its startup copy.
       const controls = liveRuns.at(-1);
       current = { ...current, turnItems: [] };
       NodeAssert.equal(yield* controls.shouldStartProviderTurn(), true);
