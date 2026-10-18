@@ -1836,6 +1836,7 @@ function OpenCommandPaletteDialog(props: {
       searchTerms: ["tab", "new tab", "surface", "terminal", "browser", "files"],
       title: "New tab",
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.newTab",
       run: async () => useRightPanelStore.getState().openNewTab(threadTabsRef(tabsTargetThreadRef)),
     });
   }

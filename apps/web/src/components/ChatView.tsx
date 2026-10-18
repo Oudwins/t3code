@@ -5577,6 +5577,8 @@ export default function ChatView(props: ChatViewProps) {
     terminalOpen: Boolean(terminalUiState.terminalOpen),
     previewFocus: isPreviewFocused(),
     previewOpen: previewPanelOpen,
+    rightPanelOpen,
+    threadTabActive: conversationHidden,
     editableFocus: isEditableFocused(eventTarget),
     modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
     composerFocus: document.activeElement?.getAttribute("data-testid") === "composer-editor",
@@ -5696,6 +5698,14 @@ export default function ChatView(props: ChatViewProps) {
         if (event.repeat) return;
         if (activeTabSurface) tabsActions.close(activeTabSurface);
         else if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface);
+      },
+      "thread.newTab": ({ event }) => {
+        if (!tabsRef) return false;
+        if (!event.repeat) openNewTabStable();
+      },
+      "thread.closeTab": ({ event }) => {
+        if (!activeTabSurface) return false;
+        if (!event.repeat) tabsActions.close(activeTabSurface);
       },
       "terminal.split": ({ terminalFocusOwner }) => {
         if (!canOperateTerminal) return false;
