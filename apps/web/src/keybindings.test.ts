@@ -41,6 +41,7 @@ import {
   threadTabShortcutIndex,
   threadTraversalDirectionFromCommand,
   type ShortcutEventLike,
+  type ShortcutMatchContext,
 } from "./keybindings";
 
 function event(overrides: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
@@ -2051,5 +2052,29 @@ describe("thread tab shortcuts", () => {
       }),
       "thread.tab.2",
     );
+  });
+
+  it("opens a thread tab with mod+t unless the right panel is open", () => {
+    const pressed = event({ key: "t", metaKey: true });
+    const resolve = (context: Partial<ShortcutMatchContext>) =>
+      resolveShortcutCommand(pressed, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context,
+      });
+    assert.strictEqual(resolve({ rightPanelOpen: false }), "thread.newTab");
+    assert.strictEqual(resolve({ rightPanelOpen: true }), "rightPanel.new");
+    assert.isNull(resolve({ rightPanelOpen: false, terminalFocus: true }));
+  });
+
+  it("closes the showing thread tab with mod+w, and the right panel's tab otherwise", () => {
+    const pressed = event({ key: "w", metaKey: true });
+    const resolve = (context: Partial<ShortcutMatchContext>) =>
+      resolveShortcutCommand(pressed, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context,
+      });
+    assert.strictEqual(resolve({ threadTabActive: true }), "thread.closeTab");
+    assert.strictEqual(resolve({ threadTabActive: false }), "rightPanel.close");
+    assert.strictEqual(resolve({ threadTabActive: true, terminalFocus: true }), "terminal.close");
   });
 });

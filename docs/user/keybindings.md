@@ -163,8 +163,9 @@ plain shortcut, [rule order](#precedence) decides which one runs.
 ## When conditions
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
-`previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
-`turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
+`previewOpen`, `rightPanelOpen`, `threadTabActive`, `modelPickerOpen`, `usagePageOpen`,
+`composerFocus`, `composerDraft`, `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
+`threadTabActive` is true while one of a thread's tabs is showing instead of the conversation.
 `editableFocus` is true while a text field, the composer, or another editor has
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
 desktop app. Unknown keys evaluate to `false`.
@@ -215,6 +216,10 @@ each later number is the next tab. They work while a terminal has focus. A numbe
 with no matching tab does nothing and the terminal keeps the key, so a shell or
 editor binding on `alt+digit` still works until that tab exists.
 
+`thread.newTab` (`mod+t`) opens a new tab in the thread, and `thread.closeTab` (`mod+w`)
+closes the tab that is showing. While the right panel is open, `mod+t` adds a tab to the
+right panel instead.
+
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
 
@@ -227,8 +232,8 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 In the desktop app, `mod+w` closes the focused terminal, the active tab, or the
 active right-panel tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
-closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
-shortcut such as `alt+w`.
+closes the browser tab; rebind `thread.closeTab`, `rightPanel.close`, and `terminal.close`
+to an available shortcut such as `alt+w`. Browsers also keep `mod+t` for a new browser tab.
 
 `mod+shift+t` reopens the last closed tab across the app, including files,
 diffs, pull requests, browsers, and devices, in the order you closed them.

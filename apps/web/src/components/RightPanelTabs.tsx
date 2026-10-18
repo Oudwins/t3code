@@ -858,19 +858,17 @@ export function SurfaceTabStrip(props: SurfaceTabStripProps) {
     event.preventDefault();
     event.stopPropagation();
     if (!event.repeat) {
-      if (props.onNewTab) {
-        props.onNewTab();
-        return;
-      }
       addSurfaceTriggerRef.current?.focus();
       setAddSurfaceMenuOpen(true);
     }
   });
+  // A host with `onNewTab` owns thread tabs and binds `thread.newTab` itself.
+  const listensForNewSurface = props.open !== false && !props.onNewTab;
   useEffect(() => {
-    if (props.open === false) return;
+    if (!listensForNewSurface) return;
     document.addEventListener("keydown", onNewSurfaceKeyDown, true);
     return () => document.removeEventListener("keydown", onNewSurfaceKeyDown, true);
-  }, [props.open]);
+  }, [listensForNewSurface]);
 
   const updateTabScrollState = () => {
     const viewport = tabScrollViewport(tabListRef.current);

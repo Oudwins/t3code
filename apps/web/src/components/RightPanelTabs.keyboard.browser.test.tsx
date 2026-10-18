@@ -113,14 +113,12 @@ async function press(key: string, options: KeyboardEventInit = {}) {
 }
 
 describe("right panel new-tab shortcut", () => {
-  it("opens a thread tab instead of the surface menu when the host owns tabs", async () => {
+  it("leaves the shortcut to the host when the host owns thread tabs", async () => {
     const onNewTab = vi.fn();
     await renderPanel({ onNewTab });
-    expect((await press("t", { metaKey: true })).defaultPrevented).toBe(true);
-    expect(onNewTab).toHaveBeenCalledOnce();
+    expect((await press("t", { metaKey: true })).defaultPrevented).toBe(false);
+    expect(onNewTab).not.toHaveBeenCalled();
     expect(document.querySelector('[role="menu"]')).toBeNull();
-    await press("t", { metaKey: true, repeat: true });
-    expect(onNewTab).toHaveBeenCalledOnce();
   });
 
   it.each(["MacIntel", "Win32", "Linux x86_64"])(
