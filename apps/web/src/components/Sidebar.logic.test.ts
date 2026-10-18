@@ -2500,6 +2500,36 @@ describe("Working shelf (beta)", () => {
       expect(resolveSidebarDropVerb("active", "waiting")).toBeNull();
     });
 
+    it.each([
+      ["working", "w1", "pinned", "p1"],
+      ["working", "w1", "active", "a2"],
+      ["working", "w1", "settled", "s1"],
+      ["waiting", "t1", "pinned", "p1"],
+      ["waiting", "t1", "active", "a2"],
+      ["waiting", "t1", "settled", "s1"],
+    ] as const)(
+      "does not move a %s thread into %s when its reference drag ends in the sidebar",
+      (activeSection, activeKey, section, overKey) => {
+        const target = resolveSidebarDropTarget(items, activeKey, overKey);
+        expect(target?.section).toBe(section);
+        expect(
+          planSidebarThreadDrop({
+            activeKey,
+            activeSection,
+            target: target!,
+            pinnedOrder: ["p1"],
+            pinnedKeysById: new Map([["p1", "m"]]),
+            activeOrder: ["a1", "a2"],
+            activeKeysById: new Map([
+              ["a1", "f"],
+              ["a2", "t"],
+            ]),
+            activeTimeOrdered: true,
+          }),
+        ).toEqual({ kind: "none" });
+      },
+    );
+
     it("arranges the rows it can write when another row's server cannot store an order", () => {
       const plan = planSidebarThreadDrop({
         activeKey: "a2",
