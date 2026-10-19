@@ -301,12 +301,9 @@ const make = Effect.gen(function* () {
   // Read both shelves once per sweep on the reader worker. Rechecks use the
   // narrow worktree-path lookup instead of rebuilding snapshots per checkout.
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
-    const [active, archived] = yield* Effect.all([
-      projections.getShellSnapshot({ location: "active" }).pipe(NodeSqliteClient.readOnly),
-      projections.getShellSnapshot({ location: "archive" }).pipe(NodeSqliteClient.readOnly),
-    ]);
+    const snapshot = yield* projections.getShellSnapshot().pipe(NodeSqliteClient.readOnly);
     const projects = yield* projectStore.listShells();
-    return { projects, threads: [...active.threads, ...archived.threads] };
+    return { projects, threads: [...snapshot.threads, ...snapshot.archivedThreads] };
   });
 
   const containsProjectRoot = Effect.fn("StorageCleanup.containsProjectRoot")(function* (

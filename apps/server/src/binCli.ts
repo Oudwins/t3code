@@ -17,7 +17,7 @@ import { pairCommand } from "./cli/pair.ts";
 import { portspaceCommand } from "./cli/portspace.ts";
 import { portspaceRelayCommand } from "./cli/portspaceRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
-import { keepOutboundFetchOnHttp1 } from "./outboundHttp.ts";
+import { extendConnectionAttemptTimeout, keepOutboundFetchOnHttp1 } from "./outboundHttp.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
@@ -99,6 +99,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
 export const cli = makeCli();
 
 export function runCli() {
+  extendConnectionAttemptTimeout();
   keepOutboundFetchOnHttp1();
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,

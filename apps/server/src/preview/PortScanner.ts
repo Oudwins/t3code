@@ -817,10 +817,12 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           probeWebServers([...listeners, ...spaceServers], configuredUrls),
         ),
       );
+    // Port spaces hold listeners for agents as well as terminals, so they are probed even
+    // when no host scan is needed.
+    if (terminalByProcessId.size === 0 && configuredUrls.length === 0) {
+      return yield* probeListeners([]);
+    }
     if (hostPlatform === "win32") {
-      if (terminalByProcessId.size === 0 && configuredUrls.length === 0) {
-        return { discovered: [], configured: new Map() } satisfies WebProbeSnapshot;
-      }
       const recoverWindowsProbeFailure = recoverProcessProbeFailure("windows-listeners");
       const runNetstat = (protocol: "tcp" | "tcpv6") =>
         processRunner.run({

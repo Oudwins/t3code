@@ -763,7 +763,9 @@ function useKeybindingRowEditor({
       setDraft({ keyDraft: row.key, isRecording: false, chordArmed: false });
       return;
     }
-    const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
+    const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform, {
+      layoutCharacter: true,
+    });
     if (!step) return;
     setDraft({ ...recordKeybindingKeypress({ keyDraft, chordArmed }, step), isRecording: false });
   };
@@ -1091,7 +1093,9 @@ function useNewKeybindingDraft({
       setDraft({ keyDraft: "", isRecording: false, chordArmed: false });
       return;
     }
-    const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
+    const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform, {
+      layoutCharacter: true,
+    });
     if (!step) return;
     setDraft({ ...recordKeybindingKeypress({ keyDraft, chordArmed }, step), isRecording: false });
   };
