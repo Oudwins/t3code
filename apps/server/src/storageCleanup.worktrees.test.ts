@@ -234,14 +234,14 @@ const sweepWorktree = (options: {
               options.threadState === "deleted" ? [] : [{ threadId, worktreePath: worktree }],
             ),
           getThreadShell: () => Effect.succeed(thread as unknown as OrchestrationV2ThreadShell),
-          getShellSnapshot: (snapshotOptions) =>
+          getShellSnapshot: () =>
             Deferred.succeed(sweepStarted, undefined).pipe(
               Effect.as({
                 threads:
-                  options.threadState === "deleted" ||
-                  (snapshotOptions?.location === "archive") !== (options.threadState === "archived")
+                  options.threadState === "deleted" || options.threadState === "archived"
                     ? []
                     : [thread],
+                archivedThreads: options.threadState === "archived" ? [thread] : [],
               } as never),
             ),
         }),
