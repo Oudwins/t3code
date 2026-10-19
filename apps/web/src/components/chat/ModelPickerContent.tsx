@@ -966,7 +966,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   <ModelListRow
                     key={modelKey}
                     index={index}
-                    model={model}
+                    slug={model.slug}
+                    name={model.name}
+                    shortName={model.shortName}
+                    subProvider={model.subProvider}
                     instanceId={model.instanceId}
                     driverKind={model.driverKind}
                     providerDisplayName={model.instanceDisplayName}
@@ -987,7 +990,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
-                    onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
+                    onToggleFavorite={toggleFavorite}
                   />
                 );
               }}
