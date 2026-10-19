@@ -22,6 +22,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-settled";
 import { isThreadWaiting, isThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
 import {
+  getLatestThread,
   getLatestThreadForProject,
   getThreadSortTimestamp,
   sortThreads,
@@ -51,9 +52,9 @@ export function shouldNavigateAfterThreadPark(input: {
 
 /**
  * Where the reader lands after parking (settling or snoozing) the thread they
- * have open: the project's latest thread that still wants them. Parked,
- * working, and waiting threads are skipped. Null means open a fresh draft in
- * the project instead.
+ * have open: the latest thread that still wants them, preferring the parked
+ * thread's project over the rest. Parked, working, and waiting threads are
+ * skipped. Null means open a fresh draft in the parked thread's project.
  */
 export function resolveThreadAfterPark(input: {
   readonly threads: readonly SidebarThreadSummary[];
@@ -66,18 +67,20 @@ export function resolveThreadAfterPark(input: {
   const { parkedThread } = input;
   const parkedKeys = new Set(input.coParkingKeys);
   parkedKeys.add(scopedThreadKey(scopeThreadRef(parkedThread.environmentId, parkedThread.id)));
-  return getLatestThreadForProject(
-    filterSidebarV2VisibleThreads(input.threads, null).filter(
-      (thread) =>
-        thread.environmentId === parkedThread.environmentId &&
-        !parkedKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) &&
-        thread.settledOverride !== "settled" &&
-        !effectiveSnoozed(thread, { now: input.now }) &&
-        !isThreadWorking(thread) &&
-        !isThreadWaiting(thread),
-    ),
-    parkedThread.projectId,
-    input.sortOrder,
+  const candidates = filterSidebarV2VisibleThreads(input.threads, null).filter(
+    (thread) =>
+      !parkedKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) &&
+      thread.settledOverride !== "settled" &&
+      !effectiveSnoozed(thread, { now: input.now }) &&
+      !isThreadWorking(thread) &&
+      !isThreadWaiting(thread),
+  );
+  return (
+    getLatestThreadForProject(
+      candidates.filter((thread) => thread.environmentId === parkedThread.environmentId),
+      parkedThread.projectId,
+      input.sortOrder,
+    ) ?? getLatestThread(candidates, input.sortOrder)
   );
 }
 

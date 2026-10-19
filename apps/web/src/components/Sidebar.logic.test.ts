@@ -2306,6 +2306,20 @@ describe("resolveThreadAfterPark", () => {
     expect(resolve([older, latest, otherProject])).toBe("latest");
   });
 
+  it("falls back to the latest thread in any project", () => {
+    const elsewhere = ProjectId.make("elsewhere");
+    const olderElsewhere = candidate("older-elsewhere", 2, { projectId: elsewhere });
+    const latestElsewhere = candidate("latest-elsewhere", 6, { projectId: elsewhere });
+
+    expect(
+      resolve([
+        candidate("settled", 8, { settledOverride: "settled" }),
+        olderElsewhere,
+        latestElsewhere,
+      ]),
+    ).toBe("latest-elsewhere");
+  });
+
   it("skips settled, snoozed, working, and waiting threads", () => {
     const eligible = candidate("eligible", 1);
     const blocked = [
@@ -2328,6 +2342,14 @@ describe("resolveThreadAfterPark", () => {
 
   it("opens a fresh draft when nothing is left to land on", () => {
     expect(resolve([candidate("settled", 5, { settledOverride: "settled" })])).toBeNull();
+    expect(
+      resolve([
+        candidate("working-elsewhere", 5, {
+          projectId: ProjectId.make("elsewhere"),
+          runtime: runtimeAt("running"),
+        }),
+      ]),
+    ).toBeNull();
     expect(resolve([])).toBeNull();
   });
 });

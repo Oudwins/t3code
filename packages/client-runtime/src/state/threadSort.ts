@@ -145,10 +145,19 @@ export function getLatestThreadForProject<
     readonly archivedAt: string | null;
   } & ThreadSortInput,
 >(threads: readonly T[], projectId: ProjectId, sortOrder: SidebarThreadSortOrder): T | null {
+  return getLatestThread(
+    threads.filter((thread) => thread.projectId === projectId),
+    sortOrder,
+  );
+}
+
+export function getLatestThread<
+  T extends { readonly id: string; readonly archivedAt: string | null } & ThreadSortInput,
+>(threads: readonly T[], sortOrder: SidebarThreadSortOrder): T | null {
   let latest: T | null = null;
   let latestTimestamp = Number.NEGATIVE_INFINITY;
   for (const thread of threads) {
-    if (thread.projectId !== projectId || thread.archivedAt !== null) continue;
+    if (thread.archivedAt !== null) continue;
     const timestamp = getThreadSortTimestamp(thread, sortOrder);
     if (
       latest === null ||
