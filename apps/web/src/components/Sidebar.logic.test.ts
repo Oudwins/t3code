@@ -2289,12 +2289,17 @@ describe("resolveThreadAfterPark", () => {
       ...overrides,
     });
   const parked = candidate("parked", 9);
-  const resolve = (threads: ReturnType<typeof candidate>[], coParkingKeys?: Set<string>) =>
+  const resolve = (
+    threads: ReturnType<typeof candidate>[],
+    coParkingKeys?: Set<string>,
+    workingShelfEnabled = true,
+  ) =>
     resolveThreadAfterPark({
       threads: [parked, ...threads],
       parkedThread: parked,
       coParkingKeys,
       sortOrder: "created_at",
+      workingShelfEnabled,
       now,
     })?.id ?? null;
 
@@ -2331,6 +2336,15 @@ describe("resolveThreadAfterPark", () => {
 
     expect(isSidebarThreadWorking(blocked[2]!)).toBe(true);
     expect(resolve([eligible, ...blocked])).toBe("eligible");
+  });
+
+  it("lands on working and waiting threads when the Working shelf keeps them in the inbox", () => {
+    const eligible = candidate("eligible", 1);
+    const waiting = candidate("waiting", 3, { runtime: runtimeAt("idle") });
+    const working = candidate("working", 4, { runtime: runtimeAt("running") });
+
+    expect(resolve([eligible, waiting], undefined, false)).toBe("waiting");
+    expect(resolve([eligible, waiting, working], undefined, false)).toBe("working");
   });
 
   it("does not land on threads parking in the same batch", () => {

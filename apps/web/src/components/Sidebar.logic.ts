@@ -52,9 +52,10 @@ export function shouldNavigateAfterThreadPark(input: {
 
 /**
  * Where the reader lands after parking (settling or snoozing) the thread they
- * have open: the latest thread that still wants them, preferring the parked
- * thread's project over the rest. Parked, working, and waiting threads are
- * skipped. Null means open a fresh draft in the parked thread's project.
+ * have open: the latest thread still in the inbox, preferring the parked
+ * thread's project over the rest. Working and waiting threads only leave the
+ * inbox when the Working shelf folds them away, so they are skipped only then.
+ * Null means open a fresh draft in the parked thread's project.
  */
 export function resolveThreadAfterPark(input: {
   readonly threads: readonly SidebarThreadSummary[];
@@ -62,6 +63,7 @@ export function resolveThreadAfterPark(input: {
   /** Threads parking in the same batch, which leave the inbox together. */
   readonly coParkingKeys?: ReadonlySet<string> | undefined;
   readonly sortOrder: SidebarThreadSortOrder;
+  readonly workingShelfEnabled: boolean;
   readonly now: string;
 }): SidebarThreadSummary | null {
   const { parkedThread } = input;
@@ -72,8 +74,7 @@ export function resolveThreadAfterPark(input: {
       !parkedKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) &&
       thread.settledOverride !== "settled" &&
       !effectiveSnoozed(thread, { now: input.now }) &&
-      !isThreadWorking(thread) &&
-      !isThreadWaiting(thread),
+      !(input.workingShelfEnabled && (isThreadWorking(thread) || isThreadWaiting(thread))),
   );
   return (
     getLatestThreadForProject(
