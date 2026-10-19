@@ -299,6 +299,7 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
+  const workingShelfEnabled = useClientSettings((settings) => settings.sidebarWorkingShelfEnabled);
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
   const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
@@ -345,6 +346,7 @@ export function useThreadActions() {
       parkedThread,
       coParkingKeys,
       sortOrder: sidebarThreadSortOrder,
+      workingShelfEnabled,
       now: new Date().toISOString(),
     });
     const navigate: () => Promise<unknown> = nextThread

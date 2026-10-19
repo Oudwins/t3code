@@ -141,9 +141,11 @@ sending an answer or restarting the agent. Settling also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A terminal that
 runs a command, such as a dev server, stays open.
 
-Settling the thread you have open takes you to the latest thread in the same project that
-is not working, waiting, snoozed, or settled. When there is none, it opens a new thread in
-that project. Snoozing the open thread moves you the same way.
+Settling the thread you have open takes you to the latest thread still in your inbox from
+the same project, skipping snoozed and settled threads and anything folded into the Working
+shelf. When that project has none, you go to the latest such thread in any project, and when
+there is none anywhere, a new thread opens in the same project. Snoozing the open thread
+moves you the same way.
 
 To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
 thread settles** for one of the project's actions, or set `"runOnSettle": true` on a

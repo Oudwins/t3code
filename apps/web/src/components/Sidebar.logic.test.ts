@@ -2289,12 +2289,17 @@ describe("resolveThreadAfterPark", () => {
       ...overrides,
     });
   const parked = candidate("parked", 9);
-  const resolve = (threads: ReturnType<typeof candidate>[], coParkingKeys?: Set<string>) =>
+  const resolve = (
+    threads: ReturnType<typeof candidate>[],
+    coParkingKeys?: Set<string>,
+    workingShelfEnabled = true,
+  ) =>
     resolveThreadAfterPark({
       threads: [parked, ...threads],
       parkedThread: parked,
       coParkingKeys,
       sortOrder: "created_at",
+      workingShelfEnabled,
       now,
     })?.id ?? null;
 
@@ -2304,6 +2309,20 @@ describe("resolveThreadAfterPark", () => {
     const otherProject = candidate("other-project", 8, { projectId: ProjectId.make("elsewhere") });
 
     expect(resolve([older, latest, otherProject])).toBe("latest");
+  });
+
+  it("falls back to the latest thread in any project", () => {
+    const elsewhere = ProjectId.make("elsewhere");
+    const olderElsewhere = candidate("older-elsewhere", 2, { projectId: elsewhere });
+    const latestElsewhere = candidate("latest-elsewhere", 6, { projectId: elsewhere });
+
+    expect(
+      resolve([
+        candidate("settled", 8, { settledOverride: "settled" }),
+        olderElsewhere,
+        latestElsewhere,
+      ]),
+    ).toBe("latest-elsewhere");
   });
 
   it("skips settled, snoozed, working, and waiting threads", () => {
@@ -2319,6 +2338,15 @@ describe("resolveThreadAfterPark", () => {
     expect(resolve([eligible, ...blocked])).toBe("eligible");
   });
 
+  it("lands on working and waiting threads when the Working shelf keeps them in the inbox", () => {
+    const eligible = candidate("eligible", 1);
+    const waiting = candidate("waiting", 3, { runtime: runtimeAt("idle") });
+    const working = candidate("working", 4, { runtime: runtimeAt("running") });
+
+    expect(resolve([eligible, waiting], undefined, false)).toBe("waiting");
+    expect(resolve([eligible, waiting, working], undefined, false)).toBe("working");
+  });
+
   it("does not land on threads parking in the same batch", () => {
     const sibling = candidate("sibling", 6);
     const remaining = candidate("remaining", 2);
@@ -2328,6 +2356,14 @@ describe("resolveThreadAfterPark", () => {
 
   it("opens a fresh draft when nothing is left to land on", () => {
     expect(resolve([candidate("settled", 5, { settledOverride: "settled" })])).toBeNull();
+    expect(
+      resolve([
+        candidate("working-elsewhere", 5, {
+          projectId: ProjectId.make("elsewhere"),
+          runtime: runtimeAt("running"),
+        }),
+      ]),
+    ).toBeNull();
     expect(resolve([])).toBeNull();
   });
 });

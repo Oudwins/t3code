@@ -1,4 +1,5 @@
 export {
+  getLatestThread,
   getLatestThreadForProject,
   getThreadSortTimestamp,
   sortThreads,
