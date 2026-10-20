@@ -5696,6 +5696,14 @@ export default function ChatView(props: ChatViewProps) {
         createNewTerminalStable();
       },
       "diff.toggle": () => onToggleDiffStable(),
+      "thread.scrollHalfPageDown": () => {
+        if (conversationHidden) return false;
+        pageScrollControllerRef.current?.stepHalfPage("PageDown");
+      },
+      "thread.scrollHalfPageUp": () => {
+        if (conversationHidden) return false;
+        pageScrollControllerRef.current?.stepHalfPage("PageUp");
+      },
       "modelPicker.toggle": ({ event }) => {
         if (!event.repeat) composerRef.current?.toggleModelPicker();
       },

@@ -63,6 +63,8 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.undo",
   "thread.newTab",
   "thread.closeTab",
+  "thread.scrollHalfPageDown",
+  "thread.scrollHalfPageUp",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
   ...THREAD_TAB_KEYBINDING_COMMANDS,
 ] as const;

@@ -304,6 +304,42 @@ describe("thread undo shortcut", () => {
   });
 });
 
+describe("thread half page scroll shortcuts", () => {
+  it("takes Ctrl+D and Ctrl+U on every platform, over diff and usage where mod is ctrl", () => {
+    for (const platform of ["MacIntel", "Linux", "Win32"]) {
+      assert.equal(
+        resolveShortcutCommand(event({ key: "d", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { editableFocus: true },
+        }),
+        "thread.scrollHalfPageDown",
+      );
+      assert.equal(
+        resolveShortcutCommand(event({ key: "u", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+        }),
+        "thread.scrollHalfPageUp",
+      );
+    }
+  });
+
+  it("leaves Ctrl+D and Ctrl+U to the terminal and the browser preview", () => {
+    for (const context of [{ terminalFocus: true }, { previewFocus: true }]) {
+      for (const key of ["d", "u"]) {
+        assert.notInclude(
+          [
+            resolveShortcutCommand(event({ key, ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+              platform: "MacIntel",
+              context,
+            }),
+          ],
+          key === "d" ? "thread.scrollHalfPageDown" : "thread.scrollHalfPageUp",
+        );
+      }
+    }
+  });
+});
+
 describe("thread search and command palette shortcuts", () => {
   it("opens thread search on Cmd+K and the command palette on Cmd+Alt+K", () => {
     assert.equal(
