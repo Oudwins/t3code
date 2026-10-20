@@ -21,8 +21,8 @@ export interface WorkspacePaletteOption {
   readonly select: () => void;
 }
 
-/** One row of the machine picker; the composer that opens it owns what selecting does. */
-export interface MachinePaletteOption {
+/** One row of the environment picker; the composer that opens it owns what selecting does. */
+export interface EnvironmentPaletteOption {
   readonly id: EnvironmentId | "auto";
   readonly label: string;
   readonly description: string | null;
@@ -37,7 +37,7 @@ export interface CommandPaletteOpenDetail {
   readonly query?: string;
   readonly linkedThreads?: CommandPaletteLinkedThreads;
   readonly workspace?: ReadonlyArray<WorkspacePaletteOption>;
-  readonly machine?: ReadonlyArray<MachinePaletteOption>;
+  readonly environment?: ReadonlyArray<EnvironmentPaletteOption>;
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {

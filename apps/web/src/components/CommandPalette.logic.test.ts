@@ -290,10 +290,12 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: { kind: "workspace", options: [] },
     });
-    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenMachine", options: [] })).toEqual({
+    expect(
+      reduceCommandPaletteUiState(filesOpen, { _tag: "OpenEnvironment", options: [] }),
+    ).toEqual({
       open: true,
       mode: "command",
-      openIntent: { kind: "machine", options: [] },
+      openIntent: { kind: "environment", options: [] },
     });
   });
 

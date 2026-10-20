@@ -1,7 +1,7 @@
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import type {
   CommandPaletteLinkedThreads,
-  MachinePaletteOption,
+  EnvironmentPaletteOption,
   WorkspacePaletteOption,
 } from "../commandPaletteBus";
 import {
@@ -73,7 +73,7 @@ export type CommandPaletteOpenIntent =
       readonly linkedThreads?: CommandPaletteLinkedThreads;
     }
   | { readonly kind: "workspace"; readonly options: ReadonlyArray<WorkspacePaletteOption> }
-  | { readonly kind: "machine"; readonly options: ReadonlyArray<MachinePaletteOption> };
+  | { readonly kind: "environment"; readonly options: ReadonlyArray<EnvironmentPaletteOption> };
 
 export interface CommandPaletteUiState {
   readonly open: boolean;
@@ -95,7 +95,7 @@ export type CommandPaletteUiAction =
   | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "OpenChangeTheme" }
   | { readonly _tag: "OpenWorkspace"; readonly options: ReadonlyArray<WorkspacePaletteOption> }
-  | { readonly _tag: "OpenMachine"; readonly options: ReadonlyArray<MachinePaletteOption> }
+  | { readonly _tag: "OpenEnvironment"; readonly options: ReadonlyArray<EnvironmentPaletteOption> }
   | { readonly _tag: "ClearOpenIntent" }
   | {
       readonly _tag: "OpenChildSearch";
@@ -150,11 +150,11 @@ export function reduceCommandPaletteUiState(
         mode: "command",
         openIntent: { kind: "workspace", options: action.options },
       };
-    case "OpenMachine":
+    case "OpenEnvironment":
       return {
         open: true,
         mode: "command",
-        openIntent: { kind: "machine", options: action.options },
+        openIntent: { kind: "environment", options: action.options },
       };
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;

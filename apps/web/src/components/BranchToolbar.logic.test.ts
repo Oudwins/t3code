@@ -1,7 +1,7 @@
 import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
-  buildMachinePaletteOptions,
+  buildEnvironmentPaletteOptions,
   buildWorkspacePaletteOptions,
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
@@ -112,7 +112,7 @@ describe("resolvePreviousWorktreeLabel", () => {
   });
 });
 
-describe("buildMachinePaletteOptions", () => {
+describe("buildEnvironmentPaletteOptions", () => {
   const environments = [
     {
       environmentId: localEnvironmentId,
@@ -130,9 +130,9 @@ describe("buildMachinePaletteOptions", () => {
     },
   ];
 
-  it("lists the machines, marks the current one, and reports the chosen id", () => {
+  it("lists the environments, marks the current one, and reports the chosen id", () => {
     const select = vi.fn();
-    const options = buildMachinePaletteOptions({
+    const options = buildEnvironmentPaletteOptions({
       environments,
       environmentId: remoteEnvironmentId,
       autoEnvironmentLabel: undefined,
@@ -150,9 +150,9 @@ describe("buildMachinePaletteOptions", () => {
     expect(select.mock.calls).toEqual([[localEnvironmentId]]);
   });
 
-  it("leads with auto balance and marks it current while it picks the machine", () => {
+  it("leads with auto balance and marks it current while it picks the environment", () => {
     const onAutoEnvironment = vi.fn();
-    const options = buildMachinePaletteOptions({
+    const options = buildEnvironmentPaletteOptions({
       environments,
       environmentId: remoteEnvironmentId,
       autoEnvironmentLabel: "Auto: Build box",
