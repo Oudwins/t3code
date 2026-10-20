@@ -225,6 +225,13 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+s", command: "thread.snooze", when: "!terminalFocus" },
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
   { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
+  // Later than diff.toggle and usage.open so these win where mod is ctrl.
+  {
+    key: "ctrl+d",
+    command: "thread.scrollHalfPageDown",
+    when: "!terminalFocus && !previewFocus",
+  },
+  { key: "ctrl+u", command: "thread.scrollHalfPageUp", when: "!terminalFocus && !previewFocus" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+shift+${index + 1}`,
     command,

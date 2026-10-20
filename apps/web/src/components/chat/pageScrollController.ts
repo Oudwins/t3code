@@ -159,6 +159,7 @@ export function createPageScrollController({
   const state = {
     activeKey: null as PageScrollKey | null,
     discreteAnimationFrame: 0,
+    discreteTargetScrollTop: 0,
     holdDelayTimeout: 0,
     holdAnimationFrame: 0,
     holdStartTime: 0,
@@ -211,6 +212,7 @@ export function createPageScrollController({
 
     const startScrollTop = container.scrollTop;
     const startTime = env.now();
+    state.discreteTargetScrollTop = startScrollTop + deltaY;
 
     const step = (now: number) => {
       const progress = Math.min(1, (now - startTime) / PAGE_SCROLL_ANIMATION_MS);
@@ -296,6 +298,29 @@ export function createPageScrollController({
       }
 
       stop({ cancelDiscreteAnimation: state.holdActive });
+    },
+    /**
+     * Vim-style half page step. Key repeats arrive before the previous step
+     * finishes animating, so each step continues from the pending target
+     * rather than from wherever the animation currently is.
+     */
+    stepHalfPage(key: PageScrollKey) {
+      const container = getContainer();
+      if (!container || !canScrollInDirection(container, key)) {
+        return;
+      }
+
+      const continuing = state.activeKey === null && state.discreteAnimationFrame !== 0;
+      stop({ cancelDiscreteAnimation: !continuing });
+      onScrollStart?.(key);
+
+      const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      const fromScrollTop = continuing ? state.discreteTargetScrollTop : container.scrollTop;
+      const targetScrollTop = Math.min(
+        maxScrollTop,
+        Math.max(0, fromScrollTop + (readPageScrollDistance(container) / 2) * getDirection(key)),
+      );
+      smoothScrollBy(container, targetScrollTop - container.scrollTop);
     },
     releaseActiveKey() {
       stop({ cancelDiscreteAnimation: state.holdActive });

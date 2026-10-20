@@ -250,6 +250,63 @@ describe("createPageScrollController", () => {
     expect(started).toEqual(["PageUp"]);
   });
 
+  test("steps half a page per press and continues from the pending target on repeat", () => {
+    const clock = new TestClock();
+    const container = {
+      clientHeight: 600,
+      scrollHeight: 4_000,
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ height: 600 }),
+    };
+    const controller = createPageScrollController({
+      getContainer: () => container,
+      getScrollPaddingBottomPx: () => 24,
+      env: clock.env,
+    });
+    const halfPage =
+      getPageScrollDistancePx({ containerHeightPx: 600, scrollPaddingBottomPx: 24 }) / 2;
+
+    controller.stepHalfPage("PageDown");
+    clock.advanceBy(PAGE_SCROLL_ANIMATION_MS);
+    expect(container.scrollTop).toBeCloseTo(halfPage, 5);
+
+    controller.stepHalfPage("PageDown");
+    clock.advanceBy(PAGE_SCROLL_ANIMATION_MS / 3);
+    controller.stepHalfPage("PageDown");
+    clock.advanceBy(PAGE_SCROLL_ANIMATION_MS);
+    expect(container.scrollTop).toBeCloseTo(halfPage * 3, 5);
+
+    controller.stepHalfPage("PageUp");
+    clock.advanceBy(PAGE_SCROLL_ANIMATION_MS);
+    expect(container.scrollTop).toBeCloseTo(halfPage * 2, 5);
+  });
+
+  test("clamps repeated half page steps to the end of the timeline", () => {
+    const clock = new TestClock();
+    const container = {
+      clientHeight: 600,
+      scrollHeight: 1_000,
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ height: 600 }),
+    };
+    const controller = createPageScrollController({
+      getContainer: () => container,
+      getScrollPaddingBottomPx: () => 24,
+      env: clock.env,
+    });
+
+    for (let press = 0; press < 5; press += 1) {
+      controller.stepHalfPage("PageDown");
+      clock.advanceBy(16);
+    }
+    clock.advanceBy(PAGE_SCROLL_ANIMATION_MS);
+    expect(container.scrollTop).toBeCloseTo(400, 5);
+
+    controller.stepHalfPage("PageUp");
+    clock.advanceBy(PAGE_SCROLL_ANIMATION_MS);
+    expect(container.scrollTop).toBeLessThan(400);
+  });
+
   test("does not start a page scroll at the timeline boundary", () => {
     const clock = new TestClock();
     const started: string[] = [];

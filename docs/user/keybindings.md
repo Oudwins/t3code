@@ -75,6 +75,13 @@ default sidebar rather than the legacy one.
 Change them in Settings under **Thread: Settle**, **Thread: Snooze**, **Thread: Previous
 Needing Attention**, and **Thread: Next Needing Attention**.
 
+`Ctrl+D` and `Ctrl+U` scroll the conversation down and up by half a screen, as in vim,
+even while you type in the composer. Hold either key to keep stepping. They use Ctrl on
+every platform and leave terminal and browser preview input alone. On Windows and Linux
+the diff and Usage shortcuts also default to `Ctrl+D` and `Ctrl+U`, and the later rule in
+your keybindings wins. Rebind **Thread: Scroll Half Page Down**, **Thread: Scroll Half
+Page Up**, **Diff: Toggle**, or **Usage: Open** to choose.
+
 ## Copy pull request references
 
 With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
