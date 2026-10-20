@@ -227,6 +227,7 @@ export const layer: Layer.Layer<
       readonly threadId: ThreadId;
       readonly runId: RunId;
       readonly willRetry?: boolean;
+      readonly setupFailure?: Error;
     }) {
       const { runId } = input;
       const projection = yield* projectionStore.getTurnStartContext(input.threadId, runId);
@@ -491,83 +492,16 @@ export const layer: Layer.Layer<
             },
           });
         });
-      const { worktreePath, branch } = projection.thread;
-      if (worktreePath !== null && branch !== null) {
-        const exists = yield* fileSystem
-          .exists(worktreePath)
-          .pipe(Effect.orElseSucceed(() => true));
-        if (!exists && (yield* isManagedWorktreePath(worktreePath))) {
-          const project = yield* projects.getById(projection.thread.projectId).pipe(
-            Effect.map(Option.getOrUndefined),
-            Effect.orElseSucceed(() => undefined),
-          );
-          if (project !== undefined) {
-            yield* Effect.logWarning("provider turn start recreating missing worktree", {
-              threadId: projection.thread.id,
-              worktreePath,
-              branch,
-            });
-            const recreated = yield* gitWorkflow
-              .pruneWorktrees({ cwd: project.workspaceRoot })
-              .pipe(
-                Effect.andThen(
-                  worktreeManager.createWorktree({
-                    cwd: project.workspaceRoot,
-                    refName: branch,
-                    path: worktreePath,
-                  }),
-                ),
-                Effect.as(true),
-                Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.failCause(cause)
-                    : Effect.logWarning("provider turn start failed to recreate worktree", {
-                        threadId: projection.thread.id,
-                        worktreePath,
-                        cause: Cause.pretty(cause),
-                      }).pipe(Effect.as(false)),
-                ),
-              );
-            // A recreated worktree is as bare as a new one, so it gets the same
-            // setup. Like a new thread, the turn waits for a blocking script and
-            // leaves an async one running. Setup that fails, or cannot start,
-            // removes the worktree so the next turn recreates it and runs setup
-            // again; the provider never starts in a checkout that skipped it.
-            if (recreated) {
-              const setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(
-                setupScripts,
-                {
-                  threadId: projection.thread.id,
-                  projectId: project.id,
-                  projectCwd: project.workspaceRoot,
-                  worktreePath,
-                  project: {
-                    id: project.id,
-                    workspaceRoot: project.workspaceRoot,
-                    scripts: project.scripts,
-                  },
-                },
-              ).pipe(
-                Effect.as(undefined),
-                Effect.catch((error) => Effect.succeed(error)),
-              );
-              if (setupFailure !== undefined) {
-                yield* worktreeManager
-                  .removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: true })
-                  .pipe(Effect.ignoreCause({ log: true }));
-                if (input.willRetry === true) {
-                  return yield* new ProviderTurnStartError({ runId, cause: setupFailure.message });
-                }
-                yield* settleStartFailure({
-                  signal: "worktree-setup-failure",
-                  title: "Worktree setup failed",
-                  error: setupFailure,
-                });
-                return;
-              }
-            }
-          }
+      if (input.setupFailure !== undefined) {
+        if (input.willRetry === true) {
+          return yield* new ProviderTurnStartError({ runId, cause: input.setupFailure.message });
         }
+        yield* settleStartFailure({
+          signal: "worktree-setup-failure",
+          title: "Worktree setup failed",
+          error: input.setupFailure,
+        });
+        return;
       }
       const selectInheritedBackgroundItems = (
         current: ProjectionStore.ProjectionRuntimeRecoveryState,
@@ -1307,12 +1241,86 @@ export const layer: Layer.Layer<
     return ProviderTurnStartServiceV2.of({
       start: (input) =>
         Effect.gen(function* () {
+          const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
+          const { worktreePath, branch } = thread;
           // Storage cleanup removes worktrees under the same lease. Only startup
           // holds it; the provider turn runs after it is released.
-          const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
-          const providerTurn = yield* thread.worktreePath === null
-            ? start(input)
-            : withWorkspaceLease(path.resolve(thread.worktreePath), start(input));
+          const leased = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+            worktreePath === null ? effect : withWorkspaceLease(path.resolve(worktreePath), effect);
+          let setupFailure: Error | undefined;
+          if (worktreePath !== null && branch !== null) {
+            const project = yield* leased(
+              Effect.gen(function* () {
+                const exists = yield* fileSystem
+                  .exists(worktreePath)
+                  .pipe(Effect.orElseSucceed(() => true));
+                if (exists || !(yield* isManagedWorktreePath(worktreePath))) return undefined;
+                const project = yield* projects.getById(thread.projectId).pipe(
+                  Effect.map(Option.getOrUndefined),
+                  Effect.orElseSucceed(() => undefined),
+                );
+                if (project === undefined) return undefined;
+                yield* Effect.logWarning("provider turn start recreating missing worktree", {
+                  threadId: thread.id,
+                  worktreePath,
+                  branch,
+                });
+                return yield* gitWorkflow.pruneWorktrees({ cwd: project.workspaceRoot }).pipe(
+                  Effect.andThen(
+                    worktreeManager.createWorktree({
+                      cwd: project.workspaceRoot,
+                      refName: branch,
+                      path: worktreePath,
+                    }),
+                  ),
+                  Effect.as(project),
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.failCause(cause)
+                      : Effect.logWarning("provider turn start failed to recreate worktree", {
+                          threadId: thread.id,
+                          worktreePath,
+                          cause: Cause.pretty(cause),
+                        }).pipe(Effect.as(undefined)),
+                  ),
+                );
+              }),
+            );
+            // A recreated worktree is as bare as a new one, so it gets the same
+            // setup. Like a new thread, the turn waits for a blocking script and
+            // leaves an async one running. Setup that fails, cannot start, or is
+            // interrupted removes the worktree so the next turn recreates it and
+            // runs setup again; the provider never starts in a checkout that
+            // skipped it. Setup opens its terminal under this same lease, which
+            // is not reentrant, so it runs between the leased steps.
+            if (project !== undefined) {
+              const removeRecreated = () =>
+                leased(
+                  worktreeManager
+                    .removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: true })
+                    .pipe(Effect.ignoreCause({ log: true })),
+                );
+              setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(setupScripts, {
+                threadId: thread.id,
+                projectId: project.id,
+                projectCwd: project.workspaceRoot,
+                worktreePath,
+                project: {
+                  id: project.id,
+                  workspaceRoot: project.workspaceRoot,
+                  scripts: project.scripts,
+                },
+              }).pipe(
+                Effect.as(undefined),
+                Effect.catch((error) => Effect.succeed(error)),
+                Effect.onInterrupt(removeRecreated),
+              );
+              if (setupFailure !== undefined) yield* removeRecreated();
+            }
+          }
+          const providerTurn = yield* leased(
+            start(setupFailure === undefined ? input : { ...input, setupFailure }),
+          );
           if (providerTurn !== undefined) yield* providerTurn;
         }).pipe(
           Effect.mapError((cause) =>
