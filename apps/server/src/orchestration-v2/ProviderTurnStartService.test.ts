@@ -224,11 +224,15 @@ async function startAfterMissingWorktree(options?: {
   const outcome = await Effect.gen(function* () {
     return yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2)
       .start({ threadId, runId, ...(options?.willRetry ? { willRetry: true } : {}) })
-      .pipe(Effect.result);
+      .pipe(
+        Effect.result,
+        Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
+      );
   }).pipe(Effect.provide(layer), Effect.runPromise);
 
   return {
-    error: outcome._tag === "Failure" ? outcome.failure : undefined,
+    error: outcome?._tag === "Failure" ? outcome.failure : undefined,
+    interrupted: outcome === undefined,
     projectionReadCount,
     pruneWorktrees,
     createWorktree,
@@ -267,6 +271,41 @@ it("runs the project setup script in a missing worktree it recreated", async () 
     project: result.project,
     observeCompletion: { releaseOnFailure: true },
   });
+});
+
+// Setup opens its terminal through TerminalManager.open, which takes the workspace
+// lease for the worktree, and the lease is not reentrant. A deadlock never releases
+// the process-wide lease, so this test uses its own path to keep a failure from
+// hanging every later test on the shared one.
+it(
+  "runs setup in a recreated worktree without holding the startup workspace lease",
+  {
+    timeout: 10_000,
+  },
+  async () => {
+    const worktreePath = `${managedWorktreesDir}/project/feature-setup-lease`;
+    const result = await startAfterMissingWorktree({
+      worktreePath,
+      setup: withWorkspaceLease(worktreePath, Effect.succeed({ status: "no-script" } as const)),
+    });
+
+    expect(result.runForThread).toHaveBeenCalledTimes(1);
+    expect(result.error?._tag).toBe("ProviderTurnStartError");
+  },
+);
+
+// An interrupt is neither a typed failure nor a result, so it escapes the start.
+it("removes a recreated worktree when its setup is interrupted", async () => {
+  const result = await startAfterMissingWorktree({ setup: Effect.interrupt });
+
+  expect(result.interrupted).toBe(true);
+  expect(result.error).toBeUndefined();
+  expect(result.removeWorktree).toHaveBeenCalledWith({
+    cwd: "/tmp/provider-turn-start-project",
+    path: missingWorktreePath,
+    force: true,
+  });
+  expect(result.projectionReadCount).toBe(1);
 });
 
 it("skips setup when the missing worktree could not be recreated", async () => {
@@ -380,11 +419,6 @@ it.each(setupOperations)(
     expect(result.startRootRun).not.toHaveBeenCalled();
   },
 );
-
-it("lets an interrupted setup interrupt the turn start instead of treating it as a failure", async () => {
-  // An interrupt is neither a typed failure nor a result, so it escapes the start.
-  await expect(startAfterMissingWorktree({ setup: Effect.interrupt })).rejects.toThrow();
-});
 
 it("starts the turn once a blocking setup script succeeds", async () => {
   const result = await startAfterMissingWorktree({
