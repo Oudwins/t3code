@@ -150,7 +150,8 @@ describe("composerSubmissionIntentForKey", () => {
           ...input,
           platform: "MacIntel",
           keybindings,
-          event: enter,
+          // A fresh event: chord state is recorded per event object.
+          event: { ...enter },
           sendShortcut: "enter",
           prompt: "one line",
         }),
