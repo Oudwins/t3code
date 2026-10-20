@@ -28,7 +28,7 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useQuietThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
-  buildMachinePaletteOptions,
+  buildEnvironmentPaletteOptions,
   buildWorkspacePaletteOptions,
   type EnvMode,
   type EnvironmentOption,
@@ -78,9 +78,9 @@ export interface BranchToolbarHandle {
   /** False when the workspace is fixed (existing thread, no git, forced new worktree). */
   canPickWorkspace: boolean;
   openWorkspacePicker: () => void;
-  /** False when the machine is fixed (started thread, only one machine). */
-  canPickMachine: boolean;
-  openMachinePicker: () => void;
+  /** False when the environment is fixed (started thread, only one environment). */
+  canPickEnvironment: boolean;
+  openEnvironmentPicker: () => void;
   usePreviousWorktree: () => void;
 }
 
@@ -648,11 +648,11 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   const hasMultipleEnvironments = (availableEnvironments?.length ?? 0) > 1;
   const showEnvironmentPicker = hasMultipleEnvironments && onEnvironmentChange !== undefined;
-  const canPickMachine = showEnvironmentPicker && !envLocked;
-  const openMachinePicker = () => {
-    if (!canPickMachine || !availableEnvironments || !onEnvironmentChange) return;
+  const canPickEnvironment = showEnvironmentPicker && !envLocked;
+  const openEnvironmentPicker = () => {
+    if (!canPickEnvironment || !availableEnvironments || !onEnvironmentChange) return;
     openCommandPalette({
-      machine: buildMachinePaletteOptions({
+      environment: buildEnvironmentPaletteOptions({
         environments: availableEnvironments,
         environmentId,
         autoEnvironmentLabel,
@@ -668,8 +668,8 @@ export const BranchToolbar = memo(function BranchToolbar({
       openBranchPicker: () => branchSelectorRef.current?.open(),
       canPickWorkspace,
       openWorkspacePicker,
-      canPickMachine,
-      openMachinePicker,
+      canPickEnvironment,
+      openEnvironmentPicker,
       usePreviousWorktree: () => {
         if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
         onUsePreviousWorktree();
@@ -677,12 +677,12 @@ export const BranchToolbar = memo(function BranchToolbar({
       },
     }),
     [
-      canPickMachine,
+      canPickEnvironment,
       canPickWorkspace,
       canUsePreviousWorktree,
       onComposerFocusRequest,
       onUsePreviousWorktree,
-      openMachinePicker,
+      openEnvironmentPicker,
       openWorkspacePicker,
       previousWorktreeSeed,
       showGitControls,

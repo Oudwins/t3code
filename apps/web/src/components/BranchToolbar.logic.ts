@@ -7,7 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
-import type { MachinePaletteOption, WorkspacePaletteOption } from "../commandPaletteBus";
+import type { EnvironmentPaletteOption, WorkspacePaletteOption } from "../commandPaletteBus";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
@@ -156,15 +156,15 @@ export function resolvePreviousWorktreeLabel(seed: PreviousWorktreeSeed): string
 
 // The "Run on" choices as command palette rows, in the same order and wording
 // as the dropdown. Auto balance counts as current while it picks the machine.
-export function buildMachinePaletteOptions(input: {
+export function buildEnvironmentPaletteOptions(input: {
   environments: readonly EnvironmentOption[];
   environmentId: EnvironmentId;
   autoEnvironmentLabel: string | undefined;
   onAutoEnvironment: (() => void) | undefined;
   select: (environmentId: EnvironmentId) => void;
-}): MachinePaletteOption[] {
+}): EnvironmentPaletteOption[] {
   const { onAutoEnvironment } = input;
-  const options: MachinePaletteOption[] = input.environments.map((env) => ({
+  const options: EnvironmentPaletteOption[] = input.environments.map((env) => ({
     id: env.environmentId,
     label: env.label,
     description: env.isPrimary ? "This device" : null,

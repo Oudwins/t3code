@@ -640,8 +640,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openAddProject();
         } else if (detail.workspace !== undefined) {
           dispatch({ _tag: "OpenWorkspace", options: detail.workspace });
-        } else if (detail.machine !== undefined) {
-          dispatch({ _tag: "OpenMachine", options: detail.machine });
+        } else if (detail.environment !== undefined) {
+          dispatch({ _tag: "OpenEnvironment", options: detail.environment });
         } else if (detail.query !== undefined) {
           dispatch({
             _tag: "OpenSearch",
@@ -1858,16 +1858,16 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (handles.branchToolbar?.canPickMachine) {
+  if (handles.branchToolbar?.canPickEnvironment) {
     actionItems.push({
       kind: "action",
-      value: "action:select-machine",
+      value: "action:select-environment",
       searchTerms: ["machine", "host", "environment", "run on", "server", "remote"],
-      title: "Select machine",
+      title: "Select environment",
       icon: <ServerIcon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
-      shortcutCommand: "composer.machine",
-      run: async () => handles.branchToolbar?.openMachinePicker(),
+      shortcutCommand: "composer.environment",
+      run: async () => handles.branchToolbar?.openEnvironmentPicker(),
     });
   }
 
@@ -2190,7 +2190,7 @@ function OpenCommandPaletteDialog(props: {
   }, [browseNavigation, clearOpenIntent, openIntent, pushPaletteView]);
 
   useLayoutEffect(() => {
-    if (openIntent?.kind !== "machine") return;
+    if (openIntent?.kind !== "environment") return;
     clearOpenIntent();
     browseNavigation.invalidate();
     cloneLookupGeneration.current += 1;
@@ -2203,14 +2203,15 @@ function OpenCommandPaletteDialog(props: {
       addonIcon: <ServerIcon className={ADDON_ICON_CLASS} />,
       groups: [
         {
-          value: "machines",
-          label: "Select machine",
+          value: "environments",
+          label: "Select environment",
           items: enumerateCommandPaletteItems(
             openIntent.options.map((option): CommandPaletteActionItem => ({
               kind: "action",
-              value: `machine:${option.id}`,
+              value: `environment:${option.id}`,
               searchTerms: [
                 option.label,
+                "environment",
                 "machine",
                 "host",
                 ...(option.description ? [option.description] : []),

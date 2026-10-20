@@ -1893,7 +1893,7 @@ describe("chord shortcuts", () => {
     assert.isNull(getPendingChordLabel());
   });
 
-  it("opens the machine picker from the default ctrl+x m chord", () => {
+  it("opens the environment picker from the default ctrl+x l chord", () => {
     const context = { terminalFocus: false };
     assert.isNull(
       resolveShortcutCommand(keyDown({ key: "x", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
@@ -1902,8 +1902,8 @@ describe("chord shortcuts", () => {
       }),
     );
     assert.strictEqual(
-      resolveShortcutCommand(plainPress("m"), DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
-      "composer.machine",
+      resolveShortcutCommand(plainPress("l"), DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+      "composer.environment",
     );
   });
 

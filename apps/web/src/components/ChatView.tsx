@@ -5719,8 +5719,8 @@ export default function ChatView(props: ChatViewProps) {
       "composer.workspace": ({ event }) => {
         if (!event.repeat) branchToolbarRef.current?.openWorkspacePicker();
       },
-      "composer.machine": ({ event }) => {
-        if (!event.repeat) branchToolbarRef.current?.openMachinePicker();
+      "composer.environment": ({ event }) => {
+        if (!event.repeat) branchToolbarRef.current?.openEnvironmentPicker();
       },
       "composer.cycleHost": ({ event }) => {
         if (!canChangeEnvironment) return false;

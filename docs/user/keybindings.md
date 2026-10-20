@@ -29,9 +29,9 @@ workspace, and `mod+shift+g` for the Git branch. `mod+shift+x` opens the command
 palette on the workspace choices (the current checkout, a new worktree, and the
 previous worktree when available), so you can type to filter them.
 Use `mod+shift+l` to reuse the previous worktree directly.
-The `ctrl+x m` chord opens the command palette on the machines a new thread can run
-on, so you can type to filter them.
-**Change model**, **Select workspace**, and **Select machine** are also in the
+The `ctrl+x l` chord opens the command palette on the environments a new thread can
+run on, so you can type to filter them.
+**Change model**, **Select workspace**, and **Select environment** are also in the
 command palette (`Cmd/Ctrl+Alt+K`), next to their shortcuts.
 
 To change effort one step without opening the picker, bind
