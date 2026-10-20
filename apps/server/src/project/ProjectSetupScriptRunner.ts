@@ -3,6 +3,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   projectScriptRuntimeEnv,
   projectScriptsInheritDefaults,
+  projectScriptTerminalInput,
   resolveProjectScripts,
   settleProjectScript,
   setupProjectScript,
@@ -456,7 +457,7 @@ export const make = Effect.gen(function* () {
       .write({
         threadId: input.threadId,
         terminalId,
-        data: `${commandLine}\r`,
+        data: projectScriptTerminalInput(commandLine),
       })
       .pipe(
         Effect.mapError(

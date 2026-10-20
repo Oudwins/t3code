@@ -4,6 +4,7 @@ import {
   type KeybindingWhenNode,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
   type ResolvedKeybindingRule,
+  type ResolvedShortcutKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
   THREAD_TAB_KEYBINDING_COMMANDS,
@@ -110,6 +111,28 @@ export function shortcutConflictKey(
   ].join("|");
 }
 
+function shortcutForContext(
+  binding: ResolvedShortcutKeybindingRule,
+  context: ShortcutMatchContext,
+) {
+  const shortcut = binding.shortcut;
+  // Existing installs persist Mod+Enter. Resolve its alternate chord against
+  // the send preference without rewriting saved or remapped shortcuts.
+  if (
+    context.composerRequiresModifier &&
+    binding.command === "composer.sendAlternate" &&
+    shortcut.key === "enter" &&
+    shortcut.modKey &&
+    !shortcut.metaKey &&
+    !shortcut.ctrlKey &&
+    !shortcut.altKey &&
+    !shortcut.shiftKey
+  ) {
+    return { ...shortcut, shiftKey: true };
+  }
+  return shortcut;
+}
+
 function chordConflictKey(
   chord: readonly [KeybindingShortcut, KeybindingShortcut],
   platform: string,
@@ -138,10 +161,13 @@ function effectiveBindingsForCommand(
     if (!binding) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
 
+    let effectiveBinding: ResolvedKeybindingRule = binding;
     if ("shortcut" in binding) {
-      const key = shortcutConflictKey(binding.shortcut, platform);
+      const shortcut = shortcutForContext(binding, context);
+      const key = shortcutConflictKey(shortcut, platform);
       if (claimed.has(`s|${key}`) || claimed.has(`l|${key}`)) continue;
       claimed.add(`s|${key}`);
+      if (shortcut !== binding.shortcut) effectiveBinding = { ...binding, shortcut };
     } else {
       const leaderKey = shortcutConflictKey(binding.chord[0], platform);
       const chordKey = chordConflictKey(binding.chord, platform);
@@ -150,7 +176,7 @@ function effectiveBindingsForCommand(
       claimed.add(`l|${leaderKey}`);
     }
     if (binding.command === command) {
-      effective.push(binding);
+      effective.push(effectiveBinding);
     }
   }
 
@@ -355,7 +381,7 @@ export function resolveShortcutCommand(
     }
 
     if (pending) continue;
-    if (!matchesKeybindingShortcut(event, binding.shortcut, platform)) continue;
+    if (!matchesKeybindingShortcut(event, shortcutForContext(binding, context), platform)) continue;
     return binding.command;
   }
   return null;
