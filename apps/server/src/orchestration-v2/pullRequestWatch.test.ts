@@ -9,6 +9,7 @@ import {
   PULL_REQUEST_WATCH_WAKE_LIMIT,
   evaluatePullRequestWatch,
   pullRequestWatchMessage,
+  watchedChecks,
 } from "./pullRequestWatch.ts";
 
 const STARTED = "2026-10-02T12:00:00.000Z";
@@ -254,6 +255,47 @@ describe("evaluatePullRequestWatch", () => {
     const pushed = evaluatePullRequestWatch(tired, detail({ headSha: "cccccccccc" }), comments);
     assert.isFalse(pushed.exhausted);
     assert.equal(pushed.next.wakes, 1);
+  });
+});
+
+describe("watchedChecks", () => {
+  it("drops checks any pattern finds, ignoring case, and skips patterns that do not compile", () => {
+    const names = ["policy-bot: main", "Policy-Bot: release", "deploy (preview)", "lint", "test"];
+    const kept = watchedChecks(
+      names.map((name) => check(name, "pending")),
+      ["policy-bot", "^deploy \\(", "^lint$", "(unclosed"],
+    );
+    assert.deepEqual(
+      kept.map((kept) => kept.name),
+      ["test"],
+    );
+    const lintlike = [check("lint-docs", "pending")];
+    assert.deepEqual(watchedChecks(lintlike, ["^lint$", "(unclosed"]), lintlike);
+  });
+
+  it("lets checks pass past an ignored gate and keeps its failures quiet", () => {
+    const required = (name: string, status: PullRequestCheck["status"]) => ({
+      ...check(name, status),
+      required: true,
+    });
+    const ignored = ["^policy-bot"];
+    const waiting = detail({
+      checks: watchedChecks(
+        [required("test", "success"), required("policy-bot: main", "pending")],
+        ignored,
+      ),
+    });
+    assert.deepEqual(evaluatePullRequestWatch(watch(), waiting, noRemarks).changes, [
+      { kind: "checks-passed", count: 1, required: true },
+    ]);
+
+    const rejected = detail({
+      checks: watchedChecks(
+        [required("test", "pending"), required("policy-bot: main", "failure")],
+        ignored,
+      ),
+    });
+    assert.deepEqual(evaluatePullRequestWatch(watch(), rejected, noRemarks).changes, []);
   });
 });
 

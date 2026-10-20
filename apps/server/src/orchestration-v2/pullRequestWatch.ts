@@ -26,6 +26,26 @@ export interface PullRequestWatchReport {
   readonly exhausted: boolean;
 }
 
+/**
+ * Drops the checks a watch ignores: gates such as approval bots stay pending until a person acts,
+ * so they would hold back "checks passed" forever. Patterns are unanchored, case-insensitive
+ * regexes; one that does not compile, say from a hand-edited settings file, is skipped.
+ */
+export function watchedChecks(
+  checks: ReadonlyArray<PullRequestCheck>,
+  ignored: ReadonlyArray<string>,
+): ReadonlyArray<PullRequestCheck> {
+  const patterns = ignored.flatMap((pattern) => {
+    try {
+      return [new RegExp(pattern, "i")];
+    } catch {
+      return [];
+    }
+  });
+  if (patterns.length === 0) return checks;
+  return checks.filter((check) => !patterns.some((pattern) => pattern.test(check.name)));
+}
+
 // "action-required" is a finished check that needs someone, so the agent hears about it.
 const isFailedCheck = (check: PullRequestCheck) =>
   check.status === "failure" || check.status === "cancelled" || check.status === "action-required";

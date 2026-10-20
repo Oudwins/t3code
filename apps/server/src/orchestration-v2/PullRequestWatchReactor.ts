@@ -32,9 +32,14 @@ import {
 } from "@t3tools/source-control-core/server/PullRequestProvider";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
-import { evaluatePullRequestWatch, pullRequestWatchMessage } from "./pullRequestWatch.ts";
+import {
+  evaluatePullRequestWatch,
+  pullRequestWatchMessage,
+  watchedChecks,
+} from "./pullRequestWatch.ts";
 
 /**
  * Checks take minutes, so a faster pass mostly spends the host's rate limit,
@@ -191,6 +196,7 @@ export const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const pullRequests = yield* PullRequestService.PullRequestService;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const crypto = yield* Crypto.Crypto;
   const bootedAt = yield* Clock.currentTimeMillis;
   const lives = new Map<string, WatchLife>();
@@ -438,7 +444,14 @@ export const make = Effect.gen(function* () {
       return yield* Effect.failCause(read.cause);
     }
     readFailures.delete(group.key);
-    const [detail, activity] = read.value;
+    const [hostDetail, activity] = read.value;
+    const ignoredChecks = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.pullRequestWatchIgnoredChecks),
+      Effect.orElseSucceed(() => []),
+    );
+    // Filtered before `inFlight` too: an ignored gate that never settles must not force a full
+    // read on every pass.
+    const detail = { ...hostDetail, checks: watchedChecks(hostDetail.checks, ignoredChecks) };
     const headSha = detail.headSha ?? null;
     for (const target of group.targets) {
       const life = lifeOf(target);
