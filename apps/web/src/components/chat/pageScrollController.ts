@@ -81,6 +81,7 @@ type PageScrollEnv = {
   cancelAnimationFrame: (handle: number) => void;
   setTimeout: (callback: () => void, delay: number) => number;
   clearTimeout: (handle: number) => void;
+  prefersReducedMotion: () => boolean;
 };
 
 function getDefaultEnv(): PageScrollEnv {
@@ -90,6 +91,7 @@ function getDefaultEnv(): PageScrollEnv {
     cancelAnimationFrame: (handle) => window.cancelAnimationFrame(handle),
     setTimeout: (callback, delay) => window.setTimeout(callback, delay),
     clearTimeout: (handle) => window.clearTimeout(handle),
+    prefersReducedMotion: () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   };
 }
 
@@ -207,8 +209,13 @@ export function createPageScrollController({
     state.holdActive = false;
   };
 
-  const smoothScrollBy = (container: PageScrollContainer, deltaY: number) => {
+  const scrollBy = (container: PageScrollContainer, deltaY: number) => {
     cancelDiscreteAnimation();
+
+    if (env.prefersReducedMotion()) {
+      container.scrollTop += deltaY;
+      return;
+    }
 
     const startScrollTop = container.scrollTop;
     const startTime = env.now();
@@ -281,7 +288,7 @@ export function createPageScrollController({
       state.activeKey = key;
       onScrollStart?.(key);
 
-      smoothScrollBy(container, readPageScrollDistance(container) * getDirection(key));
+      scrollBy(container, readPageScrollDistance(container) * getDirection(key));
 
       state.holdDelayTimeout = env.setTimeout(() => {
         state.holdDelayTimeout = 0;
@@ -320,7 +327,7 @@ export function createPageScrollController({
         maxScrollTop,
         Math.max(0, fromScrollTop + (readPageScrollDistance(container) / 2) * getDirection(key)),
       );
-      smoothScrollBy(container, targetScrollTop - container.scrollTop);
+      scrollBy(container, targetScrollTop - container.scrollTop);
     },
     releaseActiveKey() {
       stop({ cancelDiscreteAnimation: state.holdActive });

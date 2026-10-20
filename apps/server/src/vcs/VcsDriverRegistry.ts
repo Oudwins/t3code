@@ -41,7 +41,7 @@ export class VcsDriverRegistry extends Context.Service<
   }
 >()("t3/vcs/VcsDriverRegistry") {}
 
-/** Fails with a `GitCommandError` unless `cwd` is inside a Git repository. */
+/** The Git driver handle for `cwd`; fails with a `GitCommandError` outside a Git repository. */
 export const ensureGitCommand = Effect.fn("VcsDriverRegistry.ensureGitCommand")(function* (
   registry: VcsDriverRegistry["Service"],
   operation: string,
@@ -67,6 +67,7 @@ export const ensureGitCommand = Effect.fn("VcsDriverRegistry.ensureGitCommand")(
       detail: `The ${operation} command currently supports Git repositories only; detected ${handle.kind}.`,
     });
   }
+  return handle;
 });
 
 function detectionCacheKey(input: {
