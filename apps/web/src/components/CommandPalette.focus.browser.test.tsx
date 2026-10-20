@@ -7,7 +7,8 @@ import { useComposerHandleContext } from "../composerHandleContext";
 import { openCommandPalette } from "../commandPaletteBus";
 import { primaryServerKeybindingsAtom } from "../state/server";
 
-vi.mock("@tanstack/react-router", () => ({
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => vi.fn(),
   useParams: () => null,
   useLocation: () => "/settings",
@@ -34,8 +35,20 @@ vi.mock("../hooks/useScratchProject", () => ({
 }));
 vi.mock("../hooks/useNewProject", () => ({ useNewProject: () => vi.fn() }));
 vi.mock("../hooks/useHandleNewThread", () => ({
-  useHandleNewThread: () => ({}),
+  useHandleNewThread: () => ({
+    activeThread: null,
+    activeDraftThread: null,
+    defaultProjectRef: null,
+  }),
   useNewThreadHandler: () => vi.fn(),
+}));
+vi.mock("../hooks/useThreadActions", () => ({
+  useThreadActions: () => ({
+    settleThread: vi.fn(),
+    unsettleThread: vi.fn(),
+    snoozeThread: vi.fn(),
+    unsnoozeThread: vi.fn(),
+  }),
 }));
 vi.mock("../hooks/useOpenPanelPullRequestUrl", () => ({ useOpenPanelPullRequestUrl: () => null }));
 vi.mock("../connection/useDesktopLocalBootstraps", () => ({ useDesktopLocalBootstraps: () => [] }));
