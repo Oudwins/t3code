@@ -284,7 +284,7 @@ const layerTest = Layer.mergeAll(
   Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(layerCheckpointStoreTest),
   Layer.provide(layerServerConfig),
-  Layer.provide(ServerSettings.layerTest()),
+  Layer.provideMerge(ServerSettings.layerTest()),
   Layer.provide(layerTestProviderInstanceRegistry),
   Layer.provide(layerGitWorkflowTest),
   Layer.provide(layerProjectServiceTest),
@@ -2757,6 +2757,93 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       yield* TestClock.adjust("10 minutes");
       yield* restarted.sweep;
       assert.deepEqual(yield* summaries, ["#12: checks passed", "#12: checks passed"]);
+      yield* watch(false, "end");
+    }),
+  );
+
+  it.effect("an ignored gate that never settles neither holds back passed nor forces reads", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-pull-request-watch-ignored");
+      const projectId = ProjectId.make("pr-watch-ignored-project");
+      yield* seedProject({
+        projectId,
+        title: "Watch ignored",
+        workspaceRoot: "/workspace/watch-ignored",
+        defaultModelSelection: null,
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("pr-watch-ignored-create"),
+        threadId,
+        projectId,
+        title: "Watch ignored",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const watch = (on: boolean, id: string) =>
+        orchestrator.dispatch({
+          type: "thread.pull-request.watch",
+          commandId: CommandId.make(`pr-watch-ignored-${id}`),
+          threadId,
+          host: "github.com",
+          repository: "pingdotgg/t3code",
+          number: 13,
+          watching: on,
+          link: { url: "https://github.com/pingdotgg/t3code/pull/13", source: "agent" },
+        });
+      yield* watch(true, "start");
+
+      let reads = 0;
+      const reactor = yield* PullRequestWatchReactor.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            NodeServices.layer,
+            ServerSettings.layerTest({ pullRequestWatchIgnoredChecks: ["^Policy-Bot:"] }),
+            Layer.mock(PullRequestService.PullRequestService)({
+              detail: () =>
+                Effect.sync(() => {
+                  reads += 1;
+                  return {
+                    ...watchedPullRequestDetail({
+                      projectId,
+                      number: 13,
+                      at: "2026-10-02T12:00:00.000Z",
+                    }),
+                    checks: [
+                      { name: "test", status: "success" as const },
+                      { name: "policy-bot: main", status: "pending" as const },
+                    ].map((check) => ({ ...check, description: null, url: null, required: true })),
+                  };
+                }),
+              activity: () =>
+                Effect.succeed({
+                  comments: [],
+                  commentCount: 0,
+                  commentsTruncated: false,
+                  reviewThreads: [],
+                  commits: [],
+                }),
+            }),
+          ),
+        ),
+      );
+      yield* reactor.sweep;
+      yield* TestClock.adjust("2 minutes");
+      yield* reactor.sweep;
+
+      const { messages } = yield* orchestrator.getThreadRecords(threadId, ["messages"]);
+      assert.deepEqual(
+        messages.flatMap((message) => message.notification?.summary ?? []),
+        ["#13: checks passed"],
+      );
+      assert.equal(reads, 1);
       yield* watch(false, "end");
     }),
   );

@@ -898,6 +898,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "pull-request-watch-ignored-checks",
+    title: "Ignored checks",
+    to: "/settings/source-control",
+    searchTerms: [
+      "pull request pr watch monitor babysit ci checks pending skip approval bot policy-bot wait regex pattern",
+    ],
+    environmentOnly: true,
+  },
+  {
     id: "project-actions",
     title: "Actions",
     to: "/settings/projects",
