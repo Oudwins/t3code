@@ -68,13 +68,15 @@ const authenticate = Effect.gen(function* () {
   }
 });
 
-const pump = (source: Socket.Socket, sink: Socket.Writer) =>
-  Effect.gen(function* () {
-    const { pull } = yield* source.reader;
-    while (true) {
-      yield* sink.writeAll(yield* pull);
-    }
-  });
+const pump = Effect.fn("PortTunnelRoute.pump")(function* (
+  source: Socket.Socket,
+  sink: Socket.Writer,
+) {
+  const { pull } = yield* source.reader;
+  while (true) {
+    yield* sink.writeAll(yield* pull);
+  }
+});
 
 const handler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;

@@ -345,55 +345,56 @@ export class PortSpaceProxy extends Context.Service<
 >()("@t3tools/desktop/preview/PortSpaceProxy") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
-export const make = (createSocket: TunnelSocketFactory = webSocketFactory) =>
-  Effect.gen(function* PortSpaceProxyMake() {
-    const tunnels = new Map<string, PortSpaceTunnelAccess>();
-    const servers = new Map<string, Promise<SocksServer>>();
+export const make = Effect.fn("PortSpaceProxy.make")(function* (
+  createSocket: TunnelSocketFactory = webSocketFactory,
+) {
+  const tunnels = new Map<string, PortSpaceTunnelAccess>();
+  const servers = new Map<string, Promise<SocksServer>>();
 
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(async () => {
-        for (const server of servers.values()) (await server.catch(() => null))?.close();
-        servers.clear();
+  yield* Effect.addFinalizer(() =>
+    Effect.promise(async () => {
+      for (const server of servers.values()) (await server.catch(() => null))?.close();
+      servers.clear();
+    }),
+  );
+
+  const listener = (environmentId: string, threadId: string): Promise<SocksServer> => {
+    const key = JSON.stringify([environmentId, threadId]);
+    const existing = servers.get(key);
+    if (existing) return existing;
+    const started = startSocksServer(
+      makeSocksConnect({
+        threadId,
+        access: () => tunnels.get(environmentId),
+        createSocket,
       }),
     );
+    servers.set(key, started);
+    started.catch(() => servers.delete(key));
+    return started;
+  };
 
-    const listener = (environmentId: string, threadId: string): Promise<SocksServer> => {
-      const key = JSON.stringify([environmentId, threadId]);
-      const existing = servers.get(key);
-      if (existing) return existing;
-      const started = startSocksServer(
-        makeSocksConnect({
-          threadId,
-          access: () => tunnels.get(environmentId),
-          createSocket,
-        }),
-      );
-      servers.set(key, started);
-      started.catch(() => servers.delete(key));
-      return started;
-    };
-
-    return PortSpaceProxy.of({
-      setTunnel: ({ environmentId, access }) =>
-        Effect.sync(() => {
-          if (access === null) tunnels.delete(environmentId);
-          else tunnels.set(environmentId, access);
-        }),
-      attach: Effect.fn("PortSpaceProxy.attach")(function* (session, { environmentId, threadId }) {
-        yield* Effect.tryPromise({
-          try: async () => {
-            const { port } = await listener(environmentId, threadId);
-            // `<-loopback>` removes Chromium's implicit loopback bypass so
-            // `localhost` reaches the proxy instead of this machine.
-            await session.setProxy({
-              proxyRules: `socks5://127.0.0.1:${port}`,
-              proxyBypassRules: "<-loopback>",
-            });
-          },
-          catch: (cause) => new PortSpaceProxyError({ environmentId, threadId, cause }),
-        });
+  return PortSpaceProxy.of({
+    setTunnel: ({ environmentId, access }) =>
+      Effect.sync(() => {
+        if (access === null) tunnels.delete(environmentId);
+        else tunnels.set(environmentId, access);
       }),
-    });
+    attach: Effect.fn("PortSpaceProxy.attach")(function* (session, { environmentId, threadId }) {
+      yield* Effect.tryPromise({
+        try: async () => {
+          const { port } = await listener(environmentId, threadId);
+          // `<-loopback>` removes Chromium's implicit loopback bypass so
+          // `localhost` reaches the proxy instead of this machine.
+          await session.setProxy({
+            proxyRules: `socks5://127.0.0.1:${port}`,
+            proxyBypassRules: "<-loopback>",
+          });
+        },
+        catch: (cause) => new PortSpaceProxyError({ environmentId, threadId, cause }),
+      });
+    }),
   });
+});
 
 export const layer = Layer.effect(PortSpaceProxy, make());

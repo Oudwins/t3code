@@ -10,12 +10,19 @@ import * as ServerConfig from "../config.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as PortGateway from "../portSpace/PortGateway.ts";
 import * as PortSpaces from "../portSpace/PortSpaces.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 
 export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupError>()(
   "ResourceCleanupError",
   {
-    operation: Schema.Literals(["terminal", "preview", "attachment", "portSpace"]),
+    operation: Schema.Literals([
+      "terminal",
+      "preview",
+      "attachment",
+      "portSpace",
+      "scheduled-tasks",
+    ]),
     threadId: Schema.optional(Schema.String),
     attachmentId: Schema.optional(Schema.String),
     cause: Schema.Defect(),
@@ -23,6 +30,7 @@ export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupErro
 ) {}
 
 export class ResourceCleanupService extends Context.Reference<{
+  readonly cleanupScheduledTasks: (threadId: ThreadId) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   /** Stops the thread's relay, kills whatever still runs in its port space and deletes the namespace. */
@@ -32,6 +40,7 @@ export class ResourceCleanupService extends Context.Reference<{
   ) => Effect.Effect<void, ResourceCleanupError>;
 }>("t3/orchestration-v2/ResourceCleanupService", {
   defaultValue: () => ({
+    cleanupScheduledTasks: () => Effect.void,
     cleanupTerminals: () => Effect.void,
     cleanupPreviews: () => Effect.void,
     releasePortSpace: () => Effect.void,
@@ -48,6 +57,7 @@ export const layer = Layer.effect(
     const portGateway = yield* PortGateway.PortGateway;
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
+    const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
     return {
       // The relay goes first: once the namespace is released it would only dial nothing.
       // Hosts that never set port spaces up have no namespace to release.
@@ -61,6 +71,15 @@ export const layer = Layer.effect(
             (cause) => new ResourceCleanupError({ operation: "portSpace", threadId, cause }),
           ),
         ),
+      cleanupScheduledTasks: (threadId: ThreadId) =>
+        scheduledTasks
+          .deleteForThread(threadId)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ResourceCleanupError({ operation: "scheduled-tasks", threadId, cause }),
+            ),
+          ),
       cleanupTerminals: (threadId: string) =>
         terminals
           .close({ threadId, deleteHistory: true })

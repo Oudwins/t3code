@@ -180,8 +180,8 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const dial: PortGateway["Service"]["dial"] = (threadId, target) =>
-    Effect.gen(function* () {
+  const dial: PortGateway["Service"]["dial"] = Effect.fn("PortGateway.dial")(
+    function* (threadId, target) {
       const threads = yield* portSpaces.threads;
       if (!threads.includes(threadId)) {
         return yield* new PortGatewayError({ threadId, reason: "no-port-space" });
@@ -201,7 +201,8 @@ const make = Effect.gen(function* () {
           Effect.tap((socket) => Effect.addFinalizer(() => Effect.sync(() => socket.destroy()))),
         ),
       );
-    }).pipe(Effect.withSpan("PortGateway.dial"));
+    },
+  );
 
   const release = Effect.fn("PortGateway.release")(function* (threadId: ThreadId) {
     yield* locks.withLock(
