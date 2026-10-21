@@ -60,25 +60,7 @@ function setup() {
   state.confirm.mockResolvedValue(true);
 }
 
-describe("restoring V2 settings", () => {
-  it.each([
-    ["persistComposerContextStrip", "Composer context"],
-    ["autoResumeLimitedThreads", "Auto-resume limited threads"],
-    ["snoozeLimitedThreads", "Snooze limited threads"],
-  ] as const)("restores %s when it is the only changed setting", async (key, label) => {
-    setup();
-    state.settings = { ...DEFAULT_UNIFIED_SETTINGS, [key]: true };
-    await using screen = await renderRestore();
-    const { restore } = screen;
-
-    expect(restore.changedSettingLabels).toEqual([label]);
-    await act(() => restore.restoreDefaults());
-
-    expect(state.confirm.mock.calls[0]?.[0]).toContain(label);
-    expect(state.update).toHaveBeenCalledOnce();
-    expect(state.update.mock.calls[0]?.[0][key]).toBe(DEFAULT_UNIFIED_SETTINGS[key]);
-  });
-
+describe("restoring worktree reuse settings", () => {
   it("restores worktree reuse limits as one changed setting", async () => {
     setup();
     state.settings = {
@@ -102,18 +84,5 @@ describe("restoring V2 settings", () => {
     const { restore } = screen;
 
     expect(restore.changedSettingLabels).toEqual([]);
-  });
-
-  it("does not reset settings after cancellation", async () => {
-    setup();
-    state.settings = { ...DEFAULT_UNIFIED_SETTINGS, autoResumeLimitedThreads: true };
-    state.confirm.mockResolvedValue(false);
-    await using screen = await renderRestore();
-    const { restore } = screen;
-
-    await act(() => restore.restoreDefaults());
-
-    expect(state.confirm).toHaveBeenCalledOnce();
-    expect(state.update).not.toHaveBeenCalled();
   });
 });

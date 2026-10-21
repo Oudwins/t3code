@@ -44,7 +44,7 @@ export type PreviewWebviewConfigError = typeof PreviewWebviewConfigError.Type;
 
 type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 
-export const loadPreviewWebviewConfig = (
+const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
   profileId?: string,
   bridge: PreviewConfigBridge | null = previewBridge,
