@@ -442,79 +442,73 @@ describe("tunnel WebSocket stream", () => {
       },
     });
 
-  it.effect(
-    "holds the tunnel's reads while the reader is behind",
-    () =>
-      Effect.gen(function* () {
-        const total = 32 * MIB;
-        yield* withTunnelServer(
-          (socket) => {
-            const chunk = Buffer.alloc(CHUNK_BYTES);
-            for (let sent = 0; sent < total; sent += CHUNK_BYTES) socket.send(chunk);
-            socket.close(1000);
-          },
-          async (open) => {
-            const tunnel = await open();
-            try {
-              let received = 0;
-              let deepest = 0;
-              await new Promise<void>((resolve, reject) => {
-                const sink = slowSink((length) => {
-                  received += length;
-                  deepest = Math.max(deepest, tunnel.readableLength);
-                });
-                NodeStream.pipeline(tunnel, sink, (error) => (error ? reject(error) : resolve()));
+  it.effect("holds the tunnel's reads while the reader is behind", () =>
+    Effect.gen(function* () {
+      const total = 32 * MIB;
+      yield* withTunnelServer(
+        (socket) => {
+          const chunk = Buffer.alloc(CHUNK_BYTES);
+          for (let sent = 0; sent < total; sent += CHUNK_BYTES) socket.send(chunk);
+          socket.close(1000);
+        },
+        async (open) => {
+          const tunnel = await open();
+          try {
+            let received = 0;
+            let deepest = 0;
+            await new Promise<void>((resolve, reject) => {
+              const sink = slowSink((length) => {
+                received += length;
+                deepest = Math.max(deepest, tunnel.readableLength);
               });
-              assert.strictEqual(received, total);
-              assert.isBelow(deepest, MIB);
-            } finally {
-              tunnel.destroy();
-            }
-          },
-        );
-      }),
-    60_000,
+              NodeStream.pipeline(tunnel, sink, (error) => (error ? reject(error) : resolve()));
+            });
+            assert.strictEqual(received, total);
+            assert.isBelow(deepest, MIB);
+          } finally {
+            tunnel.destroy();
+          }
+        },
+      );
+    }),
   );
 
-  it.effect(
-    "holds the sender while the far end is behind",
-    () =>
-      Effect.gen(function* () {
-        const total = 128 * MIB;
-        let consumed = 0;
-        let finish!: (error?: Error | null) => void;
-        const farEndDone = new Promise<void>((resolve, reject) => {
-          finish = (error) => (error ? reject(error) : resolve());
-        });
-        yield* withTunnelServer(
-          (socket) => {
-            const sink = slowSink((length) => {
-              consumed += length;
-            });
-            NodeStream.pipeline(NodeWS.createWebSocketStream(socket), sink, finish);
-          },
-          async (open) => {
-            const tunnel = await open();
-            try {
-              let written = 0;
-              let widest = 0;
-              while (written < total) {
-                if (!tunnel.write(Buffer.alloc(CHUNK_BYTES)))
-                  await NodeEvents.EventEmitter.once(tunnel, "drain");
-                written += CHUNK_BYTES;
-                widest = Math.max(widest, written - consumed);
-              }
-              tunnel.end();
-              await farEndDone;
-              assert.strictEqual(consumed, total);
-              assert.isBelow(widest, 32 * MIB);
-            } finally {
-              tunnel.destroy();
+  it.effect("holds the sender while the far end is behind", () =>
+    Effect.gen(function* () {
+      const total = 128 * MIB;
+      let consumed = 0;
+      let finish!: (error?: Error | null) => void;
+      const farEndDone = new Promise<void>((resolve, reject) => {
+        finish = (error) => (error ? reject(error) : resolve());
+      });
+      yield* withTunnelServer(
+        (socket) => {
+          const sink = slowSink((length) => {
+            consumed += length;
+          });
+          NodeStream.pipeline(NodeWS.createWebSocketStream(socket), sink, finish);
+        },
+        async (open) => {
+          const tunnel = await open();
+          try {
+            let written = 0;
+            let widest = 0;
+            while (written < total) {
+              if (!tunnel.write(Buffer.alloc(CHUNK_BYTES)))
+                await NodeEvents.EventEmitter.once(tunnel, "drain");
+              written += CHUNK_BYTES;
+              widest = Math.max(widest, written - consumed);
             }
-          },
-        );
-      }),
-    60_000,
+            tunnel.end();
+            await farEndDone;
+            assert.strictEqual(consumed, total);
+            assert.isBelow(widest, 32 * MIB);
+          } finally {
+            tunnel.destroy();
+          }
+        },
+      );
+    }),
   );
 });
 
