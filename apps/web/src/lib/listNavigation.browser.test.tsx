@@ -1,8 +1,6 @@
-// @vitest-environment jsdom
-
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
+
+import { act, render } from "../../test/render";
 
 import { Command, CommandInput, CommandItem, CommandList } from "../components/ui/command";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
@@ -136,37 +134,27 @@ describe("installListNavigationKeys", () => {
 
 describe("with a Base UI menu", () => {
   let uninstall: () => void;
-  let root: Root;
-  let container: HTMLDivElement;
 
   beforeEach(() => {
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     uninstall = installListNavigationKeys();
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
   });
 
-  afterEach(async () => {
-    await act(async () => root.unmount());
+  afterEach(() => {
     uninstall();
-    container.remove();
-    vi.unstubAllGlobals();
   });
 
   it("moves between items with ctrl+n and ctrl+p", async () => {
-    await act(async () => {
-      root.render(
-        <Menu defaultOpen>
-          <MenuTrigger>Open</MenuTrigger>
-          <MenuPopup>
-            <MenuItem>First</MenuItem>
-            <MenuItem>Second</MenuItem>
-            <MenuItem>Third</MenuItem>
-          </MenuPopup>
-        </Menu>,
-      );
-    });
+    await using _screen = await render(
+      <Menu defaultOpen>
+        <MenuTrigger>Open</MenuTrigger>
+        <MenuPopup>
+          <MenuItem>First</MenuItem>
+          <MenuItem>Second</MenuItem>
+          <MenuItem>Third</MenuItem>
+        </MenuPopup>
+      </Menu>,
+      { router: false },
+    );
     const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     expect(items()).toHaveLength(3);
     const popup = document.querySelector<HTMLElement>('[role="menu"]')!;
@@ -191,42 +179,32 @@ describe("with a Base UI menu", () => {
 
 describe("with a Base UI command list", () => {
   let uninstall: () => void;
-  let root: Root;
-  let container: HTMLDivElement;
 
   beforeEach(() => {
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     uninstall = installListNavigationKeys();
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
   });
 
-  afterEach(async () => {
-    await act(async () => root.unmount());
+  afterEach(() => {
     uninstall();
-    container.remove();
-    vi.unstubAllGlobals();
   });
 
   it("moves the highlight from the search input with ctrl+n and ctrl+p", async () => {
     const items = ["alpha", "beta", "gamma"];
-    await act(async () => {
-      root.render(
-        <div data-command-palette="true">
-          <Command items={items}>
-            <CommandInput aria-label="Search" />
-            <CommandList>
-              {(item: string) => (
-                <CommandItem key={item} value={item}>
-                  {item}
-                </CommandItem>
-              )}
-            </CommandList>
-          </Command>
-        </div>,
-      );
-    });
+    await using _screen = await render(
+      <div data-command-palette="true">
+        <Command items={items}>
+          <CommandInput aria-label="Search" />
+          <CommandList>
+            {(item: string) => (
+              <CommandItem key={item} value={item}>
+                {item}
+              </CommandItem>
+            )}
+          </CommandList>
+        </Command>
+      </div>,
+      { router: false },
+    );
     const input = document.querySelector<HTMLInputElement>("input")!;
     const highlighted = () =>
       document.querySelector('[role="option"][data-highlighted]')?.textContent ?? null;
