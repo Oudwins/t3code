@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { act, render } from "../../test/render";
 
@@ -35,26 +35,20 @@ describe("listNavigationDirection", () => {
   });
 });
 
-describe("installListNavigationKeys", () => {
-  let uninstall: () => void;
-  let container: HTMLDivElement;
-  let arrows: string[];
-  let laterListener: Mock<(event: KeyboardEvent) => void>;
+/** Installs the key handler for one test: `using _keys = listNavigationKeys()`. */
+function listNavigationKeys(): Disposable {
+  return { [Symbol.dispose]: installListNavigationKeys() };
+}
 
-  beforeEach(() => {
-    uninstall = installListNavigationKeys();
-    container = document.createElement("div");
-    document.body.append(container);
-    arrows = [];
-    laterListener = vi.fn<(event: KeyboardEvent) => void>();
-    window.addEventListener("keydown", laterListener, true);
-  });
-
-  afterEach(() => {
-    window.removeEventListener("keydown", laterListener, true);
-    uninstall();
-    container.remove();
-  });
+function setup() {
+  using stack = new DisposableStack();
+  stack.use(listNavigationKeys());
+  const container = stack.adopt(document.createElement("div"), (element) => element.remove());
+  document.body.append(container);
+  const arrows: string[] = [];
+  const laterListener = vi.fn<(event: KeyboardEvent) => void>();
+  window.addEventListener("keydown", laterListener, true);
+  stack.defer(() => window.removeEventListener("keydown", laterListener, true));
 
   function mount(html: string, options: { consume: boolean }) {
     container.innerHTML = html;
@@ -68,24 +62,33 @@ describe("installListNavigationKeys", () => {
     return input;
   }
 
-  function press(target: HTMLElement, init: KeyboardEventInit) {
-    const event = chord(init);
-    target.dispatchEvent(event);
-    return event;
-  }
+  const environment = stack.move();
+  return { arrows, laterListener, mount, [Symbol.dispose]: () => environment.dispose() };
+}
 
+function press(target: HTMLElement, init: KeyboardEventInit) {
+  const event = chord(init);
+  target.dispatchEvent(event);
+  return event;
+}
+
+describe("installListNavigationKeys", () => {
   it("replays ctrl+n and ctrl+p as arrows inside a list and claims the chord", () => {
-    const input = mount('<div role="listbox"><input /></div>', { consume: true });
+    using keys = setup();
+    const input = keys.mount('<div role="listbox"><input /></div>', { consume: true });
 
     const next = press(input, { key: "n", ctrlKey: true });
     const previous = press(input, { key: "p", metaKey: true });
 
-    expect(arrows).toEqual(["ArrowDown", "ArrowUp"]);
+    expect(keys.arrows).toEqual(["ArrowDown", "ArrowUp"]);
     expect(next.defaultPrevented).toBe(true);
     expect(previous.defaultPrevented).toBe(true);
     // Only the replayed arrows reach later listeners, never the chords that
     // would open a new thread or the file picker.
-    expect(laterListener.mock.calls.map(([event]) => event.key)).toEqual(["ArrowDown", "ArrowUp"]);
+    expect(keys.laterListener.mock.calls.map(([event]) => event.key)).toEqual([
+      "ArrowDown",
+      "ArrowUp",
+    ]);
   });
 
   it.each([
@@ -93,57 +96,52 @@ describe("installListNavigationKeys", () => {
     ["the command palette", '<div data-command-palette="true"><input /></div>'],
     ["an opted-in region", '<div data-list-navigation=""><input /></div>'],
   ])("treats %s as a list", (_name, html) => {
-    const input = mount(html, { consume: true });
+    using keys = setup();
+    const input = keys.mount(html, { consume: true });
     press(input, { key: "n", ctrlKey: true });
-    expect(arrows).toEqual(["ArrowDown"]);
+    expect(keys.arrows).toEqual(["ArrowDown"]);
   });
 
   it("leaves the chord alone outside a list", () => {
-    const input = mount('<div role="combobox" aria-expanded="false"><input /></div>', {
+    using keys = setup();
+    const input = keys.mount('<div role="combobox" aria-expanded="false"><input /></div>', {
       consume: true,
     });
 
     const event = press(input, { key: "n", metaKey: true });
 
-    expect(arrows).toEqual([]);
+    expect(keys.arrows).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
-    expect(laterListener).toHaveBeenCalledTimes(1);
+    expect(keys.laterListener).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the chord alone when the list does not handle the arrow", () => {
-    const input = mount('<div role="listbox"><input /></div>', { consume: false });
+    using keys = setup();
+    const input = keys.mount('<div role="listbox"><input /></div>', { consume: false });
 
     const event = press(input, { key: "p", metaKey: true });
 
-    expect(arrows).toEqual(["ArrowUp"]);
+    expect(keys.arrows).toEqual(["ArrowUp"]);
     expect(event.defaultPrevented).toBe(false);
-    expect(laterListener.mock.calls.map(([later]) => later.key)).toEqual(["ArrowUp", "p"]);
+    expect(keys.laterListener.mock.calls.map(([later]) => later.key)).toEqual(["ArrowUp", "p"]);
   });
 
   it("does not interfere with composition or already-handled chords", () => {
-    const input = mount('<div role="listbox"><input /></div>', { consume: true });
+    using keys = setup();
+    const input = keys.mount('<div role="listbox"><input /></div>', { consume: true });
 
     press(input, { key: "n", ctrlKey: true, isComposing: true });
     const handled = chord({ key: "n", ctrlKey: true });
     handled.preventDefault();
     input.dispatchEvent(handled);
 
-    expect(arrows).toEqual([]);
+    expect(keys.arrows).toEqual([]);
   });
 });
 
 describe("with a Base UI menu", () => {
-  let uninstall: () => void;
-
-  beforeEach(() => {
-    uninstall = installListNavigationKeys();
-  });
-
-  afterEach(() => {
-    uninstall();
-  });
-
   it("moves between items with ctrl+n and ctrl+p", async () => {
+    using _keys = listNavigationKeys();
     await using _screen = await render(
       <Menu defaultOpen>
         <MenuTrigger>Open</MenuTrigger>
@@ -178,17 +176,8 @@ describe("with a Base UI menu", () => {
 });
 
 describe("with a Base UI command list", () => {
-  let uninstall: () => void;
-
-  beforeEach(() => {
-    uninstall = installListNavigationKeys();
-  });
-
-  afterEach(() => {
-    uninstall();
-  });
-
   it("moves the highlight from the search input with ctrl+n and ctrl+p", async () => {
+    using _keys = listNavigationKeys();
     const items = ["alpha", "beta", "gamma"];
     await using _screen = await render(
       <div data-command-palette="true">
