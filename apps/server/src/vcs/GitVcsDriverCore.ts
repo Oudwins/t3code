@@ -3891,7 +3891,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const progress = options?.progress;
 
     const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
-    yield* executeGit(
+    yield* executeGitWithStableDiagnostics(
       "GitVcsDriver.createWorktree",
       input.cwd,
       ["-c", `checkout.workers=${checkoutWorkers}`, ...args],
@@ -3931,7 +3931,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     yield* ensureParentDirectory("GitVcsDriver.reuseWorktree", input.cwd, worktreePath);
 
-    let createdBranch = false;
+    // A branch that was already there is not ours to delete on failure.
+    const branchExisted =
+      input.newRefName == null || (yield* branchExists(input.cwd, input.newRefName));
     // The move and its notification are one uninterruptible step: once the
     // checkout has left `standbyPath`, the caller must learn where it went.
     return yield* Effect.uninterruptibleMask((restore) =>
@@ -3949,7 +3951,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         return yield* restore(
           Effect.gen(function* () {
             const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
-            yield* executeGit(
+            yield* executeGitWithStableDiagnostics(
               "GitVcsDriver.reuseWorktree",
               worktreePath,
               [
@@ -3967,7 +3969,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
                 ...checkoutProgressOptions(progress?.onCheckoutProgress),
               },
             );
-            createdBranch = input.newRefName != null;
             yield* finishWorktree(input, worktreePath, options);
             return { worktree: { path: worktreePath, refName: targetBranch } };
           }),
@@ -3984,7 +3985,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             ]).pipe(
               Effect.ignore,
               Effect.andThen(
-                createdBranch && input.newRefName
+                !branchExisted && input.newRefName
                   ? runGit("GitVcsDriver.reuseWorktree.deleteBranch", input.cwd, [
                       "branch",
                       "-D",

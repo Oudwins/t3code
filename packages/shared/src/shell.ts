@@ -206,10 +206,7 @@ function envCaptureEnd(name: string): string {
   return `__T3CODE_ENV_${name}_END__`;
 }
 
-export function buildEnvironmentCaptureCommand(
-  shell: string,
-  names: ReadonlyArray<string>,
-): string {
+function buildEnvironmentCaptureCommand(shell: string, names: ReadonlyArray<string>): string {
   const executableName = NodePath.basename(shell).toLowerCase();
   const isNushell = executableName.startsWith("nu");
 

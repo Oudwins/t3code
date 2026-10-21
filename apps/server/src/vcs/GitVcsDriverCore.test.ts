@@ -5164,12 +5164,13 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           baseRefName: initialBranch,
         });
 
-        // The merge-base config is written after the checkout, so a locked config fails the reuse late.
+        // A failing post-checkout hook fails the reuse after `checkout -b` created the branch.
         const parked = yield* park("first");
-        const lock = pathService.join(cwd, ".git", "config.lock");
-        yield* fileSystem.writeFileString(lock, "");
+        const hook = pathService.join(cwd, ".git", "hooks", "post-checkout");
+        yield* writeTextFile(cwd, ".git/hooks/post-checkout", "#!/bin/sh\nexit 1\n");
+        yield* fileSystem.chmod(hook, 0o755);
         yield* driver.reuseWorktree(request(parked.path, "feature/second")).pipe(Effect.flip);
-        yield* fileSystem.remove(lock);
+        yield* fileSystem.remove(hook);
 
         assert.equal(yield* fileSystem.exists(parked.path), false);
         assert.notInclude(yield* driver.listLocalBranchNames(cwd), "feature/second");
