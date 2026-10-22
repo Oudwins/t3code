@@ -72,8 +72,14 @@ failed, or simply finished, and whether or not you have read it. Working, snooze
 settled threads are skipped, and the search wraps at either end. These two need the
 default sidebar rather than the legacy one.
 
+The `ctrl+b l` chord goes back to the thread you had open before this one. Press it
+again to return, so it switches between your two most recent threads. The command
+palette has the same action as **Go to last thread**. On Windows and Linux this chord
+replaces `Ctrl+B` for toggling the sidebar; rebind either one in Settings if you
+want both.
+
 Change them in Settings under **Thread: Settle**, **Thread: Snooze**, **Thread: Previous
-Needing Attention**, and **Thread: Next Needing Attention**.
+Needing Attention**, **Thread: Next Needing Attention**, and **Thread: Last Opened**.
 
 `Ctrl+D` and `Ctrl+U` scroll the conversation down and up by half a screen, as in vim,
 even while you type in the composer. Hold either key to keep stepping. They use Ctrl on

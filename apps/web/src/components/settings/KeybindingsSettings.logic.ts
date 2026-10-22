@@ -386,6 +386,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "thread.copyReference") return "Pull Request: Copy Link or Thread ID";
   if (command === "thread.previousAttention") return "Thread: Previous Needing Attention";
   if (command === "thread.nextAttention") return "Thread: Next Needing Attention";
+  if (command === "thread.last") return "Thread: Last Opened";
   const usageMetric = METRIC_OPTIONS.find((option) => option.command === command);
   if (usageMetric) return `Usage: ${usageMetric.label}`;
   const usagePeriod = WINDOW_OPTIONS.find((option) => option.command === command);

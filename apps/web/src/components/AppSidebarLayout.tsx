@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
+import { noteThreadVisit, readLastThread } from "../lastThread";
 import {
   releaseThreadUndoShortcut,
   threadUndoClaimsShortcut,
@@ -61,8 +62,10 @@ import {
   useSidebar,
   useSidebarVisibility,
 } from "./ui/sidebar";
+import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
+import { buildThreadRouteParams } from "../threadRoutes";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
 
@@ -222,6 +225,9 @@ function routePanelsOpen(routeThreadRef: ReturnType<typeof useThreadRouteRef>) {
 function NavigationHistoryShortcuts() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const routeThreadRef = useThreadRouteRef();
+  const navigate = useNavigate();
+
+  useEffect(() => noteThreadVisit(routeThreadRef), [routeThreadRef]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -241,6 +247,21 @@ function NavigationHistoryShortcuts() {
           modelPickerOpen: isModelPickerOpen(),
         },
       });
+      if (command === "thread.last") {
+        if (isCommandPaletteOpen()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const lastThread = readLastThread(routeThreadRef);
+        if (lastThread === null) {
+          toastManager.add({ type: "info", title: "No previous thread to go back to" });
+          return;
+        }
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(lastThread),
+        });
+        return;
+      }
       if (command !== "navigation.back" && command !== "navigation.forward") return;
 
       event.preventDefault();
@@ -251,7 +272,7 @@ function NavigationHistoryShortcuts() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, routeThreadRef]);
+  }, [keybindings, navigate, routeThreadRef]);
 
   return null;
 }
