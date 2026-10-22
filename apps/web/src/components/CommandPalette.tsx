@@ -251,6 +251,7 @@ import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+import { readLastThread } from "../lastThread";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -1377,6 +1378,26 @@ function OpenCommandPaletteDialog(props: {
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
+    });
+  }
+
+  const lastThreadRef = readLastThread(
+    paletteRouteTarget?.kind === "server" ? paletteRouteTarget.threadRef : null,
+  );
+  if (lastThreadRef !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:last-thread",
+      searchTerms: ["last", "previous", "back", "recent", "thread", "switch"],
+      title: "Go to last thread",
+      icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.last",
+      run: async () => {
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(lastThreadRef),
+        });
+      },
     });
   }
 

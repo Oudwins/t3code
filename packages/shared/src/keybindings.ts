@@ -220,6 +220,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+]", command: "thread.next" },
   { key: "mod+alt+[", command: "thread.previousAttention" },
   { key: "mod+alt+]", command: "thread.nextAttention" },
+  { key: "ctrl+b l", command: "thread.last", when: "!terminalFocus" },
   { key: "mod+shift+c", command: "thread.copyReference", when: "!terminalFocus" },
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+alt+s", command: "thread.snooze", when: "!terminalFocus" },

@@ -56,6 +56,7 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.next",
   "thread.previousAttention",
   "thread.nextAttention",
+  "thread.last",
   "thread.copyReference",
   "thread.settle",
   "thread.snooze",
