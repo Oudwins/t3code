@@ -222,7 +222,8 @@ function routePanelsOpen(routeThreadRef: ReturnType<typeof useThreadRouteRef>) {
   };
 }
 
-function NavigationHistoryShortcuts() {
+export function NavigationHistoryShortcuts() {
+  const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const routeThreadRef = useThreadRouteRef();
   const navigate = useNavigate();
@@ -245,6 +246,7 @@ function NavigationHistoryShortcuts() {
           ...routePanelsOpen(routeThreadRef),
           editableFocus: isEditableFocused(event.target),
           modelPickerOpen: isModelPickerOpen(),
+          usagePageOpen,
         },
       });
       if (command === "thread.last") {
@@ -272,7 +274,7 @@ function NavigationHistoryShortcuts() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, navigate, routeThreadRef]);
+  }, [keybindings, navigate, routeThreadRef, usagePageOpen]);
 
   return null;
 }
