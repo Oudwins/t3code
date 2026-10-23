@@ -202,6 +202,9 @@ jobs:
       resource_key: darwin-arm64
       cli_archive: true
 
+  # release-desktop.yml cross-builds Windows on Linux (`build-exe --target`
+  # extracts the downloaded Node zip with tar, which Git Bash's GNU tar cannot
+  # do on a Windows host), so only the native checks run on Windows.
   desktop_win_x64:
     name: Desktop Windows x64
     needs: [preflight, build_bundle]
@@ -217,7 +220,8 @@ jobs:
       clerk_cli_oauth_client_id: ""
       relay_url: ""
       label: Windows x64
-      runner: windows-latest
+      runner: ubuntu-latest
+      verify_runner: windows-2025
       platform: win
       target: nsis
       arch: x64
@@ -242,7 +246,8 @@ jobs:
       clerk_cli_oauth_client_id: ""
       relay_url: ""
       label: Windows arm64
-      runner: windows-11-arm
+      runner: ubuntu-latest
+      verify_runner: windows-11-arm
       platform: win
       target: nsis
       arch: arm64
