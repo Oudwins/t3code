@@ -490,6 +490,11 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         threadId: input.threadId,
         env,
       });
+      // Finalizers run in reverse order: reap detached work after terminating Pi.
+      const scopeUnit = scopedLaunch.unit;
+      const stopScope =
+        scopeUnit === undefined ? Effect.void : yield* Effect.cached(agentScope.stop(scopeUnit));
+      yield* Effect.addFinalizer(() => stopScope);
       const spawn = { command: scopedLaunch.command, args: scopedLaunch.args, cwd, env };
       const connection: PiRpcConnection = yield* makePiRpcConnection(
         portSpace === undefined ? spawn : { ...portSpace.rewrite(spawn), cwd: undefined },
@@ -504,6 +509,13 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             }),
         ),
       );
+      // Detached children can keep stdout open after Pi exits.
+      if (scopeUnit !== undefined) {
+        yield* connection.exited.pipe(
+          Effect.matchEffect({ onFailure: () => stopScope, onSuccess: () => stopScope }),
+          Effect.forkIn(scope),
+        );
+      }
       const now = yield* DateTime.now;
       let sessionEntity: OrchestrationV2ProviderSession = {
         id: input.providerSessionId,
