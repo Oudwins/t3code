@@ -1176,12 +1176,20 @@ function PortForwardingStatusNote() {
     status === null ? null : scopeThreadRef(status.environmentId, status.threadId),
   );
   if (status === null) return <span>Open a thread with port spaces to forward its ports.</span>;
-  const forwarding = new Set<number>();
-  const conflicts = new Set<number>();
-  for (const port of status.ports) {
-    (port.state === "forwarding" ? forwarding : conflicts).add(port.port);
-  }
-  for (const port of forwarding) conflicts.delete(port);
+  const forwarding = new Set(
+    status.ports.filter((port) => port.state === "forwarding").map((port) => port.port),
+  );
+  // A port forwarded on one address family can still be taken on the other,
+  // where clients reach the other app instead.
+  const conflicts = new Set(
+    status.ports
+      .filter((port) => port.state === "conflict")
+      .map((port) =>
+        forwarding.has(port.port)
+          ? `${port.host === "::1" ? "[::1]" : port.host}:${port.port}`
+          : String(port.port),
+      ),
+  );
   const title = thread?.title ?? "the selected thread";
   return (
     <span>

@@ -1,4 +1,5 @@
 import { ClientSettingsSchema } from "@t3tools/contracts";
+import * as Electron from "electron";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -23,12 +24,20 @@ export const setClientSettings = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.SET_CLIENT_SETTINGS_CHANNEL,
   payload: ClientSettingsSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.clientSettings.set")(function* (settings) {
+  handler: Effect.fn("desktop.ipc.clientSettings.set")(function* (settings, event) {
     const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
     const snapShot = yield* DesktopSnapShot.DesktopSnapShot;
     const forwarder = yield* LocalPortForwarder.LocalPortForwarder;
     yield* clientSettings.set(settings);
     yield* snapShot.configure(settings);
     yield* forwarder.setEnabled(settings.portForwardingEnabled);
+    // Each window saves its whole copy, so one that missed this change would
+    // put the old values back with its next unrelated edit.
+    yield* Effect.sync(() => {
+      for (const window of Electron.BrowserWindow.getAllWindows()) {
+        if (window.isDestroyed() || window.webContents.id === event?.sender.id) continue;
+        window.webContents.send(IpcChannels.CLIENT_SETTINGS_CHANGED_CHANNEL, settings);
+      }
+    });
   }),
 });

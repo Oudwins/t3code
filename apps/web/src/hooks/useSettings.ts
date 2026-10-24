@@ -74,6 +74,8 @@ let clientSettingsHydrationPromise: Promise<void> | null = null;
 let clientSettingsHydrationGeneration = 0;
 let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
 let deferredClientSettingsPatchCount = 0;
+let pendingClientSettingsWrites = 0;
+let followingOtherWindows = false;
 
 function emitClientSettingsChange() {
   for (const listener of clientSettingsListeners) {
@@ -151,6 +153,7 @@ async function hydrateClientSettings(): Promise<void> {
       if (persistedSettings) {
         replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
       }
+      followClientSettingsFromOtherWindows();
       setClientSettingsHydrationStatus("ready");
     } catch (error) {
       if (hydrationGeneration === clientSettingsHydrationGeneration) {
@@ -174,11 +177,28 @@ async function hydrateClientSettings(): Promise<void> {
   return clientSettingsHydrationPromise;
 }
 
+/**
+ * Every write saves this window's whole copy, so a copy that missed another
+ * window's change would put the old values back with its next edit.
+ */
+function followClientSettingsFromOtherWindows(): void {
+  if (followingOtherWindows) return;
+  followingOtherWindows = true;
+  ensureLocalApi().persistence.onClientSettingsChanged?.((settings) => {
+    // A write still queued here is newer: it is saved last and reaches the other windows too.
+    if (pendingClientSettingsWrites > 0) return;
+    replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...settings });
+  });
+}
+
 const defaultClientSettingsPersistence = (settings: ClientSettings): Promise<void> =>
   ensureLocalApi().persistence.setClientSettings(settings);
 
 function enqueueClientSettingsPersistence<A>(work: () => Promise<A>): Promise<A> {
-  const result = clientSettingsPersistenceQueue.then(work);
+  pendingClientSettingsWrites += 1;
+  const result = clientSettingsPersistenceQueue.then(work).finally(() => {
+    pendingClientSettingsWrites -= 1;
+  });
   clientSettingsPersistenceQueue = result.then(
     () => undefined,
     () => undefined,
@@ -751,6 +771,8 @@ export function __resetClientSettingsPersistenceForTests(): void {
   clientSettingsHydrationPromise = null;
   clientSettingsPersistenceQueue = Promise.resolve();
   deferredClientSettingsPatchCount = 0;
+  pendingClientSettingsWrites = 0;
+  followingOtherWindows = false;
   clientSettingsListeners.clear();
   clientSettingsHydrationListeners.clear();
 }

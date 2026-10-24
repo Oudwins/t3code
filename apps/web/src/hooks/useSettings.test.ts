@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 const persistenceMocks = vi.hoisted(() => ({
   getClientSettings: vi.fn<() => Promise<ClientSettings | null>>(),
   setClientSettings: vi.fn<(settings: ClientSettings) => Promise<void>>(),
+  onClientSettingsChanged: vi.fn<(listener: (settings: ClientSettings) => void) => () => void>(),
 }));
 
 vi.mock("~/localApi", () => ({
@@ -26,6 +27,7 @@ import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 beforeEach(() => {
   persistenceMocks.getClientSettings.mockReset().mockResolvedValue(null);
   persistenceMocks.setClientSettings.mockReset().mockResolvedValue(undefined);
+  persistenceMocks.onClientSettingsChanged.mockReset().mockReturnValue(() => undefined);
   __resetClientSettingsPersistenceForTests();
 });
 
@@ -194,6 +196,44 @@ describe("persistClientSettingsPatch", () => {
 
     expect(persistenceMocks.setClientSettings).toHaveBeenNthCalledWith(1, firstSettings);
     expect(persistenceMocks.setClientSettings).toHaveBeenNthCalledWith(2, secondSettings);
+  });
+});
+
+describe("settings saved in another window", () => {
+  const otherWindowSaves = async () => {
+    await ensureClientSettingsHydrated();
+    const listener = persistenceMocks.onClientSettingsChanged.mock.calls[0]?.[0];
+    if (listener === undefined) throw new Error("not following other windows");
+    return listener;
+  };
+
+  it("are what this window saves next", async () => {
+    const save = await otherWindowSaves();
+    save({ ...DEFAULT_CLIENT_SETTINGS, wordWrap: false });
+
+    await persistClientSettingsPatch({ snapShotFlash: false });
+
+    expect(persistenceMocks.setClientSettings).toHaveBeenCalledWith({
+      ...DEFAULT_CLIENT_SETTINGS,
+      wordWrap: false,
+      snapShotFlash: false,
+    });
+  });
+
+  it("do not undo an edit this window has not saved yet", async () => {
+    const save = await otherWindowSaves();
+    let finishWrite!: () => void;
+    persistenceMocks.setClientSettings.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      }),
+    );
+    const write = persistClientSettingsPatch({ snapShotFlash: false });
+    save({ ...DEFAULT_CLIENT_SETTINGS, wordWrap: false });
+    finishWrite();
+    await write;
+
+    expect(getClientSettings()).toEqual({ ...DEFAULT_CLIENT_SETTINGS, snapShotFlash: false });
   });
 });
 

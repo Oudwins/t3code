@@ -1101,6 +1101,8 @@ export interface DesktopBridge {
   getLocalEnvironmentBearerToken: () => Promise<string>;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
+  /** Settings another window saved. */
+  onClientSettingsChanged?: (listener: (settings: ClientSettings) => void) => () => void;
   getConnectionCatalog?: () => Promise<string | null>;
   setConnectionCatalog?: (catalog: string) => Promise<boolean>;
   clearConnectionCatalog?: () => Promise<void>;
@@ -1297,5 +1299,7 @@ export interface LocalApi {
   persistence: {
     getClientSettings: () => Promise<ClientSettings | null>;
     setClientSettings: (settings: ClientSettings) => Promise<void>;
+    /** Settings another desktop window saved; browser tabs are not told. */
+    onClientSettingsChanged?: (listener: (settings: ClientSettings) => void) => () => void;
   };
 }
