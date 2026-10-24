@@ -88,6 +88,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getClientPlatform: () => clientPlatform,
   setNotificationBadge: (badge) =>
     ipcRenderer.invoke(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, badge),
+  setPortForwarding: (input) => ipcRenderer.invoke(IpcChannels.SET_PORT_FORWARDING_CHANNEL, input),
+  getPortForwardingStatus: () => ipcRenderer.invoke(IpcChannels.GET_PORT_FORWARDING_STATUS_CHANNEL),
+  onPortForwardingStatus: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: unknown) =>
+      listener(status as Parameters<typeof listener>[0]);
+    ipcRenderer.on(IpcChannels.PORT_FORWARDING_STATUS_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(IpcChannels.PORT_FORWARDING_STATUS_CHANNEL, handler);
+  },
   onNotificationBadgeClear: (listener) => {
     const handler = () => listener();
     ipcRenderer.on(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, handler);
@@ -119,6 +127,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getClientSettings: () => ipcRenderer.invoke(IpcChannels.GET_CLIENT_SETTINGS_CHANNEL),
   setClientSettings: (settings) =>
     ipcRenderer.invoke(IpcChannels.SET_CLIENT_SETTINGS_CHANNEL, settings),
+  onClientSettingsChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, settings: unknown) =>
+      listener(settings as Parameters<typeof listener>[0]);
+    ipcRenderer.on(IpcChannels.CLIENT_SETTINGS_CHANGED_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(IpcChannels.CLIENT_SETTINGS_CHANGED_CHANNEL, handler);
+  },
   requestSnapShotPermissions: (includeAccessibility) =>
     ipcRenderer.invoke(IpcChannels.REQUEST_SNAP_SHOT_PERMISSIONS_CHANNEL, includeAccessibility),
   getSnapShotState: () => ipcRenderer.invoke(IpcChannels.GET_SNAP_SHOT_STATE_CHANNEL),

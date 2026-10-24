@@ -161,6 +161,30 @@ browser runs on the host, so its `localhost` is the host's, not the thread's.
 If the helper is missing, terminals fall back to the host network (see above) while the preview
 proxy has no namespace to dial and reports the failure in that thread. It does not browse the host.
 
+## Forwarding to this machine
+
+The desktop app can also bind the selected thread's listeners on its own loopback at their own ports,
+so an ordinary browser, `curl`, or database client reaches them. It reuses the tunnel and the ticket
+`PortSpaceProxy` holds; only the listener side is new.
+
+- `subscribePortSpaceListeners` streams every listener the tunnel can reach, from
+  [`PortSpaceListeners`](../../apps/server/src/portSpace/PortSpaceListeners.ts). Discovery is the
+  wrong source: it publishes only servers that answer with HTML, which would drop databases.
+- The selection is per desktop, never server state, so two people on one environment forward
+  different threads. Each window reports its thread over IPC; main forwards the most recently
+  focused one's ([`LocalPortForwarder`](../../apps/desktop/src/portForward/LocalPortForwarder.ts)).
+  The renderer keeps the ticket renewed and sends nothing (releasing every port) while the
+  environment is disconnected.
+- A connection keeps the thread it was accepted for. A switch retargets shared ports before binding
+  new ones, then closes the old thread's connections rather than moving them.
+- Binding cannot detect a conflict on macOS: `127.0.0.1:3000` binds over another process's
+  `0.0.0.0:3000` and silently takes its loopback traffic. The forwarder connects first and leaves a
+  served address alone, retrying every few seconds.
+- `ss` prints a dual-stack listener as `*` and a v6-only one as `::`. Only `*` is forwarded on both
+  `127.0.0.1` and `::1`; the tunnel cannot dial other loopback addresses.
+- Like the SOCKS listener, the forwarded ports accept any local process, which can then use the
+  thread's servers as the signed-in user would.
+
 Clients learn whether the helper is usable from `server.getPortSpacesStatus`, a unary RPC. It is not
 part of the config snapshot, which is cached and compat-gated: the answer changes when the user runs
 `t3 portspace setup` in a terminal, so every look re-checks.

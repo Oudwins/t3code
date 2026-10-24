@@ -39,6 +39,7 @@ export const GET_LOCAL_ENVIRONMENT_BEARER_TOKEN_CHANNEL =
   "desktop:get-local-environment-bearer-token";
 export const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
 export const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
+export const CLIENT_SETTINGS_CHANGED_CHANNEL = "desktop:client-settings-changed";
 export const SETUP_SNAP_SHOT_CHANNEL = "desktop:setup-snap-shot";
 export const PREVIEW_SNAP_SHOT_CONFIG_CHANNEL = "desktop:preview-snap-shot-config";
 export const APPLY_SNAP_SHOT_CONFIG_CHANNEL = "desktop:apply-snap-shot-config";
@@ -94,6 +95,9 @@ export const PREVIEW_OPEN_DEVTOOLS_CHANNEL = "desktop:preview-open-devtools";
 export const PREVIEW_CLEAR_COOKIES_CHANNEL = "desktop:preview-clear-cookies";
 export const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
 export const PREVIEW_GET_CONFIG_CHANNEL = "desktop:preview-get-config";
+export const SET_PORT_FORWARDING_CHANNEL = "desktop:set-port-forwarding";
+export const GET_PORT_FORWARDING_STATUS_CHANNEL = "desktop:get-port-forwarding-status";
+export const PORT_FORWARDING_STATUS_CHANNEL = "desktop:port-forwarding-status";
 export const PREVIEW_SET_PORT_SPACE_TUNNEL_CHANNEL = "desktop:preview-set-port-space-tunnel";
 export const PREVIEW_IMPORT_SOURCES_CHANNEL = "desktop:preview-import-sources";
 export const PREVIEW_IMPORT_COOKIES_CHANNEL = "desktop:preview-import-cookies";

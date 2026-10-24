@@ -54,7 +54,9 @@ import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { formatEnvironmentQueryError } from "~/state/query";
 import { previewEnvironment } from "~/state/preview";
-import { useServerConfigs } from "~/state/entities";
+import { useServerConfigs, useThreadShell } from "~/state/entities";
+import { portForwardingBridge, usePortForwardingStatus } from "~/state/portForwarding";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AgentDeviceSetupStatus,
@@ -1123,6 +1125,7 @@ function PortSpacesIntegrationSettings() {
           />
         }
       />
+      {portForwardingBridge ? <PortForwardingSetting /> : null}
     </SettingsSection>
   );
 }
@@ -1161,6 +1164,59 @@ function AgentBrowserAccessSetting() {
           aria-label="Agent browser access"
           checked={settings.enableAgentBrowserAccess}
           onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
+        />
+      }
+    />
+  );
+}
+
+function PortForwardingStatusNote() {
+  const status = usePortForwardingStatus();
+  const thread = useThreadShell(
+    status === null ? null : scopeThreadRef(status.environmentId, status.threadId),
+  );
+  if (status === null) return <span>Open a thread with port spaces to forward its ports.</span>;
+  const forwarding = new Set(
+    status.ports.filter((port) => port.state === "forwarding").map((port) => port.port),
+  );
+  // A port forwarded on one address family can still be taken on the other,
+  // where clients reach the other app instead.
+  const conflicts = new Set(
+    status.ports
+      .filter((port) => port.state === "conflict")
+      .map((port) =>
+        forwarding.has(port.port)
+          ? `${port.host === "::1" ? "[::1]" : port.host}:${port.port}`
+          : String(port.port),
+      ),
+  );
+  const title = thread?.title ?? "the selected thread";
+  return (
+    <span>
+      {forwarding.size === 0
+        ? `Nothing in ${title} is listening.`
+        : `Forwarding ${title}: ${[...forwarding].map((port) => `localhost:${port}`).join(", ")}.`}
+      {conflicts.size > 0
+        ? ` Already in use by another app on this machine: ${[...conflicts].join(", ")}.`
+        : null}
+    </span>
+  );
+}
+
+function PortForwardingSetting() {
+  const enabled = useClientSettings((settings) => settings.portForwardingEnabled);
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsRow
+      {...searchableSetting("port-forwarding")}
+      description="Reach the selected thread's servers at their own ports on this computer, from any browser or tool. Selecting another thread switches them; refresh to see it. Follows the last focused window."
+      status={enabled ? <PortForwardingStatusNote /> : null}
+      control={
+        <Switch
+          checked={enabled}
+          onCheckedChange={(checked) => updateSettings({ portForwardingEnabled: Boolean(checked) })}
+          aria-label="Forward to this computer"
         />
       }
     />
