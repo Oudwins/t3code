@@ -232,7 +232,7 @@ editor binding on `alt+digit` still works until that tab exists.
 
 `thread.newTab` (`mod+t`) opens a new tab in the thread, and `thread.closeTab` (`mod+w`)
 closes the tab that is showing. While the right panel is open, `mod+t` adds a tab to the
-right panel instead.
+right panel instead, unless a terminal has focus.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.

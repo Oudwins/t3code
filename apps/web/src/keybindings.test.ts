@@ -1280,7 +1280,7 @@ describe("thread tab shortcuts", () => {
     );
   });
 
-  it("opens a thread tab with mod+t unless the right panel is open", () => {
+  it("opens a thread tab with mod+t unless the right panel takes it", () => {
     const pressed = event({ key: "t", metaKey: true });
     const resolve = (context: Partial<ShortcutMatchContext>) =>
       resolveShortcutCommand(pressed, DEFAULT_RESOLVED_KEYBINDINGS, {
@@ -1289,7 +1289,8 @@ describe("thread tab shortcuts", () => {
       });
     assert.strictEqual(resolve({ rightPanelOpen: false }), "thread.newTab");
     assert.strictEqual(resolve({ rightPanelOpen: true }), "rightPanel.new");
-    assert.isNull(resolve({ rightPanelOpen: false, terminalFocus: true }));
+    assert.strictEqual(resolve({ rightPanelOpen: false, terminalFocus: true }), "thread.newTab");
+    assert.strictEqual(resolve({ rightPanelOpen: true, terminalFocus: true }), "thread.newTab");
   });
 
   it("closes the showing thread tab with mod+w, and the right panel's tab otherwise", () => {
