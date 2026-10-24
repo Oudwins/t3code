@@ -25,7 +25,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   CodexAuthCallbackInput,
   CodexAuthCallbackState,
@@ -66,7 +66,7 @@ import {
   AcpRegistrySetProviderResult,
 } from "./acpRegistry.ts";
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
-import { PortSpacesStatus } from "./portSpace.ts";
+import { PortSpaceListenerList, PortSpacesStatus } from "./portSpace.ts";
 import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
@@ -575,6 +575,7 @@ export const WS_METHODS = {
   subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribePreviewEvents: "subscribePreviewEvents",
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
+  subscribePortSpaceListeners: "subscribePortSpaceListeners",
   subscribeDeviceState: "subscribeDeviceState",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
@@ -1569,6 +1570,14 @@ const WsSubscribeDiscoveredLocalServersRpc = Rpc.make(WS_METHODS.subscribeDiscov
   stream: true,
 });
 
+/** A thread's port space TCP listeners, sent again whenever the set changes. */
+const WsSubscribePortSpaceListenersRpc = Rpc.make(WS_METHODS.subscribePortSpaceListeners, {
+  payload: Schema.Struct({ threadId: ThreadId }),
+  success: PortSpaceListenerList,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsDeviceTestHostRpc = Rpc.make(WS_METHODS.deviceTestHost, {
   payload: SshDeviceHostConfig,
   success: DeviceHostSummary,
@@ -2056,6 +2065,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewReportStatusRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
+  WsSubscribePortSpaceListenersRpc,
   WsDeviceConfigureRpc,
   WsDeviceListRpc,
   WsDeviceTestHostRpc,

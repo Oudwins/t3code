@@ -103,3 +103,8 @@ export function usePortSpaceTunnelSettled(
   );
   return !portSpacesEnabled || !AsyncResult.isInitial(result);
 }
+
+/** Keeps desktop main holding a tunnel ticket for the environment while mounted; `null` holds none. */
+export function useHoldPortSpaceTunnel(environmentId: EnvironmentId | null): void {
+  useAtomValue(environmentId === null ? IDLE_TUNNEL_ATOM : portSpaceTunnelAtom(environmentId));
+}

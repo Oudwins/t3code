@@ -12,6 +12,7 @@ import type {
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import { PortSpaceListenerList } from "./portSpace.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
@@ -995,6 +996,38 @@ export const DesktopPortSpaceTunnelInputSchema = Schema.Struct({
 });
 export type DesktopPortSpaceTunnelInput = typeof DesktopPortSpaceTunnelInputSchema.Type;
 
+/**
+ * The thread a window has selected, whose port space listeners desktop main
+ * forwards to this machine's loopback while that window was the last focused.
+ * `null` selects nothing.
+ */
+export const DesktopPortForwardingInputSchema = Schema.NullOr(
+  Schema.Struct({
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    listeners: PortSpaceListenerList.fields.listeners,
+  }),
+);
+export type DesktopPortForwardingInput = typeof DesktopPortForwardingInputSchema.Type;
+
+export const DesktopForwardedPortSchema = Schema.Struct({
+  host: Schema.Literals(["127.0.0.1", "::1"]),
+  port: Schema.Int,
+  /** `conflict`: another process on this machine serves the address, so it was left alone. */
+  state: Schema.Literals(["forwarding", "conflict"]),
+});
+export type DesktopForwardedPort = typeof DesktopForwardedPortSchema.Type;
+
+/** What desktop main forwards now; `null` when nothing is selected. */
+export const DesktopPortForwardingStatusSchema = Schema.NullOr(
+  Schema.Struct({
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    ports: Schema.Array(DesktopForwardedPortSchema),
+  }),
+);
+export type DesktopPortForwardingStatus = typeof DesktopPortForwardingStatusSchema.Type;
+
 export const DesktopPreviewClearDataInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
   /** Omit to clear every profile; otherwise only this profile's partition. */
@@ -1044,6 +1077,10 @@ export interface DesktopBridge {
   getPathForFile?: (file: File) => string;
   getClientPlatform?: () => string;
   setNotificationBadge?: (badge: { count: number; image: string | null }) => Promise<void>;
+  /** Reports this window's selected thread for port forwarding; absent on older desktop builds. */
+  setPortForwarding?: (input: DesktopPortForwardingInput) => Promise<void>;
+  getPortForwardingStatus?: () => Promise<DesktopPortForwardingStatus>;
+  onPortForwardingStatus?: (listener: (status: DesktopPortForwardingStatus) => void) => () => void;
   onNotificationBadgeClear?: (listener: () => void) => () => void;
   onTrackpadScrollEnd?: (listener: () => void) => () => void;
   /**

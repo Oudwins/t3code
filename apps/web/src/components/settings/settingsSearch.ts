@@ -736,6 +736,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "port-forwarding",
+    title: "Forward to this computer",
+    to: "/settings/integrations",
+    searchTerms: [
+      "port forward localhost external browser curl database same port thread switch tunnel",
+    ],
+  },
+  {
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/integrations",

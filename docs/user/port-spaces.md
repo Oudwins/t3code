@@ -31,6 +31,21 @@ Agents have the internet, as they do outside a port space. They reach T3 Code's 
 A thread's port space is removed when you archive or delete the thread. Turning the setting off
 affects threads from their next start.
 
+### Forward to this computer
+
+With the desktop app, turn on **Settings → Integrations → Port spaces → Forward to this computer** to
+reach the selected thread's servers at their own ports on your machine, from any browser, `curl`, or
+database client. Select a thread and `http://localhost:3000` is that thread's app; select another
+and refresh to get the other thread's. Every port the thread listens on is forwarded, not only web
+servers. The settings row shows which ports are forwarded.
+
+- The last T3 Code window you focused decides the thread. Switching to your browser keeps it.
+- A port another app on your computer already uses is left alone and listed as in use. It is
+  forwarded once that app lets it go.
+- Connections open when you switch threads are closed, never moved to the other thread. Cookies and
+  storage for `localhost` are shared by every thread you forward; previews keep threads apart.
+- Only TCP ports from 1024 up, and only on your computer: nothing is exposed to your network.
+
 ## Good to know
 
 - **Previews need the desktop app.** Tabs the desktop app draws itself route a thread's `localhost`

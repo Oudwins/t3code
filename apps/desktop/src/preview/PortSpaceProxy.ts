@@ -324,7 +324,7 @@ export class PortSpaceProxyError extends Schema.TaggedError<PortSpaceProxyError>
   },
 ) {
   override get message(): string {
-    return `Failed to route the preview session for thread ${this.threadId} through its port space.`;
+    return `Failed to reach the port space of thread ${this.threadId}.`;
   }
 }
 
@@ -336,6 +336,13 @@ export class PortSpaceProxy extends Context.Service<
       readonly environmentId: string;
       readonly access: PortSpaceTunnelAccess | null;
     }) => Effect.Effect<void>;
+    /** One TCP connection to a loopback port in the thread's namespace. */
+    readonly openTunnel: (input: {
+      readonly environmentId: string;
+      readonly threadId: string;
+      readonly family: TunnelFamily;
+      readonly port: number;
+    }) => Effect.Effect<NodeStream.Duplex, PortSpaceProxyError>;
     /** Sends every request from `session` through the thread's port space. */
     readonly attach: (
       session: Session,
@@ -379,6 +386,17 @@ export const make = Effect.fn("PortSpaceProxy.make")(function* (
       Effect.sync(() => {
         if (access === null) tunnels.delete(environmentId);
         else tunnels.set(environmentId, access);
+      }),
+    openTunnel: ({ environmentId, threadId, family, port }) =>
+      Effect.tryPromise({
+        try: () => {
+          const access = tunnels.get(environmentId);
+          if (access === undefined) {
+            return Promise.reject(new Error("the environment's port tunnel is not available"));
+          }
+          return createSocket(tunnelUrl(access, threadId, family, port));
+        },
+        catch: (cause) => new PortSpaceProxyError({ environmentId, threadId, cause }),
       }),
     attach: Effect.fn("PortSpaceProxy.attach")(function* (session, { environmentId, threadId }) {
       yield* Effect.tryPromise({
