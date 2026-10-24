@@ -39,6 +39,12 @@ export function createPreviewEnvironmentAtoms<R, E>(
       // unmounted projects stop contributing probe candidates on the server.
       idleTtlMs: 0,
     }),
+    portSpaceListeners: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:preview:port-space-listeners",
+      tag: WS_METHODS.subscribePortSpaceListeners,
+      // Each one polls the thread's namespace on the server; stop when unused.
+      idleTtlMs: 0,
+    }),
     open: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:open",
       tag: WS_METHODS.previewOpen,

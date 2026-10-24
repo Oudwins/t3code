@@ -88,6 +88,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getClientPlatform: () => clientPlatform,
   setNotificationBadge: (badge) =>
     ipcRenderer.invoke(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, badge),
+  setPortForwarding: (input) => ipcRenderer.invoke(IpcChannels.SET_PORT_FORWARDING_CHANNEL, input),
+  getPortForwardingStatus: () => ipcRenderer.invoke(IpcChannels.GET_PORT_FORWARDING_STATUS_CHANNEL),
+  onPortForwardingStatus: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: unknown) =>
+      listener(status as Parameters<typeof listener>[0]);
+    ipcRenderer.on(IpcChannels.PORT_FORWARDING_STATUS_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(IpcChannels.PORT_FORWARDING_STATUS_CHANNEL, handler);
+  },
   onNotificationBadgeClear: (listener) => {
     const handler = () => listener();
     ipcRenderer.on(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, handler);
