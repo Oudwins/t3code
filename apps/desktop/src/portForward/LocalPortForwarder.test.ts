@@ -102,15 +102,10 @@ describe("activeSelection", () => {
       LocalPortForwarder.activeSelection(selections, [2, 1]),
       "thread in window 1",
     );
-    // Focusing a window without a selection (a preview popout) changes nothing.
+    // Focusing a window without a selection changes nothing.
     assert.strictEqual(
       LocalPortForwarder.activeSelection(selections, [2, 1, 3]),
       "thread in window 1",
-    );
-    // A window that selected nothing wins too, so nothing is forwarded.
-    assert.strictEqual(
-      LocalPortForwarder.activeSelection(new Map([...selections, [3, null]]), [2, 1, 3]),
-      null,
     );
     assert.strictEqual(LocalPortForwarder.activeSelection(new Map(), [1]), null);
   });
@@ -231,10 +226,12 @@ describe("LocalPortForwarder", () => {
       environmentId: "env-1",
       access: { url: "wss://env.example/api/port-space/tunnel", ticket: "ticket-1" },
     });
-    return yield* LocalPortForwarder.make.pipe(
+    const service = yield* LocalPortForwarder.make.pipe(
       Effect.provideService(PortSpaceProxy.PortSpaceProxy, proxy),
       Scope.provide(scope),
     );
+    yield* service.setEnabled(true);
+    return service;
   });
 
   const thread = (threadId: string, port: number) => ({
@@ -261,7 +258,8 @@ describe("LocalPortForwarder", () => {
       assert.strictEqual(yield* reached, "thread-b");
       assert.strictEqual((yield* SubscriptionRef.get(service.status))?.threadId, "thread-b");
 
-      // A window with no selection, such as a preview popout, changes nothing.
+      // A window that has not selected a thread yet changes nothing.
+      yield* service.set(3, null);
       yield* service.focus(3);
       assert.strictEqual(yield* reached, "thread-b");
 
@@ -271,6 +269,28 @@ describe("LocalPortForwarder", () => {
       yield* service.set(1, null);
       assert.strictEqual(yield* reached, "refused");
       assert.isNull(yield* SubscriptionRef.get(service.status));
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect("follows the saved setting whichever window last reported", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const service = yield* makeService(scope);
+      const port = yield* Effect.promise(freePort);
+      const reached = Effect.promise(() => read(port));
+
+      yield* service.set(1, thread("thread-a", port));
+      yield* service.setEnabled(false);
+      assert.strictEqual(yield* reached, "refused");
+      assert.isNull(yield* SubscriptionRef.get(service.status));
+
+      // A window still reporting its selection does not turn it back on.
+      yield* service.set(1, thread("thread-a", port));
+      assert.strictEqual(yield* reached, "refused");
+
+      yield* service.setEnabled(true);
+      assert.strictEqual(yield* reached, "thread-a");
       yield* Scope.close(scope, Exit.void);
     }),
   );

@@ -254,6 +254,8 @@ export const startSocksServer = (connect: SocksConnect): Promise<SocksServer> =>
 /** Resolves to the open tunnel as a byte stream, or rejects if it cannot be opened. */
 export type TunnelSocketFactory = (url: string) => Promise<NodeStream.Duplex>;
 
+const TUNNEL_HANDSHAKE_TIMEOUT_MS = 10_000;
+
 /**
  * One TCP connection in the thread's namespace, carried by one WebSocket. The
  * `ws` stream pauses the socket while the reader is behind and holds each write
@@ -262,7 +264,11 @@ export type TunnelSocketFactory = (url: string) => Promise<NodeStream.Duplex>;
  */
 export const webSocketFactory: TunnelSocketFactory = (url) =>
   new Promise((resolve, reject) => {
-    const socket = new NodeWS.WebSocket(url, { perMessageDeflate: false });
+    // Bounds a connection whose upgrade never answers; the accepted client cannot cancel it.
+    const socket = new NodeWS.WebSocket(url, {
+      perMessageDeflate: false,
+      handshakeTimeout: TUNNEL_HANDSHAKE_TIMEOUT_MS,
+    });
     const failed = () => reject(new Error("port tunnel could not be opened"));
     socket.once("error", failed);
     socket.once("close", failed);

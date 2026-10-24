@@ -256,8 +256,8 @@ export const activeSelection = <A>(
   focusOrder: ReadonlyArray<number>,
 ): A | null => {
   for (let index = focusOrder.length - 1; index >= 0; index -= 1) {
-    const windowId = focusOrder[index]!;
-    if (selections.has(windowId)) return selections.get(windowId)!;
+    const selection = selections.get(focusOrder[index]!);
+    if (selection !== undefined) return selection;
   }
   return null;
 };
@@ -270,6 +270,11 @@ export class LocalPortForwarder extends Context.Service<
      * use the credential `PortSpaceProxy` holds for the environment.
      */
     readonly set: (windowId: number, input: LocalPortForwardingInput | null) => Effect.Effect<void>;
+    /**
+     * The saved setting. Each window reads its own copy of settings, so a
+     * window that has not seen a change must not keep forwarding.
+     */
+    readonly setEnabled: (enabled: boolean) => Effect.Effect<void>;
     readonly focus: (windowId: number) => Effect.Effect<void>;
     /** Drops a closed window's selection. */
     readonly forget: (windowId: number) => Effect.Effect<void>;
@@ -284,13 +289,14 @@ export const make = Effect.gen(function* LocalPortForwarderMake() {
   const forwarder = makePortForwarder();
   yield* Effect.addFinalizer(() => Effect.promise(forwarder.close));
 
-  const selections = new Map<number, LocalPortForwardingInput | null>();
+  const selections = new Map<number, LocalPortForwardingInput>();
   /** Window ids, least recently focused first. */
   let focusOrder: ReadonlyArray<number> = [];
+  let enabled = false;
   const status = yield* SubscriptionRef.make<PortForwardingStatus | null>(null);
 
   const reconcile = Effect.gen(function* () {
-    const input = activeSelection(selections, focusOrder);
+    const input = enabled ? activeSelection(selections, focusOrder) : null;
     const ports = yield* Effect.promise(() =>
       forwarder.apply(
         input === null
@@ -324,9 +330,16 @@ export const make = Effect.gen(function* LocalPortForwarderMake() {
   return LocalPortForwarder.of({
     set: (windowId, input) =>
       Effect.suspend(() => {
-        selections.set(windowId, input);
+        if (input === null) selections.delete(windowId);
+        else selections.set(windowId, input);
         // A window that has not been focused since it started ranks last.
         if (!focusOrder.includes(windowId)) focusOrder = [windowId, ...focusOrder];
+        return reconcile;
+      }),
+    setEnabled: (next) =>
+      Effect.suspend(() => {
+        if (enabled === next) return Effect.void;
+        enabled = next;
         return reconcile;
       }),
     focus: (windowId) =>
