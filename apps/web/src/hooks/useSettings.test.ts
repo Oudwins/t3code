@@ -220,7 +220,7 @@ describe("settings saved in another window", () => {
     });
   });
 
-  it("do not undo an edit this window has not saved yet", async () => {
+  it("are read back once this window's own save finishes", async () => {
     const save = await otherWindowSaves();
     let finishWrite!: () => void;
     persistenceMocks.setClientSettings.mockReturnValueOnce(
@@ -229,11 +229,33 @@ describe("settings saved in another window", () => {
       }),
     );
     const write = persistClientSettingsPatch({ snapShotFlash: false });
-    save({ ...DEFAULT_CLIENT_SETTINGS, wordWrap: false });
+    const otherWindow = { ...DEFAULT_CLIENT_SETTINGS, wordWrap: false };
+    save(otherWindow);
+    // Unknown yet which save landed last, so this window's edit stays.
+    expect(getClientSettings()).toEqual({ ...DEFAULT_CLIENT_SETTINGS, snapShotFlash: false });
+
+    persistenceMocks.getClientSettings.mockResolvedValueOnce(otherWindow);
     finishWrite();
     await write;
 
-    expect(getClientSettings()).toEqual({ ...DEFAULT_CLIENT_SETTINGS, snapShotFlash: false });
+    expect(getClientSettings()).toEqual(otherWindow);
+  });
+
+  it("win over a read that was already in flight", async () => {
+    let finishRead!: (settings: ClientSettings) => void;
+    persistenceMocks.getClientSettings.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishRead = resolve;
+      }),
+    );
+    const hydrated = ensureClientSettingsHydrated();
+    const save = persistenceMocks.onClientSettingsChanged.mock.calls[0]?.[0];
+    const otherWindow = { ...DEFAULT_CLIENT_SETTINGS, wordWrap: false };
+    save?.(otherWindow);
+    finishRead(DEFAULT_CLIENT_SETTINGS);
+    await hydrated;
+
+    expect(getClientSettings()).toEqual(otherWindow);
   });
 });
 

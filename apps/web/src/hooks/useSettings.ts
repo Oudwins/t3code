@@ -76,6 +76,10 @@ let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
 let deferredClientSettingsPatchCount = 0;
 let pendingClientSettingsWrites = 0;
 let followingOtherWindows = false;
+/** Counts saves from other windows, so an older read cannot replace a newer one. */
+let otherWindowSaves = 0;
+let otherWindowSaveDuringHydration: ClientSettings | null = null;
+let missedOtherWindowSave = false;
 
 function emitClientSettingsChange() {
   for (const listener of clientSettingsListeners) {
@@ -146,14 +150,17 @@ async function hydrateClientSettings(): Promise<void> {
   );
   const nextHydration = (async () => {
     try {
+      // Before reading, so a save that lands while the read is in flight is not missed.
+      followClientSettingsFromOtherWindows();
       const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
       if (hydrationGeneration !== clientSettingsHydrationGeneration) {
         return;
       }
-      if (persistedSettings) {
-        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+      const settings = otherWindowSaveDuringHydration ?? persistedSettings;
+      otherWindowSaveDuringHydration = null;
+      if (settings) {
+        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...settings });
       }
-      followClientSettingsFromOtherWindows();
       setClientSettingsHydrationStatus("ready");
     } catch (error) {
       if (hydrationGeneration === clientSettingsHydrationGeneration) {
@@ -185,10 +192,31 @@ function followClientSettingsFromOtherWindows(): void {
   if (followingOtherWindows) return;
   followingOtherWindows = true;
   ensureLocalApi().persistence.onClientSettingsChanged?.((settings) => {
-    // A write still queued here is newer: it is saved last and reaches the other windows too.
-    if (pendingClientSettingsWrites > 0) return;
-    replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...settings });
+    otherWindowSaves += 1;
+    if (clientSettingsHydrationStatus !== "ready") {
+      otherWindowSaveDuringHydration = settings;
+    } else if (pendingClientSettingsWrites > 0) {
+      // Whether that save or this window's landed last is unknown until ours finish.
+      missedOtherWindowSave = true;
+    } else {
+      replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...settings });
+    }
   });
+}
+
+async function catchUpWithOtherWindows(): Promise<void> {
+  missedOtherWindowSave = false;
+  const savesBefore = otherWindowSaves;
+  const saved = await ensureLocalApi()
+    .persistence.getClientSettings()
+    .catch(() => null);
+  if (pendingClientSettingsWrites > 0) {
+    missedOtherWindowSave = true;
+    return;
+  }
+  if (saved !== null && otherWindowSaves === savesBefore) {
+    replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...saved });
+  }
 }
 
 const defaultClientSettingsPersistence = (settings: ClientSettings): Promise<void> =>
@@ -198,6 +226,10 @@ function enqueueClientSettingsPersistence<A>(work: () => Promise<A>): Promise<A>
   pendingClientSettingsWrites += 1;
   const result = clientSettingsPersistenceQueue.then(work).finally(() => {
     pendingClientSettingsWrites -= 1;
+    // Held in the queue, so the next write waits for what the read finds.
+    return pendingClientSettingsWrites === 0 && missedOtherWindowSave
+      ? catchUpWithOtherWindows()
+      : undefined;
   });
   clientSettingsPersistenceQueue = result.then(
     () => undefined,
@@ -773,6 +805,9 @@ export function __resetClientSettingsPersistenceForTests(): void {
   deferredClientSettingsPatchCount = 0;
   pendingClientSettingsWrites = 0;
   followingOtherWindows = false;
+  otherWindowSaves = 0;
+  otherWindowSaveDuringHydration = null;
+  missedOtherWindowSave = false;
   clientSettingsListeners.clear();
   clientSettingsHydrationListeners.clear();
 }
