@@ -87,7 +87,7 @@ const endpointKey = (endpoint: { readonly host: string; readonly port: number })
  * cannot tell: macOS lets `127.0.0.1:3000` be bound over another process's
  * `0.0.0.0:3000` and would silently take its loopback traffic.
  */
-export const isAddressServed = (host: string, port: number): Promise<boolean> =>
+const isAddressServed = (host: string, port: number): Promise<boolean> =>
   new Promise((resolve) => {
     const socket = NodeNet.connect({ host, port });
     const settle = (served: boolean) => {

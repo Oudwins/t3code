@@ -41,6 +41,13 @@ const freePort = async (): Promise<number> => {
   return port;
 };
 
+/** Another program on this machine. The conflict probe hangs up at once, which Linux reports as a reset. */
+const otherApp = () =>
+  NodeNet.createServer((socket) => {
+    socket.on("error", () => socket.destroy());
+    socket.end("other");
+  });
+
 const read = (port: number): Promise<string> =>
   new Promise((resolve) => {
     let text = "";
@@ -179,7 +186,7 @@ describe("makePortForwarder", () => {
       const port = await freePort();
       // A wildcard listener does not stop a loopback bind on macOS, so this is
       // the case binding alone would miss.
-      const other = NodeNet.createServer((socket) => socket.end("other"));
+      const other = otherApp();
       other.listen({ host: "0.0.0.0", port });
       await NodeEvents.EventEmitter.once(other, "listening");
       const forwarder = LocalPortForwarder.makePortForwarder();
@@ -273,7 +280,7 @@ describe("LocalPortForwarder", () => {
       const scope = yield* Scope.make();
       const service = yield* makeService(scope);
       const port = yield* Effect.promise(freePort);
-      const other = NodeNet.createServer((socket) => socket.end("other"));
+      const other = otherApp();
       yield* Effect.promise(async () => {
         other.listen({ host: "127.0.0.1", port });
         await NodeEvents.EventEmitter.once(other, "listening");
