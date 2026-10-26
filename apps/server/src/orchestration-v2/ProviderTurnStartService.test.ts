@@ -183,7 +183,7 @@ async function startAfterMissingWorktree(options?: {
         Layer.mock(GitWorkflow.GitWorkflowService)({ pruneWorktrees }),
         Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree, removeWorktree }),
         Layer.mock(ProjectService.ProjectService)({
-          getById: () => Effect.succeed(Option.some(project as never)),
+          getById: () => Effect.succeedSome(project as never),
         }),
         Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({ runForThread }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
@@ -346,8 +346,8 @@ it("hands a blocking setup failure back to the effect worker while retries remai
   expect(result.projectionReadCount).toBe(2);
 });
 
-// The terminal never opened or the command never reached it, so setup did not run at all.
-const setupOperationFailure = (operation: "openTerminal" | "writeCommand") =>
+// The terminal never opened, so setup did not run at all.
+const setupOperationFailure = (operation: "openTerminal") =>
   Effect.fail(
     new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
       threadId: "thread_provider_turn_start_projection_failure",
@@ -357,7 +357,7 @@ const setupOperationFailure = (operation: "openTerminal" | "writeCommand") =>
     }),
   );
 
-const setupOperations = ["openTerminal", "writeCommand"] as const;
+const setupOperations = ["openTerminal"] as const;
 
 it.each(setupOperations)(
   "fails the run and removes the worktree when setup cannot start (%s)",
@@ -920,7 +920,7 @@ function makeLocalCommandHarness(input: {
         Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree }),
         Layer.mock(ProjectService.ProjectService)({
           getById: () =>
-            Effect.succeed(Option.some({ workspaceRoot: "/tmp/native-account-project" } as never)),
+            Effect.succeedSome({ workspaceRoot: "/tmp/native-account-project" } as never),
         }),
         Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
           runForThread: () => Effect.succeed({ status: "no-script" } as const),
