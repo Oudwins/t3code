@@ -388,13 +388,17 @@ export const make = Effect.fn("PortSpaceProxy.make")(function* (
   };
 
   return PortSpaceProxy.of({
-    setTunnel: ({ environmentId, access }) =>
-      Effect.sync(() => {
-        if (access === null) tunnels.delete(environmentId);
-        else tunnels.set(environmentId, access);
-      }),
-    openTunnel: ({ environmentId, threadId, family, port }) =>
-      Effect.tryPromise({
+    setTunnel: Effect.fn("PortSpaceProxy.setTunnel")(function* ({ environmentId, access }) {
+      if (access === null) tunnels.delete(environmentId);
+      else tunnels.set(environmentId, access);
+    }),
+    openTunnel: Effect.fn("PortSpaceProxy.openTunnel")(function* ({
+      environmentId,
+      threadId,
+      family,
+      port,
+    }) {
+      return yield* Effect.tryPromise({
         try: () => {
           const access = tunnels.get(environmentId);
           if (access === undefined) {
@@ -403,7 +407,8 @@ export const make = Effect.fn("PortSpaceProxy.make")(function* (
           return createSocket(tunnelUrl(access, threadId, family, port));
         },
         catch: (cause) => new PortSpaceProxyError({ environmentId, threadId, cause }),
-      }),
+      });
+    }),
     attach: Effect.fn("PortSpaceProxy.attach")(function* (session, { environmentId, threadId }) {
       yield* Effect.tryPromise({
         try: async () => {

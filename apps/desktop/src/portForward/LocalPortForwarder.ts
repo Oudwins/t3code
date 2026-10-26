@@ -326,31 +326,27 @@ export const make = Effect.gen(function* LocalPortForwarderMake() {
   );
 
   return LocalPortForwarder.of({
-    set: (windowId, input) =>
-      Effect.suspend(() => {
-        if (input === null) selections.delete(windowId);
-        else selections.set(windowId, input);
-        // A window that has not been focused since it started ranks last.
-        if (!focusOrder.includes(windowId)) focusOrder = [windowId, ...focusOrder];
-        return reconcile;
-      }),
-    setEnabled: (next) =>
-      Effect.suspend(() => {
-        if (enabled === next) return Effect.void;
-        enabled = next;
-        return reconcile;
-      }),
-    focus: (windowId) =>
-      Effect.suspend(() => {
-        focusOrder = [...focusOrder.filter((id) => id !== windowId), windowId];
-        return selections.has(windowId) ? reconcile : Effect.void;
-      }),
-    forget: (windowId) =>
-      Effect.suspend(() => {
-        selections.delete(windowId);
-        focusOrder = focusOrder.filter((id) => id !== windowId);
-        return reconcile;
-      }),
+    set: Effect.fn("LocalPortForwarder.set")(function* (windowId, input) {
+      if (input === null) selections.delete(windowId);
+      else selections.set(windowId, input);
+      // A window that has not been focused since it started ranks last.
+      if (!focusOrder.includes(windowId)) focusOrder = [windowId, ...focusOrder];
+      yield* reconcile;
+    }),
+    setEnabled: Effect.fn("LocalPortForwarder.setEnabled")(function* (next) {
+      if (enabled === next) return;
+      enabled = next;
+      yield* reconcile;
+    }),
+    focus: Effect.fn("LocalPortForwarder.focus")(function* (windowId) {
+      focusOrder = [...focusOrder.filter((id) => id !== windowId), windowId];
+      if (selections.has(windowId)) yield* reconcile;
+    }),
+    forget: Effect.fn("LocalPortForwarder.forget")(function* (windowId) {
+      selections.delete(windowId);
+      focusOrder = focusOrder.filter((id) => id !== windowId);
+      yield* reconcile;
+    }),
     status,
   });
 });
