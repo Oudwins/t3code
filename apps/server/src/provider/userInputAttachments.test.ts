@@ -330,7 +330,13 @@ describe("question answer paths", () => {
                 Layer.mock(TerminalManager.TerminalManager)({}),
                 Layer.mock(PreviewManager.PreviewManager)({}),
                 Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
-                Layer.mock(PortSpaces.PortSpaces)({}),
+                Layer.mock(PortSpaces.PortSpaces)({
+                  wrapSpawn: (_threadId, input) => ({
+                    command: input.command,
+                    args: input.args,
+                    env: {},
+                  }),
+                }),
                 Layer.mock(PortGateway.PortGateway)({}),
               ),
             ),

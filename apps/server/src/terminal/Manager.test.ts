@@ -976,7 +976,7 @@ it.layer(
         const { manager, ptyAdapter } = yield* createManager(5, {
           shellResolver: () => "/bin/zsh -l",
           env: { PATH: "/usr/bin", HOME: "/home/test" },
-          wrapSpawn: () => Effect.void,
+          wrapSpawn: () => Effect.undefined,
         });
 
         yield* manager.open(openInput());
@@ -1058,7 +1058,7 @@ it.layer(
         );
         const { manager } = yield* createManager(5, {
           processKillGraceMs: 10,
-          wrapSpawn: () => Effect.void,
+          wrapSpawn: () => Effect.undefined,
           processTable: Effect.succeed([
             { pid: 9000, ppid: 1, name: "zsh" },
             { pid: 100, ppid: 9000, name: "node" },

@@ -5,6 +5,7 @@
  * loopback targets exist; half-close is not carried, so either side closing ends both.
  */
 import { AuthTerminalOperateScope, PORT_SPACE_TUNNEL_PATH, ThreadId } from "@t3tools/contracts";
+import type * as NodeNet from "node:net";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -41,7 +42,7 @@ const FAILURE_STATUS = { "no-port-space": 404, refused: 502, unavailable: 503 } 
 const authenticate = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-  const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
+  const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "media").pipe(
     Effect.catch((error) =>
       Effect.gen(function* () {
         if (EnvironmentAuth.isServerAuthCredentialError(error)) {
@@ -87,8 +88,8 @@ const handler = Effect.gen(function* () {
           Effect.succeed(
             HttpServerResponse.text(error.message, { status: FAILURE_STATUS[error.reason] }),
           ),
-        onSuccess: (tcp) =>
-          Effect.gen(function* () {
+        onSuccess: Effect.fn("PortTunnelRoute.pipe")(
+          function* (tcp: NodeNet.Socket) {
             const client = yield* request.upgrade;
             const upstream = yield* NodeSocket.fromDuplex(Effect.succeed(tcp));
             const writeToClient = yield* client.writer;
@@ -98,7 +99,9 @@ const handler = Effect.gen(function* () {
               pump(upstream, writeToClient),
               pump(client, writeToUpstream),
             );
-          }).pipe(Effect.ignoreCause, Effect.as(HttpServerResponse.empty())),
+          },
+          (tunnel) => tunnel.pipe(Effect.ignoreCause, Effect.as(HttpServerResponse.empty())),
+        ),
       }),
     ),
   );

@@ -166,10 +166,9 @@ const httpServer = (response: string) =>
       socket.on("error", () => undefined);
       socket.once("data", () => socket.end(response));
     }).pipe(
-      Effect.flatMap((server) =>
-        server === null
-          ? Effect.die(new Error("could not open a test server"))
-          : Effect.succeed(server),
+      Effect.filterOrElse(
+        (server) => server !== null,
+        () => Effect.die(new Error("could not open a test server")),
       ),
     ),
     closeServer,
