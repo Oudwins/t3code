@@ -42,11 +42,9 @@ export function isThreadWorking(thread: WorkingThreadInput): boolean {
 
 type WaitingThreadInput = WorkingThreadInput & Pick<EnvironmentThreadShell, "pullRequests">;
 
-/** Threads that have stopped but will come back without the user: background
-    work that wakes the agent, or checks still running on a linked pull
-    request. Anything the user has to act on stays in the inbox. Clients that
-    only have a Working section keep folding the background-work case there
-    through `isThreadWorking`. */
+/** Threads that stopped but will come back without the user: background work that wakes the
+    agent, or checks still running on a linked pull request. Clients with only a Working section
+    fold the background-work case there through `isThreadWorking`. */
 export function isThreadWaiting(thread: WaitingThreadInput): boolean {
   if (threadRuntimeIsActive(thread.runtime) || needsUser(thread)) return false;
   if (thread.runtime?.status === "idle") return true;
@@ -139,10 +137,9 @@ type ThreadKeyInput = Pick<EnvironmentThreadShell, "environmentId" | "id">;
 export const WORKING_EXIT_GRACE_MS = 2_000;
 
 /**
- * Tracks threads off the inbox: the Working section, or whichever shelves
- * `isOffInbox` names, and when each returned. Keep one at module scope so placement
- * survives routes that unmount the list. Call `observe` when the shells or the
- * snapshot version change, or with null while the beta is off. Its result stays
+ * Tracks threads off the inbox (the Working section or `isOffInbox` shelves) and when each
+ * returned. Keep one at module scope so placement survives list unmounts. Call `observe` when
+ * the shells or snapshot version change, or with null while the beta is off; its result stays
  * fixed, so a list built from it can be cached.
  */
 export function createInboxReturnTracker<T extends TrackedInboxThread = TrackedInboxThread>(

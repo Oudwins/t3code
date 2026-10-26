@@ -67,11 +67,9 @@ export interface ProjectSetupScriptRunnerInput {
   readonly observeCompletion?: {
     readonly onOutputLine?: (line: string) => Effect.Effect<void>;
     /**
-     * For callers that discard the checkout when setup fails. Closes the
-     * terminal, keeping its output, when a blocking script fails or is
-     * interrupted, or when the command cannot be written. Otherwise the shell
-     * stays open in the deleted directory, and a retry in a recreated checkout
-     * at the same path would reuse it.
+     * For callers that discard the checkout when setup fails. Closes the terminal, keeping its
+     * output, when a blocking script fails, is interrupted, or cannot be written; otherwise the
+     * shell stays open in the deleted directory and a retry at the same path would reuse it.
      */
     readonly releaseOnFailure?: boolean;
   };

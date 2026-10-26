@@ -58,11 +58,9 @@ export function shouldNavigateAfterThreadPark(input: {
 }
 
 /**
- * Where the reader lands after parking (settling or snoozing) the thread they
- * have open: the latest thread still in the inbox, preferring the parked
- * thread's project over the rest. Working and waiting threads only leave the
- * inbox when the Working shelf folds them away, so they are skipped only then.
- * Null means open a fresh draft in the parked thread's project.
+ * Where the reader lands after parking the open thread: the latest inbox thread, preferring the
+ * parked thread's project. Working and waiting threads are skipped only when the Working shelf
+ * folds them away. Null means open a fresh draft in the parked thread's project.
  */
 export function resolveThreadAfterPark(input: {
   readonly threads: readonly SidebarThreadSummary[];
@@ -863,11 +861,9 @@ export function resolveAdjacentThreadId<T>(input: {
 }
 
 /**
- * The nearest other thread in `direction` that passes `needsAttention`,
- * wrapping at either end. Unlike plain traversal the current thread need not
- * be in the list: reading a thread clears what flagged it, so the one you just
- * opened is usually no longer a candidate itself. From an unknown position the
- * walk starts at the matching edge.
+ * The nearest other thread in `direction` that passes `needsAttention`, wrapping at either end.
+ * The current thread need not be in the list, since reading it clears what flagged it; from an
+ * unknown position the walk starts at the matching edge.
  */
 export function resolveAdjacentAttentionThreadId<T>(input: {
   threadIds: readonly T[];
@@ -1028,11 +1024,9 @@ export function isThreadWokeUnseen(input: {
   return Number.isNaN(lastVisitedMs) || lastVisitedMs < wokeAtMs;
 }
 
-/** Whether the next move is the user's: anything that has stopped working,
-    whether or not they have already read it. Threads still working, or waiting
-    on background work, never qualify. Unread state is deliberately ignored: the
-    thread you were watching when it finished is read, and is still the one to
-    jump back to. */
+/** Whether the next move is the user's: anything that stopped working, read or not. Threads
+    working or waiting on background work never qualify. Unread state is ignored on purpose:
+    the thread you watched finish is read, yet still the one to jump back to. */
 export function threadNeedsAttention(thread: SidebarThreadStatusInput): boolean {
   const status = resolveSidebarThreadStatus(thread);
   return status !== "working" && status !== "waiting";

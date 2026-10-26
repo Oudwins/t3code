@@ -1,9 +1,6 @@
 /**
- * A thread's port space TCP listeners as a stream, for clients that forward
- * them to their own machine. Unlike port discovery it lists every listener the
- * tunnel can reach, not only web servers, so databases and raw TCP services
- * come along too.
- *
+ * A thread's port space TCP listeners as a stream, for clients that forward them locally.
+ * Unlike port discovery it lists every listener the tunnel can reach, not only web servers.
  * @module PortSpaceListeners
  */
 import type { PortSpaceListenerList, ThreadId } from "@t3tools/contracts";

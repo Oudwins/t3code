@@ -331,11 +331,10 @@ export function useThreadActions() {
     return resolveThreadRouteRef(currentRouteParams);
   };
 
-  // Parking the thread you're looking at (settle or snooze) moves you on to the
-  // project's latest thread that still wants you, or a fresh draft when none
-  // does. Plan BEFORE the command runs and call the returned function once it
-  // succeeds; it only navigates while the parked thread is still open, so a
-  // navigation made during the await wins. Background parks get null.
+  // Parking the open thread moves you to the project's latest thread that still wants you, or
+  // a fresh draft. Plan BEFORE the command runs and call the result once it succeeds; it only
+  // navigates while the parked thread is still open, so a navigation made during the await
+  // wins. Background parks get null.
   const planNavigationAfterPark = (
     target: ScopedThreadRef,
     action: "settle" | "snooze",

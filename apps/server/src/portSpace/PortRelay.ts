@@ -4,17 +4,10 @@
 import * as NodeNet from "node:net";
 
 /**
- * `t3 portspace-relay <socket>` - runs inside a thread's namespace and hands
- * the host a way to reach its loopback.
- *
- * A path-based unix socket is visible from every network namespace, so the
- * host can dial it while the TCP port it wants lives only in the namespace.
- * Each connection starts with one line, `<4|6|L> <port>`, naming the loopback
- * port to connect to (`L` is `localhost`, so a browser's own resolution rules
- * apply). The relay answers with one status byte, then every byte is the
- * proxied stream. The socket's directory is owned by the T3 user and not
- * readable by anyone else, which is what limits who can ask this process to
- * connect somewhere.
+ * `t3 portspace-relay <socket>` runs inside a namespace; a path-based unix socket is visible from
+ * every namespace, so the host can dial it. Each connection sends `<4|6|L> <port>` (`L` is
+ * `localhost`), gets one status byte, then the proxied stream. Only the T3 user can read the
+ * socket's directory, which is what limits who can ask this process to connect somewhere.
  */
 
 export const PORT_RELAY_COMMAND = "portspace-relay";

@@ -1,13 +1,7 @@
 /**
- * PortSpaces - per-thread network namespaces, so every thread can bind the
- * same ports (several dev servers on :3000) without colliding.
- *
- * Linux only. The namespaces are made and entered by a root-owned helper
- * (`PortSpaceHelper.ts`) that `t3 portspace setup` installs. A port space has
- * its own loopback and reaches the internet through pasta. The host's
- * loopback (T3's own server, a local Postgres) is only reachable at
- * `hostAddress`, so spawning into one is opt-in.
- *
+ * Per-thread Linux network namespaces, so threads can bind the same ports without colliding.
+ * Made and entered by a root-owned helper (`PortSpaceHelper.ts`); internet goes through pasta.
+ * Host loopback (T3's server, a local Postgres) is only at `hostAddress`, so spawning is opt-in.
  * @module PortSpaces
  */
 

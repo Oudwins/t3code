@@ -1,17 +1,8 @@
 /**
- * Authenticated WebSocket tunnel into a thread's port space.
- *
- * One WebSocket carries one TCP connection to a loopback port inside the
- * thread's namespace. The client (the desktop app's per-thread proxy) opens one
- * per connection the browser makes, so `localhost:3000` means the thread's own
- * :3000 for every request the session issues, including absolute API URLs and
- * WebSockets. Like every `/api/*` route it rides the connection the client
- * already has, so local, Tailscale, SSH-forwarded, and relayed environments
- * need nothing more than T3's own transport.
- *
- * The target is dialed before the upgrade so a refused port is an HTTP error.
- * Only loopback targets exist: the route cannot be used to reach the host's
- * network. Half-close is not carried; either side closing ends both.
+ * Authenticated WebSocket tunnel: one WebSocket carries one TCP connection to a loopback port in
+ * the thread's namespace, riding the client's existing `/api/*` transport so every connection
+ * mode works. The target is dialed before the upgrade so a refused port is an HTTP error. Only
+ * loopback targets exist; half-close is not carried, so either side closing ends both.
  */
 import { AuthTerminalOperateScope, PORT_SPACE_TUNNEL_PATH, ThreadId } from "@t3tools/contracts";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";

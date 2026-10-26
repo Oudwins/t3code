@@ -209,11 +209,10 @@ function matchesCommandShortcut(
   return resolveShortcutCommand(event, keybindings, options) === command;
 }
 
-// A chord is two keydowns, but every window-level listener resolves each
-// event on its own with its own `when` context. The leader press records the
-// pending chord here. The first listener to see the next key snapshots it
-// onto the event and clears the live state, so the remaining listeners still
-// resolve that same key as the chord's second step.
+// Every window-level listener resolves a keydown on its own `when` context. The leader press
+// records the pending chord here; the first listener to see the next key snapshots it onto the
+// event and clears the live state, so the remaining listeners still resolve that same key as
+// the chord's second step.
 const CHORD_TIMEOUT_MS = 1500;
 
 interface PendingChord {

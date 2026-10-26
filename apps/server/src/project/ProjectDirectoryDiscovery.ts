@@ -1,14 +1,7 @@
 /**
- * ProjectDirectoryDiscovery - makes projects out of the folders the server is
- * pointed at, so a code directory needs no clicking through "Add project":
- *
- * - `CODE_PROJECTS_PARENT_DIRS`: every Git repository directly inside each
- *   listed folder becomes a project, including ones cloned later;
- * - `CODE_PROJECTS`: each listed folder becomes a project.
- *
- * A folder gets a project once per server run. Deleting one keeps it deleted
- * until the server restarts and finds the folder again.
- *
+ * Makes projects from `CODE_PROJECTS_PARENT_DIRS` (every Git repository directly inside, including
+ * later clones) and `CODE_PROJECTS` (each listed folder). A folder gets a project once per server
+ * run, so a deleted one stays deleted until the server restarts and finds it again.
  * @module ProjectDirectoryDiscovery
  */
 import { CommandId, ProjectId } from "@t3tools/contracts";

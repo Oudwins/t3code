@@ -46,7 +46,7 @@ export interface ThreadPortSpaceShape {
  */
 export const ThreadPortSpace = Context.Reference<ThreadPortSpaceShape>(
   "@t3tools/shared/ThreadPortSpace",
-  { defaultValue: () => ({ resolve: () => Effect.succeed(undefined) }) },
+  { defaultValue: () => ({ resolve: () => Effect.undefined }) },
 );
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);

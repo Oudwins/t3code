@@ -1,10 +1,7 @@
 /**
- * ThreadPortSpace - whether a thread's processes run in a port space.
- *
- * Opt-in per environment (`enablePortSpaces`). When it is on but the namespace
- * cannot be made, callers spawn in the host network instead of failing: a
- * terminal that does not open is worse than one that shares ports.
- *
+ * Whether a thread's processes run in a port space (opt-in via `enablePortSpaces`). When the
+ * namespace cannot be made, callers spawn in the host network instead of failing: a terminal
+ * that does not open is worse than one that shares ports.
  * @module ThreadPortSpace
  */
 

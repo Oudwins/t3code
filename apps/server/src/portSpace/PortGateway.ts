@@ -1,16 +1,7 @@
 /**
- * PortGateway - dials loopback ports inside a thread's port space.
- *
- * Nothing outside a namespace can reach what runs in it, so every consumer
- * that must (the preview's authenticated tunnel, the port scanner's web probe)
- * goes through `dial`. Each namespace gets one relay process
- * (`PortRelay.ts`), started on first use, that this service reaches over a
- * unix socket. There is no host listener, so nothing a thread runs is
- * reachable except through a call that can be authorized.
- *
- * `dial` never creates a namespace and never falls back to the host network:
- * a thread without a port space has nothing to dial.
- *
+ * Dials loopback ports in a thread's port space through one lazily started relay per namespace
+ * (`PortRelay.ts`) over a unix socket. No host listener exists, so every reach is authorizable.
+ * `dial` never creates a namespace or falls back to the host network.
  * @module PortGateway
  */
 // Dialing is raw sockets and unix paths; there is no Effect abstraction for them.

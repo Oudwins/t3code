@@ -1,17 +1,8 @@
 /**
- * The privileged half of port spaces: a root-owned shell helper that creates,
- * enters and deletes per-thread Linux network namespaces, the sudoers entry
- * that lets one user run it, and the scripts `t3 portspace` pipes through
- * sudo to install or remove both.
- *
- * Everything the helper receives is untrusted. It validates ids, hands
- * nothing to a shell while privileged, and drops to the invoking user
- * (`SUDO_UID`) before running any command inside a namespace.
- *
- * Each namespace gets internet through `pasta` (passt), which relays the
- * namespace's traffic through ordinary host sockets, so the host's firewall
- * and sysctls stay untouched. Inside, the default gateway address is the
- * host's loopback, which is how a port space reaches T3's own server.
+ * Root-owned helper that creates, enters, and deletes per-thread network namespaces, plus its
+ * sudoers entry and install scripts. Input is untrusted: it validates ids, hands nothing to a
+ * shell while privileged, and drops to `SUDO_UID` before running commands. `pasta` gives internet
+ * without touching host firewall or sysctls; the gateway address is host loopback (T3's server).
  */
 
 export const PORT_SPACE_HELPER_PATH = "/usr/local/libexec/t3-portspace";
@@ -206,10 +197,9 @@ Defaults!${PORT_SPACE_HELPER_PATH} env_keep += "T3_PORTSPACE_PROLOGUE"
 `;
 
 /**
- * Run as root by piping to `sh -s`, so no file the installing user could
- * rewrite ever sits between the script and its destination. Both files are
- * written under a hidden name in their final directory (sudo ignores sudoers
- * entries containing a dot), validated, then renamed into place. With
+ * Run as root via `sh -s` so no file the installing user could rewrite sits between the script
+ * and its destination. Files are written under a hidden name in their final directory (sudo
+ * ignores sudoers entries containing a dot), validated, then renamed into place. With
  * `sudoersUid` undefined the caller is already root and needs no entry.
  */
 export const portSpaceInstallScript = (input: { readonly sudoersUid: number | undefined }) => {

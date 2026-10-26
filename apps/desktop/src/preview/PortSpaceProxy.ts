@@ -357,7 +357,7 @@ export class PortSpaceProxy extends Context.Service<
   }
 >()("@t3tools/desktop/preview/PortSpaceProxy") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.fn("PortSpaceProxy.make")(function* (
   createSocket: TunnelSocketFactory = webSocketFactory,
 ) {

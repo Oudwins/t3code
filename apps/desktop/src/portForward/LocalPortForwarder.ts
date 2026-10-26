@@ -1,10 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Local listeners and tunnel sockets are Node streams at the Electron main boundary.
 /**
- * Makes one thread's port space listeners reachable at their own ports on this
- * machine's loopback, so `curl localhost:3000` or an ordinary browser reaches
- * that thread's app. Each accepted connection opens one port tunnel into the
- * thread it was accepted for; a switch closes those connections instead of
- * reassigning them.
+ * Exposes one thread's port space listeners at their own ports on this machine's loopback, so
+ * `curl localhost:3000` reaches that thread's app. Each accepted connection opens one tunnel into
+ * the thread it was accepted for; a switch closes those connections instead of reassigning them.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";

@@ -1392,13 +1392,10 @@ export const layer: Layer.Layer<
                 );
               }),
             );
-            // A recreated worktree is as bare as a new one, so it gets the same
-            // setup. Like a new thread, the turn waits for a blocking script and
-            // leaves an async one running. Setup that fails, cannot start, or is
-            // interrupted removes the worktree so the next turn recreates it and
-            // runs setup again; the provider never starts in a checkout that
-            // skipped it. Setup opens its terminal under this same lease, which
-            // is not reentrant, so it runs between the leased steps.
+            // A recreated worktree gets a new one's setup, blocking or async alike. Setup that
+            // fails, cannot start, or is interrupted removes the worktree so the next turn retries;
+            // the provider never starts in a checkout that skipped it. Setup opens its terminal
+            // under this same non-reentrant lease, so it runs between the leased steps.
             if (project !== undefined) {
               const removeRecreated = () =>
                 leased(

@@ -1,8 +1,7 @@
 /**
- * Every ACP agent spawns `t3 acp-mcp-bridge` while opening its session, and terminal-fallback
- * agents run `t3 acp-mcp-call` per tool call, so their startup sits on first-message latency.
- * They, Codex's managed-token helper, and `portspace-relay` (which a thread's port space waits on
- * before its ports are reachable) dispatch before the full CLI module graph (seconds of
+ * `t3 acp-mcp-bridge` (every ACP session open), `t3 acp-mcp-call` (per terminal-fallback tool
+ * call), Codex's managed-token helper, and `portspace-relay` (gates port reachability) sit on
+ * user-facing latency, so they dispatch before the full CLI module graph (seconds of
  * evaluation) loads; everything else defers to the real CLI in ./binCli.ts.
  */
 import { isEntrypoint } from "./entrypoint.ts";
