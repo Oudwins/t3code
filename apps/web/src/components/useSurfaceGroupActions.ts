@@ -348,8 +348,10 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
       (left, right) => Number(left.id === activeId) - Number(right.id === activeId),
     );
     for (const surface of ordered) {
-      cleanupSurfaces([surface]);
+      // Releasing a browser drops its session, which prunes the tab automatically; close it
+      // first so the close stays a user action that hides the panel after the last tab.
       store.closeSurface(groupRef, surface.id);
+      cleanupSurfaces([surface]);
     }
     syncActivePreviewSurface();
     if (
