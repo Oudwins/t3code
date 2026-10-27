@@ -12,6 +12,7 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../../rightPanelStore";
+import { focusActivePanelTerminal } from "../../lib/terminalFocus";
 import { subscribePreviewAction } from "../preview/previewActionBus";
 import { browserMiniPlayerSource, usePreviewMiniPlayerStore } from "../../previewMiniPlayerStore";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -125,6 +126,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
       return;
     }
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
+    focusActivePanelTerminal(activeThreadRef);
   };
   const toggleRightPanelStable = useStableCallback(toggleRightPanel);
   const toggleThreadPanel = () => {

@@ -43,12 +43,10 @@ export class WorktreeManager extends Context.Service<
       options?: GitVcsDriver.CreateWorktreeOptions,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
     /**
-     * Moves the worktree to standby when `reuse` is set and reuse is enabled;
-     * otherwise removes it. A thread that still records the path recreates its
-     * checkout there on resume, because parking vacates it. Parking discards
-     * uncommitted changes only with `force`; without it a dirty worktree is
-     * removed the plain way, which git refuses. A worktree git cannot move,
-     * such as one with submodules, is removed the plain way as well.
+     * Parks the worktree when `reuse` is set and reuse is enabled, otherwise removes it. Parking
+     * vacates the path, so a thread that still records it recreates the checkout on resume.
+     * Without `force` a dirty worktree is removed the plain way, which git refuses; a worktree
+     * git cannot move, such as one with submodules, is removed the plain way as well.
      */
     readonly removeWorktree: (
       input: VcsRemoveWorktreeInput,

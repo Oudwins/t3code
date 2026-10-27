@@ -352,6 +352,12 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
       store.closeSurface(groupRef, surface.id);
     }
     syncActivePreviewSurface();
+    if (
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, groupRef)?.id !==
+      activeId
+    ) {
+      requestTerminalFocus();
+    }
   };
   const close = (surface: RightPanelSurface) => {
     if (!groupRef) return;

@@ -31,6 +31,7 @@ export const installPortForwarding = Effect.fn("desktop.ipc.installPortForwardin
   const forwarder = yield* LocalPortForwarder.LocalPortForwarder;
   const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
   const tracked = new Set<number>();
+  const runFork = Effect.runForkWith(yield* Effect.context<never>());
 
   const saved = yield* clientSettings.get.pipe(Effect.orElseSucceed(() => Option.none()));
   yield* forwarder.setEnabled(
@@ -51,11 +52,11 @@ export const installPortForwarding = Effect.fn("desktop.ipc.installPortForwardin
             const contents = Electron.webContents.fromId(windowId);
             // A crashed renderer keeps its webContents; the reloaded page reports again.
             contents?.on("render-process-gone", () => {
-              Effect.runFork(forwarder.set(windowId, null));
+              runFork(forwarder.set(windowId, null));
             });
             contents?.once("destroyed", () => {
               tracked.delete(windowId);
-              Effect.runFork(forwarder.forget(windowId));
+              runFork(forwarder.forget(windowId));
             });
           }
           return forwarder.set(windowId, input);
@@ -71,7 +72,7 @@ export const installPortForwarding = Effect.fn("desktop.ipc.installPortForwardin
     }),
   );
   yield* app.on("browser-window-focus", (_event: unknown, window: Electron.BrowserWindow) => {
-    if (!window.isDestroyed()) Effect.runFork(forwarder.focus(window.webContents.id));
+    if (!window.isDestroyed()) runFork(forwarder.focus(window.webContents.id));
   });
   yield* SubscriptionRef.changes(forwarder.status).pipe(
     Stream.runForEach((status) => electronWindow.sendAll(PORT_FORWARDING_STATUS_CHANNEL, status)),

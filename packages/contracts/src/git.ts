@@ -178,12 +178,9 @@ export const VcsRemoveWorktreeInput = Schema.Struct({
   path: TrimmedNonEmptyStringSchema,
   force: Schema.optional(Schema.Boolean),
   /**
-   * Keep the worktree on standby for a later thread instead of deleting it,
-   * when the environment has worktree reuse enabled. The worktree is moved
-   * away from `path`. Uncommitted changes are discarded only with `force`;
-   * without it a dirty worktree is removed the plain way, which git refuses.
-   * A worktree git cannot move, such as one with submodules, is removed the
-   * plain way too.
+   * Park the worktree for a later thread instead of deleting it, when worktree reuse is enabled;
+   * it is moved away from `path`. Without `force` a dirty worktree is removed the plain way, which
+   * git refuses; one git cannot move, such as one with submodules, is removed the plain way too.
    */
   reuse: Schema.optional(Schema.Boolean),
 });
@@ -312,11 +309,7 @@ export const GitPreparePullRequestThreadResult = Schema.Struct({
   pullRequest: GitResolvedPullRequest,
   branch: TrimmedNonEmptyStringSchema,
   worktreePath: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
-  /**
-   * False when the checkout could not be brought to the pull request head — a reused worktree
-   * holding local commits or uncommitted changes keeps its own state, so the code being handed
-   * over is older than the pull request.
-   */
+  /** False when local commits or edits prevented a reused worktree from reaching the PR head. */
   isOnPullRequestHead: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
 });
 export type GitPreparePullRequestThreadResult = typeof GitPreparePullRequestThreadResult.Type;

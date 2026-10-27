@@ -54,11 +54,7 @@ export interface ExecuteGitInput {
   readonly forceKillAfterMs?: number;
   readonly maxOutputBytes?: number;
   readonly appendTruncationMarker?: boolean;
-  /**
-   * With `appendTruncationMarker`, keep invoking the line callbacks after the
-   * buffered copy is full. For long-running commands whose output is only
-   * consumed through `progress`.
-   */
+  /** With appendTruncationMarker, line callbacks continue beyond the buffer cap for progress-only consumers. */
   readonly keepLineCallbacksAfterTruncation?: boolean;
   readonly progress?: ExecuteGitProgress;
 }
@@ -121,10 +117,7 @@ export interface ExecuteGitProgress {
 }
 
 export interface CreateWorktreeProgress {
-  /**
-   * Git refuses an existing path, so a path reported here belongs to this call and is safe to
-   * remove on cancel.
-   */
+  /** Git refuses existing paths; claimed paths belong to this call and can be removed on cancel. */
   readonly onWorktreeClaimed?: (path: string) => Effect.Effect<void, never>;
   readonly onCheckoutProgress?: (input: {
     percent: number;
@@ -144,10 +137,7 @@ export interface CreateWorktreeProgress {
 
 export interface CreateWorktreeOptions {
   readonly progress?: CreateWorktreeProgress;
-  /**
-   * Null (or omitted, for callers without settings access) defers to the
-   * checkout's own t3.json.
-   */
+  /** Null or omitted defers to the checkout's t3.json. */
   readonly submodules?: WorktreeSubmodules | null;
   readonly worktreesDirectory?: string;
 }
@@ -206,15 +196,10 @@ export interface GitRenameBranchResult {
   branch: string;
 }
 
-export interface GitFetchPullRequestBranchInput {
+export interface GitFetchRefInput {
   cwd: string;
-  prNumber: number;
-  branch: string;
-}
-
-export interface GitFetchPullRequestHeadCommitInput {
-  cwd: string;
-  prNumber: number;
+  /** A ref on the primary remote, such as a host's change request head ref. */
+  ref: string;
 }
 
 export interface GitResolveCommitInput {
@@ -229,10 +214,7 @@ export interface GitResolveCommitResult {
 export interface GitRefreshCheckedOutBranchInput {
   cwd: string;
   targetCommit: string;
-  /**
-   * Commit the checkout is allowed to be hard-reset away from: the upstream commit read before
-   * the fetch. HEAD sitting there means the checkout holds no work of its own.
-   */
+  /** Pre-fetch upstream commit; resetting away is safe only if HEAD stayed here. */
   resetWhenHeadCommit?: string | null | undefined;
 }
 
@@ -347,6 +329,14 @@ export class GitVcsDriver extends Context.Service<
       cwd: string,
       key: string,
     ) => Effect.Effect<string | null, GitCommandError>;
+    /**
+     * The branch, named as on the host, that T3 recorded `branch` was cut from. Null when none
+     * was recorded.
+     */
+    readonly readBranchBase: (
+      cwd: string,
+      branch: string,
+    ) => Effect.Effect<string | null, GitCommandError>;
     readonly resolveBranchName: (
       cwd: string,
       refName: string,
@@ -360,38 +350,32 @@ export class GitVcsDriver extends Context.Service<
       options?: CreateWorktreeOptions,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
     /**
-     * `createWorktree` served from a parked worktree. It is moved to the path
-     * `createWorktree` would use, checked out the way `createWorktree` would
-     * (a new branch from `refName` when `newRefName` is set, otherwise
-     * `refName` itself) and finished the same way (submodules, merge base).
-     * The result looks like a new worktree, except that ignored files such as
-     * `node_modules` survive from its previous life. Fails when that path is
-     * taken. A failure after the move removes the half-claimed checkout where it
-     * can; one that survives is at the path last given to `onWorktreeClaimed`.
+     * `createWorktree` served from a parked worktree: moved to the same path, checked out and
+     * finished the same way, except ignored files such as `node_modules` survive. Fails when that
+     * path is taken. A failure after the move removes the half-claimed checkout where it can; one
+     * that survives is at the path last given to `onWorktreeClaimed`.
      */
     readonly reuseWorktree: (
       input: ReuseWorktreeInput,
       options?: CreateWorktreeOptions,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
     /**
-     * Moves a linked worktree out of the way, detached from its branch, so it
-     * can wait for `reuseWorktree`, and returns where it went. The old path and
-     * its branch are free to be checked out again. Refuses a worktree with
-     * tracked or untracked changes unless `discardChanges` is set, in which case
-     * they are discarded. Ignored files are kept. Refuses a path that is not a
-     * linked worktree of `cwd`'s repository, and a worktree git cannot move,
-     * such as one with submodules; the worktree is left as it was.
+     * Moves a linked worktree aside, detached from its branch, for `reuseWorktree`, and returns
+     * where it went; the old path and branch are free again. Refuses changes unless
+     * `discardChanges` is set (ignored files are kept), a path that is not a linked worktree of
+     * `cwd`'s repository, and one git cannot move (e.g. submodules), leaving it as it was.
      */
     readonly parkWorktree: (input: {
       readonly cwd: string;
       readonly path: string;
       readonly discardChanges?: boolean;
     }) => Effect.Effect<{ readonly path: string }, GitCommandError>;
-    readonly fetchPullRequestBranch: (
-      input: GitFetchPullRequestBranchInput,
+    /** Force-updates local `branch` to the primary remote's `ref`. */
+    readonly fetchRefIntoBranch: (
+      input: GitFetchRefInput & { readonly branch: string },
     ) => Effect.Effect<void, GitCommandError>;
-    readonly fetchPullRequestHeadCommit: (
-      input: GitFetchPullRequestHeadCommitInput,
+    readonly fetchRefCommit: (
+      input: GitFetchRefInput,
     ) => Effect.Effect<GitResolveCommitResult, GitCommandError>;
     readonly resolveCommit: (
       input: GitResolveCommitInput,
@@ -536,39 +520,41 @@ function parseGitRemoteVerboseOutput(
   return remotes;
 }
 
-const gitCommand = (
-  process: VcsProcess.VcsProcess["Service"],
-  operation: string,
-  cwd: string,
-  args: ReadonlyArray<string>,
-  options?: {
-    readonly stdin?: string;
-    readonly env?: NodeJS.ProcessEnv;
-    readonly allowNonZeroExit?: boolean;
-    readonly timeoutMs?: number;
-    readonly maxOutputBytes?: number;
-    readonly outputMode?: VcsProcess.VcsProcessInput["outputMode"];
-    readonly appendTruncationMarker?: boolean;
-  },
-) =>
-  process.run({
-    operation,
-    command: "git",
-    args: ["-C", cwd, ...args],
-    cwd,
-    spawnCwd: globalThis.process.cwd(),
-    ...(options?.stdin !== undefined ? { stdin: options.stdin } : {}),
-    ...(options?.env !== undefined ? { env: options.env } : {}),
-    ...(options?.allowNonZeroExit !== undefined
-      ? { allowNonZeroExit: options.allowNonZeroExit }
-      : {}),
-    ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-    ...(options?.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : {}),
-    ...(options?.outputMode !== undefined ? { outputMode: options.outputMode } : {}),
-    ...(options?.appendTruncationMarker !== undefined
-      ? { appendTruncationMarker: options.appendTruncationMarker }
-      : {}),
-  });
+const gitCommand = Effect.fn("GitVcsDriver.gitCommand")(
+  (
+    process: VcsProcess.VcsProcess["Service"],
+    operation: string,
+    cwd: string,
+    args: ReadonlyArray<string>,
+    options?: {
+      readonly stdin?: string;
+      readonly env?: NodeJS.ProcessEnv;
+      readonly allowNonZeroExit?: boolean;
+      readonly timeoutMs?: number;
+      readonly maxOutputBytes?: number;
+      readonly outputMode?: VcsProcess.VcsProcessInput["outputMode"];
+      readonly appendTruncationMarker?: boolean;
+    },
+  ) =>
+    process.run({
+      operation,
+      command: "git",
+      args: ["-C", cwd, ...args],
+      cwd,
+      spawnCwd: globalThis.process.cwd(),
+      ...(options?.stdin !== undefined ? { stdin: options.stdin } : {}),
+      ...(options?.env !== undefined ? { env: options.env } : {}),
+      ...(options?.allowNonZeroExit !== undefined
+        ? { allowNonZeroExit: options.allowNonZeroExit }
+        : {}),
+      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options?.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : {}),
+      ...(options?.outputMode !== undefined ? { outputMode: options.outputMode } : {}),
+      ...(options?.appendTruncationMarker !== undefined
+        ? { appendTruncationMarker: options.appendTruncationMarker }
+        : {}),
+    }),
+);
 
 export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -837,14 +823,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     return path.resolve(physicalCwd, gitCommonDir);
   });
 
-  // Git renames loose objects and refs into place without fsync by default, so
-  // an unclean restart can leave 0-byte files under refs/t3/** that break every
-  // later fetch and push. Checkpoint writes flush before they are published;
-  // macOS defaults to writeout-only, which does not reach the disk either.
+  // Git defaults and macOS writeout-only can leave empty refs after crashes; flush before publication.
   // Set fsync first: Git 2.36 ignores unknown batch without resetting the method.
-  // Git documents batch/fsync equivalence on macOS HFS+/APFS and Windows NTFS/ReFS;
-  // keep per-object fsync on other platforms. Batch still fully flushes refs.
-  // On macOS, VcsProcess retries unsupported full flushes with plain fsync.
+  // Batch fully flushes refs and equals fsync on macOS HFS+/APFS and Windows NTFS/ReFS.
+  // Keep per-object fsync elsewhere; VcsProcess retries unsupported macOS full flushes with plain fsync.
   const durableWrite = [
     "-c",
     "core.fsync=objects,reference",
@@ -862,8 +844,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
-      // core.splitIndex governs every index Git writes, so an unguarded write to the
-      // scratch index can expire the sharedindex.* the real .git/index still uses.
+      // Scratch split-index writes can expire sharedindex files still used by the real index.
       const indexConfig = [
         "-c",
         "core.fsmonitor=false",
@@ -1094,8 +1075,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           Effect.catchTags({
             VcsProcessExitError: (error) =>
               Effect.gen(function* () {
-                // Git cannot stage an embedded repository until it has a commit. Discover these
-                // only after staging fails so ordinary checkpoints do not need another file scan.
+                // Git cannot stage uncommitted embedded repos; scan for them only after staging fails.
                 const untracked = yield* execute({
                   operation,
                   cwd: input.cwd,
@@ -1391,8 +1371,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           maxOutputBytes: VcsDriver.CHECKPOINT_DIFF_MAX_OUTPUT_BYTES,
           outputMode: "error",
         }).pipe(Effect.map((result) => result.stdout.split("\0")));
-      // Remerge diff lists a merge's paths only where the result differs from Git's
-      // automatic merge, so a merge keeps its conflict fixes and drops clean upstream changes.
+      // Remerge diffs retain merge conflict fixes while excluding clean upstream changes.
       const pathLists = yield* Effect.all(
         [
           listPaths(["diff", startHead, `${input.fromCheckpointRef}^{commit}`]),

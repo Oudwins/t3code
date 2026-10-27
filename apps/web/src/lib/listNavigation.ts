@@ -24,13 +24,10 @@ export function listNavigationDirection(event: KeyboardEvent): ListNavigationDir
 }
 
 /**
- * Lets ctrl/cmd+N and ctrl/cmd+P move through lists like ArrowDown and ArrowUp.
- * The chord is replayed as the arrow key on the focused element, so Base UI
- * widgets and our own list handlers need no knowledge of it. It only claims
- * the chord when the replayed arrow is handled, so New Thread (cmd+N), the
- * file picker (cmd+P) and native caret movement are untouched everywhere else.
- * Install once and before any other keydown listener: it stops the original
- * event so the global shortcuts that share these chords do not also fire.
+ * Replays ctrl/cmd+N and ctrl/cmd+P as ArrowDown/ArrowUp on the focused element, claiming the
+ * chord only when the arrow is handled, so New Thread, the file picker, and caret movement work
+ * elsewhere. Install once, before any other keydown listener: it stops the original event so
+ * global shortcuts sharing these chords do not also fire.
  */
 export function installListNavigationKeys(): () => void {
   const onKeyDown = (event: KeyboardEvent) => {

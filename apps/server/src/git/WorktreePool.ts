@@ -12,11 +12,10 @@ interface StandbyWorktree {
 }
 
 /**
- * Bookkeeping for parked worktrees. A claim deletes its row, which makes the
- * claimer the only one allowed to touch that path. An eviction only marks the
- * row: it stays, out of reach of claims, until `forget` confirms the directory
- * is gone, so a removal that fails is retried by the next eviction. The pool
- * never touches the filesystem.
+ * Bookkeeping for parked worktrees; it never touches the filesystem. A claim deletes its row,
+ * so only the claimer may touch that path. An eviction only marks the row, keeping it out of
+ * reach of claims until `forget` confirms the directory is gone, so a failed removal is
+ * retried by the next eviction.
  */
 export class WorktreePool extends Context.Service<
   WorktreePool,

@@ -116,8 +116,7 @@ function shortcutForContext(
   context: ShortcutMatchContext,
 ) {
   const shortcut = binding.shortcut;
-  // Existing installs persist Mod+Enter. Resolve its alternate chord against
-  // the send preference without rewriting saved or remapped shortcuts.
+  // Resolve persisted Mod+Enter against send preference without rewriting saved shortcuts.
   if (
     context.composerRequiresModifier &&
     binding.command === "composer.sendAlternate" &&
@@ -210,11 +209,10 @@ function matchesCommandShortcut(
   return resolveShortcutCommand(event, keybindings, options) === command;
 }
 
-// A chord is two keydowns, but every window-level listener resolves each
-// event on its own with its own `when` context. The leader press records the
-// pending chord here. The first listener to see the next key snapshots it
-// onto the event and clears the live state, so the remaining listeners still
-// resolve that same key as the chord's second step.
+// Every window-level listener resolves a keydown on its own `when` context. The leader press
+// records the pending chord here; the first listener to see the next key snapshots it onto the
+// event and clears the live state, so the remaining listeners still resolve that same key as
+// the chord's second step.
 const CHORD_TIMEOUT_MS = 1500;
 
 interface PendingChord {
@@ -514,9 +512,7 @@ export function shouldShowThreadJumpHintsForModifiers(
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): boolean {
-  // The embedded terminal owns keystrokes while it has focus: the Ghostty surface encodes the
-  // keydown and can write the pressed key into the shell before our window-level shortcut handling
-  // ever runs, regardless of any configured `when` clause on the jump command.
+  // Ghostty can write keys to the shell before window shortcuts run, regardless of the when clause.
   if (resolveContext(options).terminalFocus) {
     return false;
   }

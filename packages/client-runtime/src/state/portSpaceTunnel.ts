@@ -1,11 +1,8 @@
 /**
- * Credentials for the port space tunnel.
- *
- * The tunnel is dialed by desktop main, which has no cookie jar and cannot sign
- * relay DPoP proofs, so every connection kind mints a short-lived WebSocket
- * ticket in the renderer and hands it over. Unlike the device hub, cookie
- * sessions mint too. A ticket lives five minutes server-side and is bound to the
- * session, so one covers every tunnel opened with it.
+ * Desktop main dials the port space tunnel but has no cookie jar and cannot sign relay DPoP
+ * proofs, so the renderer mints a short-lived WebSocket ticket for every connection kind,
+ * cookie sessions included. A ticket lives five minutes server-side and is session-bound, so
+ * one covers every tunnel opened with it.
  */
 import { PORT_SPACE_TUNNEL_PATH } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";

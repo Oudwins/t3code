@@ -1,11 +1,7 @@
 /**
- * Reads the setup entry of Cursor's `.cursor/worktrees.json` and turns it into
- * a worktree setup script, so a repository that already configures worktree
- * setup for Cursor needs no second config here.
- *
- * Like Cursor, the worktree is searched first and the project root second.
- * Missing, unreadable, or invalid files are treated as absent.
- *
+ * Turns the setup entry of Cursor's `.cursor/worktrees.json` into a worktree setup script, so a
+ * repository configured for Cursor needs no second config. Like Cursor, the worktree is searched
+ * before the project root; missing, unreadable, or invalid files are treated as absent.
  * @module CursorWorktreeSetup
  */
 import type { ProjectScript } from "@t3tools/contracts";

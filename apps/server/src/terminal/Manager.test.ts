@@ -829,7 +829,7 @@ it.layer(
         "done\n";
 
       // Counts reads of strings larger than one emitted chunk, so rescanning the
-      // pending prefix on every chunk (#23817) shows up as quadratic work.
+      // pending prefix on every chunk shows up as quadratic work.
       const charCodeAt = String.prototype.charCodeAt;
       let largeStringReads = 0;
       yield* Effect.gen(function* () {
@@ -976,7 +976,7 @@ it.layer(
         const { manager, ptyAdapter } = yield* createManager(5, {
           shellResolver: () => "/bin/zsh -l",
           env: { PATH: "/usr/bin", HOME: "/home/test" },
-          wrapSpawn: () => Effect.succeed(undefined),
+          wrapSpawn: () => Effect.undefined,
         });
 
         yield* manager.open(openInput());
@@ -1058,7 +1058,7 @@ it.layer(
         );
         const { manager } = yield* createManager(5, {
           processKillGraceMs: 10,
-          wrapSpawn: () => Effect.succeed(undefined),
+          wrapSpawn: () => Effect.undefined,
           processTable: Effect.succeed([
             { pid: 9000, ppid: 1, name: "zsh" },
             { pid: 100, ppid: 9000, name: "node" },

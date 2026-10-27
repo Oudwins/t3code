@@ -62,9 +62,9 @@ describe("claudeMcpServersInPortSpace", () => {
 
   it.effect("keeps the MCP URLs when the host address cannot be found", () =>
     Effect.gen(function* () {
-      expect(
-        yield* claudeMcpServersInPortSpace(mcpServers, handle(Effect.succeed(undefined))),
-      ).toEqual(mcpServers);
+      expect(yield* claudeMcpServersInPortSpace(mcpServers, handle(Effect.undefined))).toEqual(
+        mcpServers,
+      );
     }),
   );
 });

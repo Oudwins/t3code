@@ -53,6 +53,7 @@ export function PortForwardingCoordinator() {
   const lastListeners = useRef(NO_LISTENERS);
   const targetEnvironmentId = target?.environmentId ?? null;
   const targetThreadId = target?.threadId ?? null;
+  // oxlint-disable-next-line t3code/react-effect-budget -- pushes the active thread's listeners to the desktop shell, an external system
   useEffect(() => {
     let input: DesktopPortForwardingInput = null;
     if (targetEnvironmentId !== null && targetThreadId !== null) {
