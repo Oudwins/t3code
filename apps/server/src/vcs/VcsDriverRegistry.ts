@@ -57,6 +57,14 @@ export const ensureGitCommand = Effect.fn("VcsDriverRegistry.ensureGitCommand")(
         }),
     ),
   );
+  if (handle.kind !== "git") {
+    return yield* new GitCommandError({
+      operation,
+      command: "vcs-route",
+      cwd,
+      detail: `The ${operation} command currently supports Git repositories only; detected ${handle.kind}.`,
+    });
+  }
   return handle;
 });
 
