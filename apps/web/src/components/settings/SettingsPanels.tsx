@@ -521,6 +521,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
       ? ["Delete confirmation"]
       : []),
+    ...(settings.confirmTabClose !== DEFAULT_UNIFIED_SETTINGS.confirmTabClose
+      ? ["Close confirmation"]
+      : []),
     ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
     ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
     ...(settings.threadTitleInstructions !== DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions
@@ -630,6 +633,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
+      confirmTabClose: DEFAULT_UNIFIED_SETTINGS.confirmTabClose,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
       threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
@@ -954,6 +958,29 @@ export function GeneralSettingsPanel() {
                 updateSettings({ confirmThreadDelete: Boolean(checked) })
               }
               aria-label="Confirm thread deletion"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("close-confirmation")}
+          description="Ask before closing terminals, or browser tabs the agent is using."
+          resetAction={
+            settings.confirmTabClose !== DEFAULT_UNIFIED_SETTINGS.confirmTabClose ? (
+              <SettingResetButton
+                label="close confirmation"
+                onClick={() =>
+                  updateSettings({
+                    confirmTabClose: DEFAULT_UNIFIED_SETTINGS.confirmTabClose,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.confirmTabClose}
+              onCheckedChange={(checked) => updateSettings({ confirmTabClose: Boolean(checked) })}
+              aria-label="Confirm closing terminals and tabs"
             />
           }
         />

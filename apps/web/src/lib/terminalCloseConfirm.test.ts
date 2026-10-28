@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const { confirmMock, readLocalApiMock } = vi.hoisted(() => {
+const { confirmMock, readLocalApiMock, clientSettings } = vi.hoisted(() => {
   const confirmMock = vi.fn<(message: string, options?: unknown) => Promise<boolean>>();
   const readLocalApiMock = vi.fn<
     () =>
@@ -9,8 +9,12 @@ const { confirmMock, readLocalApiMock } = vi.hoisted(() => {
         }
       | undefined
   >();
-  return { confirmMock, readLocalApiMock };
+  return { confirmMock, readLocalApiMock, clientSettings: { confirmTabClose: true } };
 });
+
+vi.mock("~/hooks/useSettings", () => ({
+  getClientSettings: () => clientSettings,
+}));
 
 vi.mock("~/localApi", () => ({
   readLocalApi: () => readLocalApiMock(),
@@ -23,6 +27,14 @@ describe("terminal close confirmation", () => {
     confirmMock.mockReset();
     readLocalApiMock.mockReset();
     readLocalApiMock.mockReturnValue({ dialogs: { confirm: confirmMock } });
+    clientSettings.confirmTabClose = true;
+  });
+
+  it("closes without asking when close confirmation is off", async () => {
+    clientSettings.confirmTabClose = false;
+
+    await expect(confirmTerminalClose(["Terminal 1"])).resolves.toBe(true);
+    expect(confirmMock).not.toHaveBeenCalled();
   });
 
   it("clears pending state and resolves false when the dialog rejects", async () => {
