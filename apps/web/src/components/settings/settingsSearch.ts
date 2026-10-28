@@ -623,6 +623,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["ask before thread chat history"],
   },
   {
+    id: "close-confirmation",
+    title: "Close confirmation",
+    to: "/settings/general",
+    searchTerms: ["ask before closing terminal browser tab process"],
+  },
+  {
     id: "quit-confirmation",
     title: "Quit shortcut",
     to: "/settings/general",

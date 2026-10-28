@@ -30,6 +30,7 @@ import {
 import { previewEnvironment } from "../state/preview";
 import { terminalEnvironment } from "../state/terminal";
 import { useAtomCommand } from "../state/use-atom-command";
+import { getClientSettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { MAX_TERMINALS_PER_GROUP } from "../types";
@@ -317,7 +318,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     closeSurfaces: () => void,
   ) => {
     const message = agentControlledBrowserCloseConfirmation(closing, previewDesktopByTabId);
-    if (!message) {
+    if (!message || !getClientSettings().confirmTabClose) {
       closeSurfaces();
       return;
     }
