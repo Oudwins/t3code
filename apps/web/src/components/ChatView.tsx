@@ -1814,6 +1814,7 @@ export default function ChatView(props: ChatViewProps) {
     composerRef.current?.openControl("composer.mode"),
   );
   const conversationWasHiddenRef = useRef(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves DOM focus back to the composer when a thread tab stops covering the conversation
   useEffect(() => {
     if (conversationWasHiddenRef.current && !conversationHidden) scheduleComposerFocusStable();
     conversationWasHiddenRef.current = conversationHidden;
@@ -2273,6 +2274,7 @@ export default function ChatView(props: ChatViewProps) {
   } | null>(null);
   const seedNewThreadTabs = tabsActions.seedTabs;
   const newThreadTabs = settings.newThreadTabs;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the configured tabs once the server thread (and its worktree) exists after the draft is sent
   useEffect(() => {
     if (isLocalDraftThread && activeThreadId) {
       pendingNewThreadTabsRef.current = { threadId: activeThreadId, envMode: sendEnvMode };

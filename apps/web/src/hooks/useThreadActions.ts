@@ -46,8 +46,8 @@ import {
   readEnvironmentThreadRefs,
   readProject,
   readThreadShell,
+  readDelegatedUnderParent,
   readThreadShells,
-  useDelegatedUnderParent,
 } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
 import { clearThreadPreviewState } from "../previewStateStore";
@@ -301,7 +301,6 @@ export function useThreadActions() {
   });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
   const workingShelfEnabled = useClientSettings((settings) => settings.sidebarWorkingShelfEnabled);
-  const delegatedUnderParent = useDelegatedUnderParent();
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
   const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
@@ -348,7 +347,7 @@ export function useThreadActions() {
       coParkingKeys,
       sortOrder: sidebarThreadSortOrder,
       workingShelfEnabled,
-      delegatedUnderParent,
+      delegatedUnderParent: readDelegatedUnderParent(),
       now: new Date().toISOString(),
     });
     const navigate: () => Promise<unknown> = nextThread

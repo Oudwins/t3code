@@ -552,7 +552,7 @@ function OpenCommandPaletteDialog(props: {
     readonly composer: ChatComposerHandle | null;
     readonly branchToolbar: BranchToolbarHandle | null;
   }>({ composer: null, branchToolbar: null });
-  // oxlint-disable-next-line t3code/react-effect-budget -- the handles are refs filled by other components' commits, so they can only be read after mount.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the handles are refs filled by other components' commits, so they can only be read after mount.
   useLayoutEffect(() => {
     setHandles({
       composer: composerHandleRef?.current ?? null,

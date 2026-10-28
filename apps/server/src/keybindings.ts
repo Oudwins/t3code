@@ -40,7 +40,6 @@ import {
   mergeWithDefaultKeybindings,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
-  parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
 
 export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
