@@ -102,8 +102,10 @@ const isImportedShellEnvName = (name: string): boolean =>
   !name.startsWith("ELECTRON_") &&
   !name.startsWith("VITE_") &&
   // T3 Code's own configuration comes from how the app was launched, except
-  // the telemetry opt-out, which is documented as a shell profile variable.
-  (!name.startsWith("T3CODE_") || name === "T3CODE_TELEMETRY_ENABLED");
+  // the telemetry opt-out and the GitHub app client, which shell profiles set.
+  (!name.startsWith("T3CODE_") ||
+    name === "T3CODE_TELEMETRY_ENABLED" ||
+    name === "T3CODE_GITHUB_APP_CLIENT_ID");
 const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as const;
 const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
 const FALLBACK_LC_CTYPE = "en_US.UTF-8";

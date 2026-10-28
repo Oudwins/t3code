@@ -57,14 +57,6 @@ export const ensureGitCommand = Effect.fn("VcsDriverRegistry.ensureGitCommand")(
         }),
     ),
   );
-  if (handle.kind !== "git") {
-    return yield* new GitCommandError({
-      operation,
-      command: "vcs-route",
-      cwd,
-      detail: `The ${operation} command currently supports Git repositories only; detected ${handle.kind}.`,
-    });
-  }
   return handle;
 });
 
@@ -80,12 +72,6 @@ function parseDetectionCacheKey(key: string): {
   readonly requestedKind: VcsDriverKind | "auto";
 } {
   const separatorIndex = key.indexOf("\0");
-  if (separatorIndex === -1) {
-    return {
-      cwd: key,
-      requestedKind: "auto",
-    };
-  }
   return {
     requestedKind: key.slice(0, separatorIndex) as VcsDriverKind | "auto",
     cwd: key.slice(separatorIndex + 1),
