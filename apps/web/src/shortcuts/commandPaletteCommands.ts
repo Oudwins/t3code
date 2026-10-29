@@ -5,10 +5,7 @@ import {
   isCommandPaletteMounted,
   useCommandPaletteStore,
 } from "../commandPaletteStore";
-import {
-  escapeReturnsToCommandPalette,
-  overlayModeForCommand,
-} from "../components/CommandPalette.logic";
+import { overlayModeForCommand } from "../components/CommandPalette.logic";
 import { APPEARANCE_OPTIONS, notifyThemeSaveFailure } from "../components/CommandPaletteThemeItems";
 import { toggleThemeEditorForTheme } from "../components/settings/themeEditorStore";
 import { toastManager } from "../components/ui/toast";
@@ -55,7 +52,7 @@ export function installCommandPaletteCommands(
       onKeyDown: (event) => {
         if (event.isComposing || event.key !== "Escape") return false;
         const { open, mode } = useCommandPaletteStore.getState();
-        if (!open || !escapeReturnsToCommandPalette(mode)) return false;
+        if (!open || mode === "command") return false;
         consume(event);
         dispatchCommandPalette({ _tag: "BackToCommand" });
       },
@@ -95,7 +92,6 @@ export function installCommandPaletteCommands(
         dispatchCommandPalette({ _tag: "SetOpen", open: false });
         void router.navigate({ to: "/usage" });
       },
-      "threadSearch.toggle": toggleOverlay("threadSearch.toggle"),
       "commandPalette.toggle": toggleOverlay("commandPalette.toggle"),
       "filePicker.toggle": toggleOverlay("filePicker.toggle"),
       "projectSearch.toggle": toggleOverlay("projectSearch.toggle"),

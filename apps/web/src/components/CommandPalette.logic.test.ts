@@ -6,7 +6,6 @@ import {
   buildNestedSearchItems,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
-  escapeReturnsToCommandPalette,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
@@ -60,33 +59,6 @@ describe("linked pull request thread navigation", () => {
 
 describe("reduceCommandPaletteUiState", () => {
   const closedState = { open: false, mode: "command", openIntent: null, session: 0 } as const;
-
-  it("hands thread search to the palette and back without closing", () => {
-    const threadsOpen = reduceCommandPaletteUiState(closedState, {
-      _tag: "ToggleMode",
-      mode: "threads",
-    });
-    expect(threadsOpen).toEqual({ open: true, mode: "threads", openIntent: null, session: 0 });
-
-    const commandOpen = reduceCommandPaletteUiState(threadsOpen, {
-      _tag: "ToggleMode",
-      mode: "command",
-    });
-    expect(commandOpen).toEqual({ open: true, mode: "command", openIntent: null, session: 0 });
-    expect(
-      reduceCommandPaletteUiState(commandOpen, { _tag: "ToggleMode", mode: "threads" }),
-    ).toEqual(threadsOpen);
-    expect(
-      reduceCommandPaletteUiState(threadsOpen, { _tag: "ToggleMode", mode: "threads" }).open,
-    ).toBe(false);
-  });
-
-  it("returns to the palette on Escape only from the surfaces it opens", () => {
-    expect(escapeReturnsToCommandPalette("files")).toBe(true);
-    expect(escapeReturnsToCommandPalette("content")).toBe(true);
-    expect(escapeReturnsToCommandPalette("threads")).toBe(false);
-    expect(escapeReturnsToCommandPalette("command")).toBe(false);
-  });
 
   it("opens PR search from another overlay and replaces an earlier search", () => {
     const first = reduceCommandPaletteUiState(
