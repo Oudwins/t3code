@@ -176,7 +176,6 @@ import {
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
   enumerateCommandPaletteItems,
-  escapeReturnsToCommandPalette,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -384,11 +383,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         <CommandDialog
           open={state.open}
           onOpenChange={(open, eventDetails) => {
-            if (
-              !open &&
-              eventDetails.reason === "escape-key" &&
-              escapeReturnsToCommandPalette(state.mode)
-            ) {
+            if (!open && eventDetails.reason === "escape-key" && state.mode !== "command") {
               eventDetails.cancel();
               dispatchCommandPalette({ _tag: "BackToCommand" });
               return;
@@ -404,7 +399,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
             session={state.session}
             openIntent={state.openIntent}
             setOpen={setOpen}
-            openOverlayMode={(mode) => dispatchCommandPalette({ _tag: "ToggleMode", mode })}
             openChildSearch={openChildSearch}
             initialContext={state.restoredSearch}
           />
@@ -419,7 +413,6 @@ function CommandPaletteDialog(props: {
   readonly session: number;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
-  readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly openChildSearch: (
     mode: "files" | "content",
     context: CommandPaletteReturnContext,
@@ -435,9 +428,7 @@ function CommandPaletteDialog(props: {
           ? "File picker"
           : props.mode === "content"
             ? "Search project contents"
-            : props.mode === "threads"
-              ? "Thread search"
-              : "Command palette"
+            : "Command palette"
       }
       className={cn("overflow-hidden", props.mode === "content" && "h-105")}
       data-command-palette="true"
@@ -464,10 +455,8 @@ function CommandPaletteDialog(props: {
       ) : (
         <OpenCommandPaletteDialog
           key={props.session}
-          threadsOnly={props.mode === "threads"}
           openIntent={props.openIntent}
           setOpen={props.setOpen}
-          openOverlayMode={props.openOverlayMode}
           openChildSearch={props.openChildSearch}
           initialContext={props.initialContext}
         />
@@ -477,11 +466,8 @@ function CommandPaletteDialog(props: {
 }
 
 function OpenCommandPaletteDialog(props: {
-  /** Thread search: Recent Threads and thread results only, no actions, projects, or settings. */
-  readonly threadsOnly: boolean;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
-  readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly openChildSearch: (
     mode: "files" | "content",
     context: CommandPaletteReturnContext,
@@ -490,7 +476,7 @@ function OpenCommandPaletteDialog(props: {
 }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { openChildSearch, openOverlayMode, setOpen, threadsOnly } = props;
+  const { openChildSearch, setOpen } = props;
   // Keyed by palette session: the intent and restored search only seed this
   // mount, and closing must not change what the closing palette shows.
   const [initialSearch] = useState(
@@ -979,10 +965,6 @@ function OpenCommandPaletteDialog(props: {
     browseNavigation.invalidate();
     clearTypedHighlight();
     setQuery(nextQuery);
-    // `>` is the palette's actions-only prefix. Typing it here hands the query over to the palette.
-    if (threadsOnly && nextQuery.startsWith(">")) {
-      openOverlayMode("command");
-    }
     if (nextQuery === "" && currentView?.initialQuery) {
       popView();
     }
@@ -1817,14 +1799,11 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({
-    actionItems: threadsOnly ? [] : actionItems,
-    recentThreadItems,
-  });
+  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
   // Every setting goes to the palette's own matcher, so settings get the same
   // word starts and typo tolerance as threads.
-  const settingsSearchItems: CommandPaletteActionItem[] = (
-    threadsOnly ? [] : settingsForThisPlatform(availableSettingsSearchItems)
+  const settingsSearchItems: CommandPaletteActionItem[] = settingsForThisPlatform(
+    availableSettingsSearchItems,
   ).map((item) => ({
     kind: "action",
     value: `setting:${item.id}`,
@@ -1868,7 +1847,7 @@ function OpenCommandPaletteDialog(props: {
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
-    ...(deferredQuery.trim().length > 0 && !threadsOnly
+    ...(deferredQuery.trim().length > 0
       ? {
           allOptions: {
             rootGroups,
@@ -1876,7 +1855,7 @@ function OpenCommandPaletteDialog(props: {
           },
         }
       : {}),
-    projectSearchItems: threadsOnly ? [] : projectSearchItems,
+    projectSearchItems: projectSearchItems,
     settingsSearchItems,
     threadSearchItems:
       isLinkedThreadSearch && linkedThreadSearch?.linkedThreads
@@ -2457,7 +2436,7 @@ function OpenCommandPaletteDialog(props: {
     newProjectFlow !== null
       ? "Project name"
       : (remoteProjectInputPlaceholder(addProjectCloneFlow) ??
-        (threadsOnly ? "Search threads..." : getCommandPaletteInputPlaceholder(paletteMode)));
+        getCommandPaletteInputPlaceholder(paletteMode));
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
   const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
   const canWriteSourceControl = useEnvironmentScope(
@@ -2868,7 +2847,7 @@ function OpenCommandPaletteDialog(props: {
   return (
     <CommandPaletteContent
       key={`${viewStack.length}-${browseGeneration}-${isBrowsing}-${newProjectFlow ? "new-project" : (addProjectCloneFlow?.step ?? "none")}`}
-      aria-label={threadsOnly ? "Thread search" : "Command palette"}
+      aria-label="Command palette"
       autoHighlight={autoHighlightsFirstRow ? "always" : false}
       footerActionLabel={footerActionLabel}
       footerTrailing={footerTrailing}

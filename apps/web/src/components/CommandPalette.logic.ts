@@ -72,15 +72,7 @@ export function browseInputEndPaddingClass(input: {
   return "*:data-[slot=autocomplete-input]:pe-24!";
 }
 
-export type SearchOverlayMode = "threads" | "command" | "files" | "content";
-
-/**
- * Files and content search are reached from the palette's actions, so Escape
- * steps back to it. Thread search is a top-level entry point; Escape closes it.
- */
-export function escapeReturnsToCommandPalette(mode: SearchOverlayMode): boolean {
-  return mode === "files" || mode === "content";
-}
+export type SearchOverlayMode = "command" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
   | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
@@ -869,7 +861,6 @@ export function errorMessage(error: unknown): string {
 }
 
 const OVERLAY_MODE_BY_COMMAND = {
-  "threadSearch.toggle": "threads",
   "commandPalette.toggle": "command",
   "filePicker.toggle": "files",
   "projectSearch.toggle": "content",

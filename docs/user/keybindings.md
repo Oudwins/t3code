@@ -32,7 +32,7 @@ Use `mod+shift+l` to reuse the previous worktree directly.
 The `ctrl+x l` chord opens the command palette on the environments a new thread can
 run on, so you can type to filter them.
 **Change model**, **Select workspace**, and **Select environment** are also in the
-command palette (`Cmd/Ctrl+Alt+K`), next to their shortcuts.
+command palette (`Cmd/Ctrl+K`), next to their shortcuts.
 
 To change effort one step without opening the picker, bind
 **Composer: Increase Effort** and **Composer: Decrease Effort** in Keybindings.
@@ -62,7 +62,7 @@ With a thread open, `mod+shift+s` settles it and `mod+alt+s` snoozes it. Both to
 the same shortcut un-settles a settled thread or wakes a snoozed one. Snooze opens a
 list of wake times; type to filter it, press Enter to pick one, or choose **Custom…**
 for a date or duration. A thread waiting on an approval or question cannot be snoozed.
-The command palette (`Cmd/Ctrl+Alt+K`) has the same actions: **Settle thread**,
+The command palette (`Cmd/Ctrl+K`) has the same actions: **Settle thread**,
 **Un-settle thread**, **Snooze thread**, and **Wake thread**.
 
 `mod+shift+[` and `mod+shift+]` open the previous and next thread in the sidebar.
