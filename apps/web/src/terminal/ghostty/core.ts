@@ -380,6 +380,17 @@ export class GhosttyTerminalCore {
     }
   }
 
+  /** A null writer drops terminal replies, as when no view owns this core. */
+  setPtyWriter(writer: ((data: string) => void) | null): void {
+    this.ensureActive();
+    if (this.ptyWriterId !== 0) {
+      this.runtime.detachPtyWriter(this.terminal, this.ptyWriterId);
+      this.ptyWriterId = 0;
+    }
+    this.ptyWriter = writer;
+    if (writer !== null) this.ptyWriterId = this.runtime.attachPtyWriter(this.terminal, writer);
+  }
+
   resize(cols: number, rows: number, cellWidth: number, cellHeight: number): void {
     this.ensureActive();
     this.assertSuccess(

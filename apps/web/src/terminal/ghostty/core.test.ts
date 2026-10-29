@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   applyTerminalAttachStreamEvent,
+  combineTerminalSessionState,
   DEFAULT_MAX_TERMINAL_BUFFER_BYTES,
   INITIAL_TERMINAL_OUTPUT_CURSOR,
   nextTerminalAttachSeedState,
@@ -9,7 +10,13 @@ import {
   type TerminalBufferState,
 } from "@t3tools/client-runtime/state/terminal";
 
-import { writeTerminalOutputUpdate } from "../../components/ThreadTerminalDrawer";
+import { Atom, AtomRegistry } from "effect/reactivity";
+
+import {
+  adoptParkedTerminalCore,
+  parkTerminalCore,
+  writeTerminalOutputUpdate,
+} from "../../components/ThreadTerminalDrawer";
 import { GHOSTTY_CELL_WIDE, GhosttyTerminalCore, ghosttyCellText } from "./core";
 import { loadGhosttyRuntime } from "./runtime";
 
@@ -318,6 +325,38 @@ describe("GhosttyTerminalCore snapshots", () => {
     writeTerminalOutputUpdate(core, next);
     reference.write("\r\nafter");
     expect(reset).not.toHaveBeenCalled();
+    expect(core.snapshot()).toEqual(reference.snapshot());
+  });
+
+  it("keeps a full-screen app intact across a remount after its start leaves the buffer", async () => {
+    const [core, reference] = await Promise.all([createCore(), createCore()]);
+    const start = "\x1b[?1049h\x1b[3;1Hstatus";
+    let state = createSession(start);
+    const initial = readTerminalOutputUpdate(state.output, INITIAL_TERMINAL_OUTPUT_CURSOR);
+    writeTerminalOutputUpdate(core, initial);
+    reference.write(start);
+    const registry = AtomRegistry.make();
+    const sessionAtom = Atom.make(combineTerminalSessionState(null, state));
+    parkTerminalCore(registry, sessionAtom, {
+      core,
+      session: registry.get(sessionAtom),
+      cursor: initial.cursor,
+    });
+
+    // Redraws that never repeat the alternate-screen entry or the status line.
+    const redraws = Array.from({ length: 4096 }, (_, index) => `\x1b[1;1Hrow ${index}`).join("");
+    while (state.output.chunks[0]?.startOffset === 0) {
+      state = append(state, redraws);
+      registry.set(sessionAtom, combineTerminalSessionState(null, state));
+      reference.write(redraws);
+    }
+    state = append(state, "\x1b[2;1Hlatest");
+    reference.write("\x1b[2;1Hlatest");
+
+    const adopted = adoptParkedTerminalCore(sessionAtom);
+    expect(adopted?.core).toBe(core);
+    writeTerminalOutputUpdate(core, readTerminalOutputUpdate(state.output, adopted!.cursor));
+    expect(core.isAlternateScreen()).toBe(true);
     expect(core.snapshot()).toEqual(reference.snapshot());
   });
 
