@@ -19,6 +19,7 @@ import { TestClock } from "effect/testing";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectService from "./ProjectService.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
 
@@ -86,6 +87,9 @@ const runWithCursorFile = (input: {
     const layer = ProjectSetupScriptRunner.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getThreadShell: () => Effect.succeed(null),
+          }),
           Layer.mock(ProjectService.ProjectService)({
             getById: () => Effect.succeedSome(project),
           }),
@@ -241,6 +245,9 @@ const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFail
   const layer = ProjectSetupScriptRunner.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadShell: () => Effect.succeed(null),
+        }),
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeedSome(project),
         }),
@@ -429,6 +436,9 @@ const makeHarness = Effect.fn(function* (options: {
       Layer.mergeAll(
         terminals,
         Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadShell: () => Effect.succeed(null),
+        }),
         ServerSettings.layerTest(),
         NodeServices.layer,
       ),

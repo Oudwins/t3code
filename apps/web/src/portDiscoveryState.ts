@@ -98,6 +98,9 @@ export function useThreadDiscoveredPorts(input: {
   const portSpacesEnabled = usePortSpacesEnabled(input.environmentId);
   const threadId = input.threadId;
   return threadId
-    ? ports.filter((port) => isThreadPort(port, threadId, portSpacesEnabled))
+    ? ports.filter(
+        (port) =>
+          isThreadPort(port, threadId, portSpacesEnabled) || port.agent?.threadId === threadId,
+      )
     : EMPTY_PORTS;
 }

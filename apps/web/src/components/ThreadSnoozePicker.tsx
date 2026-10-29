@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { CalendarClockIcon, ClockIcon } from "lucide-react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { useClientSettings } from "../hooks/useSettings";
@@ -20,6 +21,7 @@ export type SnoozeChoice = { readonly snoozedUntil: string };
  * owns the keyboard.
  */
 export function ThreadSnoozePicker(props: {
+  readonly environmentId: EnvironmentId;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onSelect: (choice: SnoozeChoice) => void;
@@ -33,7 +35,11 @@ export function ThreadSnoozePicker(props: {
           data-command-palette="true"
           onBackdropPointerDown={() => props.onOpenChange(false)}
         >
-          <SnoozePickerContent onOpenChange={props.onOpenChange} onSelect={props.onSelect} />
+          <SnoozePickerContent
+            environmentId={props.environmentId}
+            onOpenChange={props.onOpenChange}
+            onSelect={props.onSelect}
+          />
         </CommandDialogPopup>
       ) : null}
     </CommandDialog>
@@ -41,6 +47,7 @@ export function ThreadSnoozePicker(props: {
 }
 
 function SnoozePickerContent(props: {
+  readonly environmentId: EnvironmentId;
   readonly onOpenChange: (open: boolean) => void;
   readonly onSelect: (choice: SnoozeChoice) => void;
 }) {
@@ -50,7 +57,9 @@ function SnoozePickerContent(props: {
   const [query, setQuery] = useState("");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   // Resolved once per open so a picker left idle does not offer stale wake times.
-  const [presets] = useState(() => resolveSnoozePresets(new Date(), timestampFormat));
+  const [presets] = useState(() =>
+    resolveSnoozePresets(new Date(), timestampFormat, props.environmentId),
+  );
 
   const needle = query.trim().toLowerCase();
   const presetItems = presets
