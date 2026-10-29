@@ -597,6 +597,11 @@ describe("rankSearchGroups with keywords and picks", () => {
     // never moves their group, so one pick for "mcp" does not pass the command.
     expect(rank(["Reload MCP servers"], named)).toEqual(["actions", "threads"]);
     expect(rank(["Reload MCP servers"], picked)).toEqual(["actions", "threads"]);
+    // A whole branch name beats even a command with that whole name.
+    expect(rank(["MCP"], thread("Trim model lists", { branch: "t3/mcp" }))).toEqual([
+      "threads",
+      "actions",
+    ]);
   });
 });
 

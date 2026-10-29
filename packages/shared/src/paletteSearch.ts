@@ -1151,9 +1151,15 @@ export function rankSearchGroups<
       const best = Math.max(
         ...items.map(({ match }) => matchClass(match.groupQuality ?? match.quality)),
       );
-      return [{ group, ranked: sorted, best, order }];
+      const exact = items.some(({ match }) => match.exact === true);
+      return [{ group, ranked: sorted, best, exact, order }];
     })
-    .sort((left, right) => right.best - left.best || left.order - right.order)
+    .sort(
+      (left, right) =>
+        Number(right.exact) - Number(left.exact) ||
+        right.best - left.best ||
+        left.order - right.order,
+    )
     .map(({ group, ranked: items }) => ({ group, ranked: items }));
 }
 
