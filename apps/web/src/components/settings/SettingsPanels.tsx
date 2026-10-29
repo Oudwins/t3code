@@ -423,6 +423,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
       ? ["Time format"]
       : []),
+    ...(settings.commandPaletteThreadsOnly !== DEFAULT_UNIFIED_SETTINGS.commandPaletteThreadsOnly
+      ? ["Search threads by default"]
+      : []),
     ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
       ? ["Thread notifications"]
       : []),
@@ -590,6 +593,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       effortDisplay: DEFAULT_UNIFIED_SETTINGS.effortDisplay,
       mathRenderingEnabled: DEFAULT_UNIFIED_SETTINGS.mathRenderingEnabled,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      commandPaletteThreadsOnly: DEFAULT_UNIFIED_SETTINGS.commandPaletteThreadsOnly,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
@@ -1051,6 +1055,32 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("command-palette-threads-only")}
+          description="The command palette lists only threads until you type > for commands."
+          resetAction={
+            settings.commandPaletteThreadsOnly !==
+            DEFAULT_UNIFIED_SETTINGS.commandPaletteThreadsOnly ? (
+              <SettingResetButton
+                label="search threads by default"
+                onClick={() =>
+                  updateSettings({
+                    commandPaletteThreadsOnly: DEFAULT_UNIFIED_SETTINGS.commandPaletteThreadsOnly,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.commandPaletteThreadsOnly}
+              onCheckedChange={(checked) =>
+                updateSettings({ commandPaletteThreadsOnly: Boolean(checked) })
+              }
+              aria-label="Search threads by default"
+            />
           }
         />
       </SettingsSection>
