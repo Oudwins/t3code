@@ -520,7 +520,7 @@ const make = Effect.gen(function* () {
       if (result === null) return null;
       if (result.exitCode === 0 || result.exitCode === allowedExitCode) return result;
       const stderr = result.stderr.toLowerCase();
-      // Git 2.56 reports a broken `.git` file as a gitfile error instead.
+      // Git 2.56 reports a broken worktree .git file as an invalid gitfile.
       if (
         stderr.includes("not a git repository") ||
         stderr.includes("gitfile does not point to a valid repository")
