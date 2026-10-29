@@ -161,10 +161,27 @@ describe("scoreThreadSearch", () => {
     expect(rankTitles("lakebed", named)).toEqual(["Lakebed", "Lakebed perf audit"]);
   });
 
-  it("finds a branch pasted with the app's worktree prefix", () => {
+  it("finds a branch pasted with the app's worktree prefix, and lists an exact branch first", () => {
     const subject = thread("Cmd+K search", { branch: "t3/cmdk-search-v2" });
     expect(scoreThreadSearch(foldSearchQuery("t3/cmdk-search-v2"), subject, NOW)).not.toBeNull();
     expect(scoreThreadSearch(foldSearchQuery("t3/cmdk"), subject, NOW)).not.toBeNull();
+
+    const titled = thread("cmdk-search-v2", {
+      activityAt: NOW,
+      branch: "t3/other",
+      opens: { openedAt: NOW, score: 6, picks: [{ query: "cmdk-search-v2", at: NOW }] },
+    });
+    for (const query of ["cmdk-search-v2", "t3/cmdk-search-v2", "T3/CMDK-SEARCH-V2"]) {
+      expect(rankTitles(query, [titled, subject]), query).toEqual([
+        "Cmd+K search",
+        "cmdk-search-v2",
+      ]);
+    }
+    expect(scoreThreadSearch("cmdk-search-v2", subject, NOW)?.explain?.()).toEqual({
+      label: "Branch",
+      text: "cmdk-search-v2",
+      ranges: [{ start: 0, end: 14 }],
+    });
   });
 
   it("ranks a title holding the words above the app's own branch prefix and project name", () => {

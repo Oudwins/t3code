@@ -226,6 +226,7 @@ The linked pull request participates in automatic settlement.
 
 On web and desktop, open the command palette with `Cmd/Ctrl+K` to search threads
 across connected environments by title, branch, pull request, or project.
+Typing a thread's whole branch name, with or without `t3/`, lists that thread first.
 It lists only threads until you type `>` for commands. Turn off **Settings →
 General → Search threads by default** to search commands, projects, and
 settings alongside threads.
