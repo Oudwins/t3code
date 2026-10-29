@@ -242,7 +242,7 @@ describe("buildThreadActionItems", () => {
     ]);
   });
 
-  it("searches submenu options from the root and from a submenu with no match", () => {
+  it("searches submenu options from the root and from a submenu with no match, except in a threads-only root", () => {
     const action = (value: string, title: string) => ({
       kind: "action" as const,
       value,
@@ -263,11 +263,12 @@ describe("buildThreadActionItems", () => {
     };
     const addProject = action("action:add-project", "Add project");
     const rootGroups = [{ value: "actions", label: "Actions", items: [newThreadIn, addProject] }];
-    const search = (query: string, isInSubmenu: boolean) =>
+    const search = (query: string, isInSubmenu: boolean, threadsOnly = false) =>
       filterCommandPaletteGroups({
         activeGroups: isInSubmenu ? newThreadIn.groups : rootGroups,
         query,
         isInSubmenu,
+        threadsOnly,
         allOptions: {
           rootGroups,
           nestedItems: buildNestedSearchItems([newThreadIn, addProject], query),
@@ -290,6 +291,11 @@ describe("buildThreadActionItems", () => {
     expect(search("new thread", false).map(([label]) => label)).not.toContain("Suggestions");
     expect(search("t3", true)).toEqual([["Projects", ["t3code"]]]);
     expect(search("add project", true)).toEqual([["Actions", ["Add project"]]]);
+
+    expect(search("", false, true)).toEqual([]);
+    expect(search("t3code", false, true)).toEqual([["Threads", ["Thread about t3code"]]]);
+    expect(search(">add", false, true)).toEqual([["Actions", ["Add project"]]]);
+    expect(search("add project", true, true)).toEqual([["Actions", ["Add project"]]]);
   });
 
   it("lists message matches last, once, without moving the title matches above them", () => {

@@ -1847,6 +1847,7 @@ function OpenCommandPaletteDialog(props: {
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
+    threadsOnly: clientSettings.commandPaletteThreadsOnly,
     ...(deferredQuery.trim().length > 0
       ? {
           allOptions: {
@@ -2436,7 +2437,7 @@ function OpenCommandPaletteDialog(props: {
     newProjectFlow !== null
       ? "Project name"
       : (remoteProjectInputPlaceholder(addProjectCloneFlow) ??
-        getCommandPaletteInputPlaceholder(paletteMode));
+        getCommandPaletteInputPlaceholder(paletteMode, clientSettings.commandPaletteThreadsOnly));
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
   const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
   const canWriteSourceControl = useEnvironmentScope(
@@ -2948,7 +2949,11 @@ function OpenCommandPaletteDialog(props: {
                   }
                 : isThreadSearchPending
                   ? { emptyStateMessage: "Searching thread messages…" }
-                  : {})}
+                  : clientSettings.commandPaletteThreadsOnly &&
+                      currentView === null &&
+                      !isActionsOnly
+                    ? { emptyStateMessage: "No matching threads." }
+                    : {})}
       />
     </CommandPaletteContent>
   );

@@ -527,6 +527,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
   },
   {
+    id: "command-palette-threads-only",
+    title: "Search threads by default",
+    to: "/settings/general",
+    searchTerms: ["command palette cmd k actions commands prefix"],
+  },
+  {
     id: "response-streaming",
     title: "Response streaming",
     to: "/settings/threads",

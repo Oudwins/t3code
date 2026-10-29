@@ -553,6 +553,8 @@ export function filterCommandPaletteGroups(input: {
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   /** Threads whose messages match, best first; threads already listed are skipped. */
   threadMessageItems?: ReadonlyArray<CommandPaletteActionItem>;
+  /** The root lists threads only; `>` still lists actions. */
+  threadsOnly?: boolean;
   now?: number;
 }): CommandPaletteGroup[] {
   if (input.allOptions && input.isInSubmenu) {
@@ -563,21 +565,27 @@ export function filterCommandPaletteGroups(input: {
       ...input,
       activeGroups: allOptions.rootGroups,
       isInSubmenu: false,
+      threadsOnly: false,
     });
   }
 
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
   const normalizedQuery = foldSearchQuery(searchQuery);
+  const searchesEverything = !input.isInSubmenu && !isActionsFilter;
+  const threadsOnly = searchesEverything && (input.threadsOnly ?? false);
+  const activeGroups = threadsOnly
+    ? input.activeGroups.filter((group) => group.value !== "actions")
+    : input.activeGroups;
 
   if (normalizedQuery.length === 0) {
     if (isActionsFilter) {
-      return input.activeGroups.filter((group) => group.value === "actions");
+      return activeGroups.filter((group) => group.value === "actions");
     }
-    return [...input.activeGroups];
+    return [...activeGroups];
   }
 
-  let baseGroups = [...input.activeGroups];
+  let baseGroups = [...activeGroups];
   if (isActionsFilter) {
     baseGroups = baseGroups.filter((group) => group.value === "actions");
   } else if (!input.isInSubmenu) {
@@ -585,11 +593,10 @@ export function filterCommandPaletteGroups(input: {
   }
 
   const searchableGroups = [...baseGroups];
-  const searchesEverything = !input.isInSubmenu && !isActionsFilter;
   // On equal match classes, groups keep this order: threads, what people search
   // for most, right after commands.
   if (searchesEverything) {
-    if (input.allOptions && input.allOptions.nestedItems.length > 0) {
+    if (!threadsOnly && input.allOptions && input.allOptions.nestedItems.length > 0) {
       searchableGroups.push({
         value: "nested-search",
         label: "Suggestions",
@@ -603,14 +610,14 @@ export function filterCommandPaletteGroups(input: {
         items: input.threadSearchItems,
       });
     }
-    if (input.projectSearchItems.length > 0) {
+    if (!threadsOnly && input.projectSearchItems.length > 0) {
       searchableGroups.push({
         value: "projects-search",
         label: "Projects",
         items: input.projectSearchItems,
       });
     }
-    if (input.settingsSearchItems && input.settingsSearchItems.length > 0) {
+    if (!threadsOnly && input.settingsSearchItems && input.settingsSearchItems.length > 0) {
       searchableGroups.push({
         value: "settings-search",
         label: "Settings",
@@ -776,10 +783,15 @@ export function buildRootGroups(input: {
   return groups;
 }
 
-export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
+export function getCommandPaletteInputPlaceholder(
+  mode: CommandPaletteMode,
+  threadsOnly: boolean,
+): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return threadsOnly
+        ? "Search threads, or type > for commands..."
+        : "Search commands, projects, and threads...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":
