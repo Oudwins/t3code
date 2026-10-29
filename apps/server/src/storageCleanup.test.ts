@@ -248,14 +248,7 @@ const cleanupFixture = (
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const rawConfig = yield* ServerConfig.ServerConfig;
-    yield* fs.makeDirectory(rawConfig.browserArtifactsDir, { recursive: true });
-    yield* fs.makeDirectory(rawConfig.logsDir, { recursive: true });
-    const config = {
-      ...rawConfig,
-      browserArtifactsDir: yield* fs.realPath(rawConfig.browserArtifactsDir),
-      logsDir: yield* fs.realPath(rawConfig.logsDir),
-    };
+    const config = yield* ServerConfig.ServerConfig;
     const git = yield* GitVcsDriver.GitVcsDriver;
     const repo = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-repo-" }));
     const command = (cwd: string, args: string[]) =>
@@ -289,7 +282,6 @@ const cleanupFixture = (
     let events: Stream.Stream<OrchestrationV2DomainEvent> = Stream.empty;
     const activated = yield* Deferred.make<void>();
     const context = yield* Layer.build(StorageCleanup.layer).pipe(
-      Effect.provideService(ServerConfig.ServerConfig, config),
       Effect.provideService(GitVcsDriver.GitVcsDriver, {
         ...git,
         execute: (input) =>
@@ -1033,6 +1025,7 @@ describe("deleted thread worktrees", () => {
         ...DEFAULT_SERVER_SETTINGS.storageCleanup,
         worktreeAfterDays: null,
         worktreeOnDelete: true,
+        worktreeForce: false,
       });
       const owner = parent(fixture.worktree);
       fixture.setDeletedThreads([owner]);
@@ -1055,6 +1048,7 @@ describe("deleted thread worktrees", () => {
         ...DEFAULT_SERVER_SETTINGS.storageCleanup,
         worktreeAfterDays: null,
         worktreeOnDelete: true,
+        worktreeForce: false,
       });
       const owner = parent(fixture.worktree);
       const child = subagent(owner);
@@ -1087,6 +1081,7 @@ describe("deleted thread worktrees", () => {
           ...DEFAULT_SERVER_SETTINGS.storageCleanup,
           worktreeAfterDays: null,
           worktreeOnDelete: true,
+          worktreeForce: false,
         });
         const owner = parent(fixture.worktree);
         fixture.setDeletedThreads([owner]);
@@ -1133,6 +1128,7 @@ describe("deleted thread worktrees", () => {
           ...DEFAULT_SERVER_SETTINGS.storageCleanup,
           worktreeAfterDays: null,
           worktreeOnDelete: true,
+          worktreeForce: false,
         });
         const owner = parent(fixture.worktree);
         fixture.setDeletedThreads([owner]);
@@ -1164,6 +1160,7 @@ describe("deleted thread worktrees", () => {
         ...DEFAULT_SERVER_SETTINGS.storageCleanup,
         worktreeAfterDays: null,
         worktreeOnDelete: true,
+        worktreeForce: false,
       });
       fixture.setDeletedThreads([parent(fixture.worktree)]);
       fixture.setThreads([]);
@@ -1218,6 +1215,7 @@ describe("deleted thread worktrees", () => {
           ...DEFAULT_SERVER_SETTINGS.storageCleanup,
           worktreeAfterDays: null,
           worktreeOnDelete: true,
+          worktreeForce: false,
         });
         const owner = parent(fixture.worktree);
         fixture.setThreads([]);
