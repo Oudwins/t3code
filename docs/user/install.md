@@ -100,11 +100,12 @@ Home Manager, update your configuration's nixpkgs input or channel and rebuild.
 Nix manages both the desktop app and the bundled
 `t3` command; use Nix to update them instead of the in-app updater or `t3 update`.
 
-### NixOS host backend with port spaces
+### T3 Code flake with port spaces
 
-This repository's flake provides a native Linux backend and a NixOS module that
-installs the port-space helper, its tools, and a sudo rule restricted to that
-helper. It runs the backend as your normal user, outside `appimage-run`.
+This repository's flake installs the native desktop app and CLI on Linux. Its
+NixOS module can also manage the port-space helper, required tools, and sudo
+rules. The desktop runs its backend directly on the host, so there is no
+`appimage-run` sandbox or separate server to pair with.
 
 Add the input to your system flake:
 
@@ -118,34 +119,30 @@ existing username:
 ```nix
 imports = [ inputs.t3code.nixosModules.default ];
 
-services.t3code = {
+programs.t3code = {
   enable = true;
-  user = "alice";
+  portSpaces.users = [ "alice" ];
 };
 ```
 
 Pass `inputs` through your configuration's `specialArgs` if your module does not
-already receive it. Apply with `sudo nixos-rebuild switch`, then start the user
-service:
+already receive it. Apply with your normal NixOS rebuild, close the AppImage if
+it is running, and launch `t3code-desktop` or the installed app menu entry.
+The native app uses the standard T3 home, including your existing projects and
+threads. Enable Port spaces in the app's settings; `t3 portspace setup` is not
+needed. An empty `portSpaces.users` list installs the app without port-space
+permissions.
 
-```bash
-systemctl --user daemon-reload
-systemctl --user start t3code-host
-/run/current-system/sw/bin/t3 portspace status
-/run/current-system/sw/bin/t3 --base-dir "$HOME/.local/share/t3code-host" pair
-```
+To check readiness, use `/run/current-system/sw/bin/t3 portspace status`. The
+explicit path bypasses any existing AppImage CLI launcher on your PATH. Update
+T3 Code through your flake input and rebuild; the native package disables the
+in-app updater.
 
-Use the pairing details to add this backend in your desktop app's Connections
-settings, then enable Port spaces for that environment. `t3 portspace setup` is
-not needed. The explicit CLI path bypasses any existing AppImage launcher on
-your PATH. The server listens on `127.0.0.1:3773` and keeps separate state in
-`~/.local/share/t3code-host`; your AppImage's existing environment stays separate.
-Set `services.t3code.port` or `services.t3code.dataDir` to change these defaults.
-Install and authenticate provider CLIs for the same user.
-
-The flake supports `x86_64-linux` and `aarch64-linux`. To try only its native CLI
-without enabling the system module, run
-`nix run 'github:Oudwins/t3code?ref=feat/nixos-port-spaces' -- --help`.
+The flake supports `x86_64-linux` and `aarch64-linux`. You can also install only
+the app with `nix profile add 'github:Oudwins/t3code?ref=feat/nixos-port-spaces'`,
+or try the CLI with
+`nix run 'github:Oudwins/t3code?ref=feat/nixos-port-spaces#t3code-cli' -- --help`.
+Port-space permissions require the NixOS module.
 
 ### The `t3` command
 

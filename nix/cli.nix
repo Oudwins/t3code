@@ -60,7 +60,7 @@ stdenv.mkDerivation rec {
   '';
 
   meta = {
-    description = "T3 Code native host backend";
+    description = "T3 Code native CLI and host backend";
     homepage = "https://github.com/Oudwins/t3code";
     license = lib.licenses.mit;
     platforms = builtins.attrNames releases;
