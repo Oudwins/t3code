@@ -46,10 +46,12 @@ stdenv.mkDerivation {
     cairo
     cups
     dbus
+    dbus-glib
     expat
     glib
     gtk3
     libdrm
+    libdbusmenu-gtk3
     libgbm
     libGL
     libsecret
@@ -69,10 +71,14 @@ stdenv.mkDerivation {
     gsettings-desktop-schemas
     stdenv.cc.cc.lib
   ];
-  runtimeDependencies = map lib.getLib [
+  runtimeDependencies = [
+    "${placeholder "out"}/lib/t3code/usr"
+  ]
+  ++ map lib.getLib [
     pkgs.libGL
     pkgs.vulkan-loader
   ];
+  dontUnpack = true;
   dontBuild = true;
   dontStrip = true;
   dontWrapGApps = true;
@@ -80,11 +86,12 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
     mkdir -p "$out/lib/t3code" "$out/bin" "$out/share/applications" "$out/share/pixmaps"
-    cp -a . "$out/lib/t3code/"
+    cp -a "$src/." "$out/lib/t3code/"
+    chmod -R u+w "$out/lib/t3code"
     ln -s ${cli}/bin/t3 "$out/bin/t3"
-    install -m 0444 t3code.png "$out/share/pixmaps/t3code.png"
+    install -m 0444 "$src/t3code.png" "$out/share/pixmaps/t3code.png"
     sed -e "s|^Exec=.*|Exec=$out/bin/t3code-desktop %U|" \
-        -e '/^X-AppImage-Version=/d' t3code.desktop > "$out/share/applications/t3code.desktop"
+        -e '/^X-AppImage-Version=/d' "$src/t3code.desktop" > "$out/share/applications/t3code.desktop"
     runHook postInstall
   '';
 
