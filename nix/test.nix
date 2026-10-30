@@ -21,6 +21,7 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     start_all()
+    machine.wait_for_unit("user@1000.service")
     machine.wait_for_unit("t3code-host.service", user="alice")
     machine.wait_for_open_port(3773)
     status = machine.succeed("runuser -u alice -- t3 portspace status")
