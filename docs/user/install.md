@@ -109,7 +109,7 @@ helper. It runs the backend as your normal user, outside `appimage-run`.
 Add the input to your system flake:
 
 ```nix
-inputs.t3code.url = "github:Oudwins/t3code";
+inputs.t3code.url = "github:Oudwins/t3code?ref=feat/nixos-port-spaces";
 ```
 
 Include the module in your NixOS configuration, replacing `alice` with your
@@ -131,19 +131,21 @@ service:
 ```bash
 systemctl --user daemon-reload
 systemctl --user start t3code-host
-t3 portspace status
-t3 --base-dir "$HOME/.local/share/t3code-host" pair
+/run/current-system/sw/bin/t3 portspace status
+/run/current-system/sw/bin/t3 --base-dir "$HOME/.local/share/t3code-host" pair
 ```
 
 Use the pairing details to add this backend in your desktop app's Connections
 settings, then enable Port spaces for that environment. `t3 portspace setup` is
-not needed. The server listens on `127.0.0.1:3773` and keeps separate state in
+not needed. The explicit CLI path bypasses any existing AppImage launcher on
+your PATH. The server listens on `127.0.0.1:3773` and keeps separate state in
 `~/.local/share/t3code-host`; your AppImage's existing environment stays separate.
 Set `services.t3code.port` or `services.t3code.dataDir` to change these defaults.
 Install and authenticate provider CLIs for the same user.
 
 The flake supports `x86_64-linux` and `aarch64-linux`. To try only its native CLI
-without enabling the system module, run `nix run github:Oudwins/t3code -- --help`.
+without enabling the system module, run
+`nix run 'github:Oudwins/t3code?ref=feat/nixos-port-spaces' -- --help`.
 
 ### The `t3` command
 
