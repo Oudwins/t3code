@@ -142,7 +142,9 @@ adding each one by hand:
 Separate several folders with `:` (`;` on Windows). A leading `~` is your home folder, as in
 `export CODE_PROJECTS_PARENT_DIRS="$HOME/code:~/work"`. The server checks at startup and every
 30 seconds after, so a repository you clone later shows up on its own. Hidden folders are skipped.
-A project you delete stays gone until the server restarts, then it comes back. On macOS and Linux
+A project you delete stays gone until the server restarts, then it comes back. At startup the
+server also removes projects outside these folders that have no threads, so removing a folder from
+the list removes its project once its threads are gone. On macOS and Linux
 the desktop app reads these from your login shell, so set them in your shell profile and restart
 the app.
 

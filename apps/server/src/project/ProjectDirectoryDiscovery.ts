@@ -1,7 +1,7 @@
 /**
- * Makes projects from `CODE_PROJECTS_PARENT_DIRS` (every Git repository directly inside, including
- * later clones) and `CODE_PROJECTS` (each listed folder). A folder gets a project once per server
- * run, so a deleted one stays deleted until the server restarts and finds it again.
+ * Projects for `CODE_PROJECTS_PARENT_DIRS` repositories and `CODE_PROJECTS` folders. A folder
+ * gets a project once per server run, so a deleted one returns only after a restart. At startup,
+ * projects outside those folders that have no threads are removed.
  * @module ProjectDirectoryDiscovery
  */
 import { CommandId, ProjectId } from "@t3tools/contracts";
@@ -25,10 +25,12 @@ export class ProjectDirectoryDiscovery extends Context.Service<
   {
     /** One pass: makes a project for each configured folder that has none. Never fails. */
     readonly sync: Effect.Effect<void>;
+    /** Removes each project outside the configured folders that has no threads. Never fails. */
+    readonly prune: Effect.Effect<void>;
     /**
-     * Runs `sync` now and every 30 seconds for the life of the scope, so a
-     * repository cloned later shows up without a restart. Does nothing when no
-     * folders are configured.
+     * Runs `prune` once, then `sync` now and every 30 seconds for the life of the
+     * scope, so a repository cloned later shows up without a restart. Does nothing
+     * when no folders are configured.
      */
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
   }
@@ -43,7 +45,7 @@ const make = Effect.gen(function* () {
 
   // Roots that have a project, so a pass only looks at what is new, and roots
   // already reported, so a bad folder is one warning rather than one per pass.
-  // Only the sync loop touches either.
+  // Only the discovery fiber touches either.
   const settled = new Set<string>();
   const warned = new Set<string>();
 
@@ -89,14 +91,18 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const sync = Effect.gen(function* () {
+  const configuredRoots = Effect.gen(function* () {
     const roots = new Set(config.projectDirs.map((directory) => path.resolve(directory)));
     for (const parent of config.projectParentDirs) {
       for (const repository of yield* repositoriesIn(path.resolve(parent))) {
         roots.add(repository);
       }
     }
-    for (const workspaceRoot of roots) {
+    return roots;
+  });
+
+  const sync = Effect.gen(function* () {
+    for (const workspaceRoot of yield* configuredRoots) {
       if (settled.has(workspaceRoot)) continue;
       yield* ensureProject(workspaceRoot).pipe(
         Effect.tap(() => Effect.sync(() => settled.add(workspaceRoot))),
@@ -107,18 +113,49 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const removeProject = Effect.fn("ProjectDirectoryDiscovery.removeProject")(function* (
+    projectId: ProjectId,
+    workspaceRoot: string,
+  ) {
+    const id = yield* crypto.randomUUIDv4();
+    // Without `force`, delete refuses a project that still has threads.
+    yield* projects.delete({ commandId: CommandId.make(`pruned-project:${id}`), projectId });
+    yield* Effect.logInfo("Removed a project outside the configured folders", { workspaceRoot });
+  });
+
+  const prune = Effect.gen(function* () {
+    if (config.projectParentDirs.length === 0 && config.projectDirs.length === 0) return;
+    const roots = yield* configuredRoots;
+    for (const { id, workspaceRoot } of yield* projects.listShells()) {
+      if (roots.has(workspaceRoot)) continue;
+      yield* removeProject(id, workspaceRoot).pipe(
+        Effect.catchTags({ ProjectNotEmptyError: () => Effect.void }),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to remove a project outside the configured folders.", {
+            workspaceRoot,
+            cause,
+          }),
+        ),
+      );
+    }
+  }).pipe(Effect.ignoreCause({ log: true }));
+
   const start = Effect.fn("ProjectDirectoryDiscovery.start")(function* () {
     if (config.projectParentDirs.length === 0 && config.projectDirs.length === 0) return;
     yield* forkParked(
-      sync.pipe(
-        Effect.ignoreCause({ log: true }),
-        Effect.repeat(Schedule.spaced(RESCAN_INTERVAL)),
+      prune.pipe(
+        Effect.andThen(
+          sync.pipe(
+            Effect.ignoreCause({ log: true }),
+            Effect.repeat(Schedule.spaced(RESCAN_INTERVAL)),
+          ),
+        ),
         Effect.asVoid,
       ),
     );
   });
 
-  return ProjectDirectoryDiscovery.of({ sync, start });
+  return ProjectDirectoryDiscovery.of({ sync, prune, start });
 });
 
 export const layer = Layer.effect(ProjectDirectoryDiscovery, make);

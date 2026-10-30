@@ -1,7 +1,15 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { CommandId, ProjectId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EventId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type OrchestrationV2AppThread,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -9,6 +17,7 @@ import * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 
 import * as ServerConfig from "../config.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -49,6 +58,7 @@ const configLayer = (
 
 type Services =
   | ProjectService.ProjectService
+  | EventSink.EventSinkV2
   | ProjectDirectoryDiscovery.ProjectDirectoryDiscovery
   | ServerConfig.ServerConfig
   | Crypto.Crypto
@@ -76,7 +86,9 @@ const run = <A, E>(
     const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-discovery-" });
     const resolve = (entry: string) => path.join(root, entry);
     const layer = ProjectDirectoryDiscovery.layer.pipe(
-      Layer.provideMerge(RuntimeLayer.layerProjectService),
+      Layer.provideMerge(
+        Layer.merge(RuntimeLayer.layerProjectService, RuntimeLayer.layerEventSink),
+      ),
       Layer.provideMerge(enrichmentLayer),
       Layer.provideMerge(ServerSettings.layerTest()),
       Layer.provideMerge(WorkspacePaths.layer),
@@ -98,6 +110,49 @@ const makeRepository = (directory: string) =>
       fileSystem.makeDirectory(`${directory}/.git`, { recursive: true }),
     ),
   );
+
+const addThread = (projectId: ProjectId) =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const threadId = ThreadId.make(`thread:${projectId}`);
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const createdAt = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+    const payload: OrchestrationV2AppThread = {
+      createdBy: "user",
+      creationSource: "web",
+      id: threadId,
+      projectId,
+      title: "Kept",
+      providerInstanceId,
+      modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+      forkedFrom: null,
+      createdAt,
+      updatedAt: createdAt,
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      lastVisitedAt: null,
+      deletedAt: null,
+    };
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make(`created:${threadId}`),
+          type: "thread.created",
+          threadId,
+          providerInstanceId,
+          occurredAt: createdAt,
+          payload,
+        },
+      ],
+    });
+  });
 
 const titles = ProjectService.ProjectService.pipe(
   Effect.flatMap((projects) => projects.listShells()),
@@ -196,6 +251,36 @@ it.effect("does not bring back a deleted project until the next server run", () 
 
         yield* firstPass;
         assert.deepEqual(yield* titles, ["alpha"]);
+      }),
+    { parents: ["code"] },
+  ),
+);
+
+it.effect("removes projects outside the configured folders unless they have threads", () =>
+  run(
+    (root) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const projects = yield* ProjectService.ProjectService;
+        const discovery = yield* ProjectDirectoryDiscovery.ProjectDirectoryDiscovery;
+        yield* makeRepository(`${root}/code/alpha`);
+        yield* makeRepository(`${root}/code/removed`);
+        yield* discovery.sync;
+        yield* fileSystem.remove(`${root}/code/removed`, { recursive: true });
+        for (const name of ["unlisted", "busy"]) {
+          yield* fileSystem.makeDirectory(`${root}/${name}`, { recursive: true });
+          yield* projects.create({
+            commandId: CommandId.make(`user-added:${name}`),
+            projectId: ProjectId.make(name),
+            title: name,
+            workspaceRoot: `${root}/${name}`,
+          });
+        }
+        yield* addThread(ProjectId.make("busy"));
+
+        yield* discovery.prune;
+
+        assert.deepEqual(yield* titles, ["alpha", "busy"]);
       }),
     { parents: ["code"] },
   ),
