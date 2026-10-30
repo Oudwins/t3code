@@ -82,6 +82,7 @@ import {
   parsePermissionRequest,
   parseSessionUpdateEvent,
   toolCallVisibleOutputChanged,
+  withTrackedPermissionToolCall,
   type AcpPlanUpdate,
   type AcpAgentTerminalState,
   type AcpSessionModeState,
@@ -231,6 +232,7 @@ export interface AcpAdapterV2Flavor {
     readonly promptCapabilities: EffectAcpSchema.AgentCapabilities["promptCapabilities"];
   }) => Effect.Effect<ReadonlyArray<EffectAcpSchema.ContentBlock>, EffectAcpErrors.AcpError>;
   readonly promptFailure?: (cause: unknown) => OrchestrationV2ProviderFailure;
+  readonly requiresSignIn?: (cause: unknown) => boolean;
   /**
    * Runs before attachment paths, T3 instructions and native slash-command detection,
    * so a rewrite can turn the user's text into a native command.
@@ -295,7 +297,7 @@ export interface AcpAdapterV2Flavor {
       request: EffectAcpSchema.ReadTextFileRequest,
       cwd: string | null,
     ) => Effect.Effect<EffectAcpSchema.ReadTextFileResponse, EffectAcpErrors.AcpError>;
-    readonly writeTextFile: (
+    readonly writeTextFile?: (
       request: EffectAcpSchema.WriteTextFileRequest,
       cwd: string | null,
     ) => Effect.Effect<EffectAcpSchema.WriteTextFileResponse, EffectAcpErrors.AcpError>;
@@ -1337,6 +1339,8 @@ interface SnapshotMessageState {
   loadingIndex: number;
 }
 
+/** How long a Stop waits for the agent to confirm before the user is offered Force stop. */
+const ACP_STOP_CONFIRM_TIMEOUT_MS = 10_000;
 const TOOL_UPDATE_PERSIST_EVERY = 10;
 
 // Agents can resend whole calls while streaming arguments.
@@ -2020,7 +2024,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             clientCapabilities: {
               fs: {
                 readTextFile: flavor.clientFileSystem !== undefined,
-                writeTextFile: flavor.clientFileSystem !== undefined,
+                writeTextFile: flavor.clientFileSystem?.writeTextFile !== undefined,
               },
               terminal: clientTerminals !== undefined,
               elicitation: { form: {}, ...(flavor.onUrlElicitation ? { url: {} } : {}) },
@@ -5985,11 +5989,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 Effect.flatMap(({ policy }) => clientFileSystem.readTextFile(request, policy.cwd)),
               ),
             );
-            yield* targetRuntime.handleWriteTextFile((request) =>
-              clientPolicyContext.pipe(
-                Effect.flatMap(({ policy }) => clientFileSystem.writeTextFile(request, policy.cwd)),
-              ),
-            );
+            const writeTextFile = clientFileSystem.writeTextFile;
+            if (writeTextFile !== undefined) {
+              yield* targetRuntime.handleWriteTextFile((request) =>
+                clientPolicyContext.pipe(
+                  Effect.flatMap(({ policy }) => writeTextFile(request, policy.cwd)),
+                ),
+              );
+            }
           }
           if (handlerOptions.mcp !== false) {
             yield* wireAcpRuntimeMcpHandlers(targetRuntime, runtimeMcpBridge);
@@ -6002,8 +6009,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               projectAcpRuntimeSessionUpdate(handlerGeneration, rawNotification),
             );
           }
-          yield* targetRuntime.handleRequestPermission((params, requestContext) =>
+          yield* targetRuntime.handleRequestPermission((nativeParams, requestContext) =>
             Effect.gen(function* () {
+              const trackedTurn = yield* Ref.get(activeTurn);
+              const params =
+                trackedTurn !== null && nativeParams.sessionId === (yield* Ref.get(activeSessionId))
+                  ? withTrackedPermissionToolCall(
+                      nativeParams,
+                      trackedTurn.tools.get(nativeParams.toolCall.toolCallId),
+                    )
+                  : nativeParams;
               const transportRequestId = requestContext.requestId;
               const permissionQuestion = flavor.extractPermissionQuestion?.(params);
               if (permissionQuestion !== undefined) {
@@ -8004,7 +8019,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               return yield* Effect.uninterruptibleMask((restore) =>
                 Effect.gen(function* () {
                   yield* restore(runtimeTransitionPermit.take(1));
-                  return yield* Effect.gen(function* () {
+                  // Stop's caller times out on this call. The transition runs in its own fiber so
+                  // a stalled hard teardown keeps its state and permit without holding the caller.
+                  const transitionFiber = yield* Effect.gen(function* () {
                     const transition = yield* Effect.gen(function* () {
                       const interruptContext = yield* Ref.get(activeTurn);
                       if (
@@ -8015,8 +8032,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       ) {
                         // ACP cancel leaves native children alive; close confirms session-wide Stop.
                         pendingStopCloseTurn = interruptContext;
-                        const closed = yield* runtime.closeSession().pipe(
-                          Effect.timeoutOption("10 seconds"),
+                        // Interruptible, or neither this timeout nor the caller's could end a hung close.
+                        const closed = yield* restore(
+                          runtime
+                            .closeSession()
+                            .pipe(Effect.timeoutOption(ACP_STOP_CONFIRM_TIMEOUT_MS)),
+                        ).pipe(
                           Effect.mapError(
                             (cause) =>
                               new ProviderAdapter.ProviderAdapterProtocolError({
@@ -8028,10 +8049,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                           ),
                         );
                         if (Option.isNone(closed)) {
-                          return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                          return yield* new ProviderAdapter.ProviderAdapterInterruptTimeoutError({
                             driver,
-                            detail:
-                              "The agent did not confirm session close; background work may still run",
+                            providerThreadId: turnInput.providerThread.id,
+                            providerTurnId: turnInput.providerTurnId,
+                            timeoutMs: ACP_STOP_CONFIRM_TIMEOUT_MS,
                           });
                         }
                         yield* runtimeCallbackPermit.withPermit(
@@ -8261,15 +8283,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                         }
                       }
                       const stopped = yield* Deferred.await(context.completed).pipe(
-                        Effect.timeoutOption("10 seconds"),
+                        Effect.timeoutOption(ACP_STOP_CONFIRM_TIMEOUT_MS),
                       );
+                      // The turn stays open: the agent may still be working, and the user
+                      // decides whether to Force stop it.
                       if (Option.isNone(stopped)) {
-                        if (!context.finalized) {
-                          yield* finalizeTurn(context, "interrupted");
-                        }
-                        return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                        return yield* new ProviderAdapter.ProviderAdapterInterruptTimeoutError({
                           driver,
-                          detail: `ACP provider turn ${turnInput.providerTurnId} did not acknowledge cancellation before the interrupt timeout`,
+                          providerThreadId: turnInput.providerThread.id,
+                          providerTurnId: turnInput.providerTurnId,
+                          timeoutMs: ACP_STOP_CONFIRM_TIMEOUT_MS,
                         });
                       }
                     });
@@ -8290,20 +8313,29 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                         }),
                       ),
                     );
-                  }).pipe(Effect.ensuring(runtimeTransitionPermit.release(1)));
+                  }).pipe(
+                    Effect.ensuring(runtimeTransitionPermit.release(1)),
+                    Effect.forkIn(sessionScope, { startImmediately: true, uninterruptible: true }),
+                  );
+                  return yield* restore(Fiber.join(transitionFiber)).pipe(
+                    Effect.onInterrupt(() =>
+                      Fiber.interrupt(transitionFiber).pipe(Effect.forkDetach, Effect.asVoid),
+                    ),
+                  );
                 }),
               );
             },
             (effect, turnInput) =>
               effect.pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderAdapter.ProviderAdapterInterruptError({
-                      driver,
-                      providerThreadId: turnInput.providerThread.id,
-                      providerTurnId: turnInput.providerTurnId,
-                      cause,
-                    }),
+                Effect.mapError((cause) =>
+                  cause._tag === "ProviderAdapterInterruptTimeoutError"
+                    ? cause
+                    : new ProviderAdapter.ProviderAdapterInterruptError({
+                        driver,
+                        providerThreadId: turnInput.providerThread.id,
+                        providerTurnId: turnInput.providerTurnId,
+                        cause,
+                      }),
                 ),
               ),
           ),
@@ -8571,6 +8603,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               new ProviderAdapter.ProviderAdapterOpenSessionError({
                 driver,
                 providerSessionId: input.providerSessionId,
+                ...(flavor.requiresSignIn?.(cause) === true ? { requiresSignIn: true } : {}),
                 cause,
               }),
           ),
