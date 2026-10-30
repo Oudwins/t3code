@@ -6,7 +6,7 @@ import * as Option from "effect/Option";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 
-// AppImage mounts change each run; the launcher must mount the image itself.
+// AppImage mounts change each run; the launcher must reopen the image itself.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
 export const MARKER = "Written by T3 Code: runs the desktop app's bundled t3 CLI.";
@@ -21,7 +21,12 @@ const cmdWord = (value: string) => `"${cmdText(value)}"`;
 const MOVED = "T3 Code has moved or been removed. Open the app once to update this command.";
 
 export type CliShimTarget =
-  | { readonly kind: "appimage"; readonly appImage: string; readonly executableName: string }
+  | {
+      readonly kind: "appimage";
+      readonly appImage: string;
+      readonly appDirectory: string;
+      readonly executableName: string;
+    }
   | { readonly kind: "direct"; readonly executable: string; readonly entry: string }
   | { readonly kind: "windows"; readonly executable: string; readonly entry: string };
 
@@ -89,6 +94,10 @@ export const renderCliShim = (input: {
     ...header,
     // Extract-and-run would make the runtime start the app instead of mounting it.
     "unset APPIMAGE_EXTRACT_AND_RUN",
+    // NixOS intercepts runtime flags; -w uses the app's extracted directory without startup text on stdout.
+    `if [ -x ${shellWord(`${target.appDirectory}/AppRun`)} ] && command -v appimage-run >/dev/null 2>&1; then`,
+    `  exec appimage-run -w ${shellWord(target.appDirectory)} ${shellWord(`${target.appDirectory}/resources/app.asar/${SERVER_ENTRY}`)} "$@"`,
+    "fi",
     // The runtime stays mounted until killed; traps unmount it because background jobs ignore Ctrl-C.
     "work=$(mktemp -d) || exit 1",
     '"$app" --appimage-mount >"$work/mount" 2>/dev/null &',
@@ -133,6 +142,7 @@ export const install = Effect.gen(function* () {
         onSome: (appImage) => ({
           kind: "appimage" as const,
           appImage,
+          appDirectory: path.dirname(process.execPath),
           executableName: path.basename(process.execPath),
         }),
         onNone: () => ({ kind: "direct" as const, executable: process.execPath, entry }),
