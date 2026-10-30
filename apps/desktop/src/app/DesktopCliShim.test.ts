@@ -41,36 +41,83 @@ const run = (shim: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv =
 const REPORTER =
   '#!/bin/sh\necho "node=$ELECTRON_RUN_AS_NODE cli=$T3CODE_CLI_PATH home=$T3CODE_HOME"\nprintf "%s\\n" "$@"\nexit 3\n';
 
-const fakeAppImage = (canMount = true) => {
+const fakeAppImage = (mode: "mount" | "extract" | "appimage-run") => {
   const root = tempRoot();
-  const image = NodePath.join(root, "image");
+  const image = NodePath.join(root, "image with spaces");
+  const tools = NodePath.join(root, "tools");
+  NodeFS.mkdirSync(tools);
+  for (const tool of ["cp", "head", "mktemp", "rm", "sleep", "touch"]) {
+    const executable = NodeChildProcess.execFileSync("sh", ["-c", 'command -v "$1"', "_", tool], {
+      encoding: "utf8",
+    }).trim();
+    NodeFS.symlinkSync(executable, NodePath.join(tools, tool));
+  }
   writeExecutable(NodePath.join(image, "t3code"), REPORTER);
+  if (mode === "appimage-run") {
+    const entry = NodePath.join(image, "resources/app.asar/apps/server/dist/bin.mjs");
+    NodeFS.mkdirSync(NodePath.dirname(entry), { recursive: true });
+    NodeFS.writeFileSync(
+      entry,
+      [
+        "if (!import.meta.main) process.exit(9);",
+        "console.log(`node=${process.env.ELECTRON_RUN_AS_NODE} cli=${process.env.T3CODE_CLI_PATH} home=${process.env.T3CODE_HOME}`);",
+        'console.log(process.argv.slice(1).join("\\n"));',
+        "process.exit(3);",
+      ].join("\n"),
+    );
+    writeExecutable(NodePath.join(image, "AppRun"), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+    writeExecutable(
+      NodePath.join(tools, "appimage-run"),
+      [
+        "#!/bin/sh",
+        '[ "$1" = -w ] || { echo "unexpected startup text"; exit 9; }',
+        'export APPDIR="$2"',
+        "shift 2",
+        'exec "$APPDIR/AppRun" "$@"',
+        "",
+      ].join("\n"),
+    );
+  }
   const appImage = NodePath.join(root, "T3 Code.AppImage");
   writeExecutable(
     appImage,
     [
       "#!/bin/sh",
+      ...(mode === "appimage-run" ? ["echo 'bad option: --appimage-extract' >&2; exit 9"] : []),
       `if [ "$1" = --appimage-extract ]; then cp -R '${image}' squashfs-root; exit 0; fi`,
       '[ "$1" = --appimage-mount ] || exit 9',
       '[ -n "$APPIMAGE_EXTRACT_AND_RUN" ] && exit 8',
-      canMount ? `echo '${image}'` : 'echo "Cannot mount AppImage"; exit 1',
+      mode === "mount" ? `echo '${image}'` : 'echo "Cannot mount AppImage"; exit 1',
       `trap 'touch "${root}/unmounted"; exit 0' TERM`,
       "while :; do sleep 0.05; done",
       "",
     ].join("\n"),
   );
-  const shim = writeShim(root, { kind: "appimage", appImage, executableName: "t3code" });
-  return { root, image, appImage, shim };
+  const shim = writeShim(root, {
+    kind: "appimage",
+    appImage,
+    appDirectory: image,
+    executableName: "t3code",
+  });
+  return { root, image, appImage, shim, tools };
 };
 
 describe("renderCliShim", () => {
-  it("extracts the AppImage where it cannot be mounted", () => {
-    const { shim } = fakeAppImage(false);
-    const result = run(shim, ["--version"], { APPIMAGE_EXTRACT_AND_RUN: "1" });
+  it.each(["mount", "extract", "appimage-run"] as const)("runs the AppImage CLI via %s", (mode) => {
+    const { root, image, shim, tools } = fakeAppImage(mode);
+    const args = ["portspace", "setup", "path with spaces", "literal '$value' $(echo unexpected)"];
+    const result = run(shim, args, { PATH: tools, APPIMAGE_EXTRACT_AND_RUN: "1" });
     expect(result.status).toBe(3);
-    expect(result.stdout).toMatch(
-      /squashfs-root\/resources\/app\.asar\/apps\/server\/dist\/bin\.mjs/,
+    expect(result.stdout.split("\n")[0]).toBe(`node=1 cli=${shim} home=${root}/home`);
+    const lines = result.stdout.split("\n").slice(1);
+    expect(lines[0]).toEqual(
+      mode === "extract"
+        ? expect.stringMatching(
+            /squashfs-root\/resources\/app\.asar\/apps\/server\/dist\/bin\.mjs$/,
+          )
+        : `${image}/resources/app.asar/apps/server/dist/bin.mjs`,
     );
+    expect(lines.slice(1)).toEqual([...args, ""]);
   });
 
   it("keeps the install's T3 home under sudo, unless one is set", () => {
