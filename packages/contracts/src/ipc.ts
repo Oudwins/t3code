@@ -1067,6 +1067,7 @@ export interface DesktopBridge {
   getPortForwardingStatus?: () => Promise<DesktopPortForwardingStatus>;
   onPortForwardingStatus?: (listener: (status: DesktopPortForwardingStatus) => void) => () => void;
   onNotificationBadgeClear: (listener: () => void) => () => void;
+  onTrackpadScrollBegin: (listener: () => void) => () => void;
   onTrackpadScrollEnd: (listener: () => void) => () => void;
   /**
    * Renderer `window.focus()` cannot raise an Electron window, and on Wayland
