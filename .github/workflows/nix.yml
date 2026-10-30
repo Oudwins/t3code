@@ -1,0 +1,37 @@
+name: NixOS port spaces
+
+on:
+  push:
+    paths:
+      - flake.nix
+      - flake.lock
+      - nix/**
+      - apps/server/src/portSpace/PortSpaceHelper.ts
+      - .github/workflows/nix.yml
+  pull_request:
+    paths:
+      - flake.nix
+      - flake.lock
+      - nix/**
+      - apps/server/src/portSpace/PortSpaceHelper.ts
+      - .github/workflows/nix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nixos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            system-features = nixos-test benchmark big-parallel kvm
+            extra-sandbox-paths = /dev/kvm
+      - name: Enable KVM for the VM test
+        run: sudo chmod a+rw /dev/kvm
+      - name: Build packages and test the NixOS module
+        run: nix flake check --print-build-logs
