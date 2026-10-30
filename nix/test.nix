@@ -45,6 +45,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    import json
+
     start_all()
     machine.wait_for_unit("xvfb.service")
     machine.wait_for_file("/tmp/.X11-unix/X0")
@@ -52,7 +54,10 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("t3code-desktop-test.service")
     machine.wait_for_open_port(3773)
     machine.wait_until_succeeds("DISPLAY=:0 xwininfo -root -tree | grep 'T3 Code'")
-    privileges = machine.succeed("runuser -u alice -- env ELECTRON_RUN_AS_NODE=1 t3code-desktop -p 'require(\"fs\").readFileSync(\"/proc/self/status\", \"utf8\")'")
+    runtime_path = "/home/alice/t3code-test/userdata/server-runtime.json"
+    machine.wait_for_file(runtime_path)
+    backend_pid = json.loads(machine.succeed("cat " + runtime_path))["pid"]
+    privileges = machine.succeed(f"cat /proc/{backend_pid}/status")
     assert "NoNewPrivs:\t0" in privileges, privileges
     status = machine.succeed("runuser -u alice -- t3 portspace status")
     assert "Port spaces are ready." in status, status

@@ -64,7 +64,6 @@ stdenv.mkDerivation {
     libxext
     libxfixes
     libxrandr
-    musl
     systemd
     vulkan-loader
     gsettings-desktop-schemas
@@ -90,6 +89,8 @@ stdenv.mkDerivation {
   '';
 
   preFixup = ''
+    # Keep the optional musl addons out of the launcher's glibc link flags.
+    addAutoPatchelfSearchPath "${pkgs.musl}/lib"
     makeWrapper "$out/lib/t3code/t3code" "$out/bin/t3code-desktop" \
       "''${gappsWrapperArgs[@]}" \
       --unset APPIMAGE --unset APPDIR \
