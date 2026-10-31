@@ -55,7 +55,18 @@ export const layerRealGit = GitWorkflow.layer.pipe(
       Layer.mock(TextGeneration.TextGeneration)({}),
       Layer.mock(ProviderRegistry.ProviderRegistry)({}),
       Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
-      Layer.mock(WorktreeManager.WorktreeManager)({}),
+      // The fork's GitManager creates worktrees through the manager; keep them on real Git.
+      Layer.effect(
+        WorktreeManager.WorktreeManager,
+        Effect.gen(function* () {
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          return WorktreeManager.WorktreeManager.of({
+            createWorktree: driver.createWorktree,
+            removeWorktree: driver.removeWorktree,
+            sweep: Effect.void,
+          });
+        }),
+      ),
       Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
       Layer.mock(ProjectStore.ProjectStoreV2)({}),
       ServerSettings.layerTest(),
