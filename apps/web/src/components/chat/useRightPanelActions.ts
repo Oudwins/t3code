@@ -34,6 +34,8 @@ interface RightPanelActionsInput {
   readonly deviceStateLoaded: boolean;
   readonly threadPanelPresentation: ThreadPanelPresentation;
   readonly isServerThread: boolean;
+  /** A side chat pane; the main view already answers preview bus actions. */
+  readonly embedded: boolean;
   readonly browserAvailable: boolean;
   readonly canOperatePreview: boolean;
   readonly diffOpen: boolean;
@@ -61,6 +63,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     deviceStateLoaded,
     threadPanelPresentation,
     isServerThread,
+    embedded,
     browserAvailable,
     canOperatePreview,
     diffOpen,
@@ -225,10 +228,12 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the preview action bus to toggle the preview panel
   useEffect(
     () =>
-      subscribePreviewAction((action) => {
-        if (action === "toggle-panel") togglePreviewPanelStable();
-      }),
-    [togglePreviewPanelStable],
+      embedded
+        ? undefined
+        : subscribePreviewAction((action) => {
+            if (action === "toggle-panel") togglePreviewPanelStable();
+          }),
+    [embedded, togglePreviewPanelStable],
   );
 
   const shortcuts = {

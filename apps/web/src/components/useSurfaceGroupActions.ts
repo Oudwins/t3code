@@ -3,12 +3,14 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  AuthOrchestrationOperateScope,
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
   type NewThreadTab,
   type PreviewSessionSnapshot,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { getTerminalLabel, nextTerminalId } from "@t3tools/shared/terminalLabels";
 import { readEnvironmentScope } from "../state/session";
@@ -27,8 +29,12 @@ import {
   useRightPanelStore,
   type RightPanelSurface,
 } from "../rightPanelStore";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { readThreadShell } from "../state/entities";
 import { previewEnvironment } from "../state/preview";
+import { environmentShell } from "../state/shell";
 import { terminalEnvironment } from "../state/terminal";
+import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { getClientSettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
@@ -104,6 +110,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const deleteThread = useAtomCommand(threadEnvironment.delete, "side chat delete");
   const storeCloseTerminal = useTerminalUiStateStore((state) => state.closeTerminal);
 
   const openBrowserTab = async (profileId?: string) => {
@@ -310,6 +317,22 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
             input: { threadId: threadRef.threadId, terminalId, deleteHistory: true },
           });
         }
+      }
+      if (
+        surface.kind === "side-chat" &&
+        readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) &&
+        // A live shell without the side chat means it is already deleted.
+        !(
+          appAtomRegistry.get(environmentShell.stateValueAtom(threadRef.environmentId)).status ===
+            "live" &&
+          readThreadShell(scopeThreadRef(threadRef.environmentId, surface.threadId)) === null
+        )
+      ) {
+        // The server keeps a side chat with a run or message. Reopen skips one it deleted.
+        void deleteThread({
+          environmentId: threadRef.environmentId,
+          input: { threadId: surface.threadId, onlyIfUnused: true },
+        });
       }
     }
   };
