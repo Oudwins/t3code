@@ -522,6 +522,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
       case "empty":
       case "cached":
       case "synchronizing":
+      case "missing":
         if (contentPresentationKind === "ready") {
           return "Syncing messages...";
         }
