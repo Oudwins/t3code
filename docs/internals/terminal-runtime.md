@@ -37,6 +37,13 @@ owns and frees its own handles. The canonical upstream pin is
 web artifacts must be rebuilt when it changes. Web embeds the revision in its build
 info so the ABI check can detect drift without a second pin.
 
+Retained output is a byte tail, not terminal state. Once a full-screen app's start
+(alternate screen, modes, a one-time status line) falls out of the cap, replaying the
+tail draws a distorted screen. Web views unmount on tab, drawer, and thread switches,
+so the [drawer](../../apps/web/src/components/ThreadTerminalDrawer.tsx) parks the
+Ghostty core on unmount, keeps feeding it, and hands it to the next view of that
+session. Replay remains the fallback after a reload or eviction. Mobile still replays.
+
 Restoring scrollback must not send terminal replies to the current shell. Historical
 device queries can otherwise provoke fresh replies that appear as junk at the
 prompt. The server strips query/response traffic from retained history, and the

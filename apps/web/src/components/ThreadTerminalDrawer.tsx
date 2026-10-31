@@ -31,6 +31,7 @@ import {
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
+import { type Atom, type AtomRegistry } from "effect/reactivity";
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -56,7 +57,11 @@ import {
   GhosttyTerminalSurface,
   type GhosttyTerminalSurfaceOptions,
 } from "~/terminal/ghostty/surface";
-import { type GhosttyColor, type GhosttyTheme } from "~/terminal/ghostty/core";
+import {
+  type GhosttyColor,
+  type GhosttyTerminalCore,
+  type GhosttyTheme,
+} from "~/terminal/ghostty/core";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { isTerminalUrl } from "../terminal-links";
@@ -195,6 +200,73 @@ export function synchronizeTerminalSession(
     writeSystemMessage(terminal, session.error);
   }
   return nextCursor;
+}
+
+interface ParkedTerminalCore {
+  readonly core: GhosttyTerminalCore;
+  readonly session: TerminalSessionState;
+  readonly cursor: TerminalOutputCursor;
+}
+
+const MAX_PARKED_TERMINAL_CORES = 10;
+const parkedTerminalCores = new Map<
+  Atom.Atom<TerminalSessionState>,
+  { state: ParkedTerminalCore; readonly unsubscribe: () => void }
+>();
+
+function evictParkedTerminalCore(sessionAtom: Atom.Atom<TerminalSessionState>): void {
+  const parked = parkedTerminalCores.get(sessionAtom);
+  if (!parked) return;
+  parkedTerminalCores.delete(sessionAtom);
+  parked.unsubscribe();
+  parked.state.core.dispose();
+}
+
+/**
+ * Keeps a running session's emulator fed after its view unmounts. Replaying the retained
+ * output instead is lossy: full-screen apps like nvim set modes and draw once, then only
+ * send deltas, so a byte tail without its start redraws a distorted screen.
+ */
+export function parkTerminalCore(
+  registry: AtomRegistry.AtomRegistry,
+  sessionAtom: Atom.Atom<TerminalSessionState>,
+  parked: ParkedTerminalCore,
+): void {
+  evictParkedTerminalCore(sessionAtom);
+  if (parked.session.status === "closed" || parked.session.status === "exited") {
+    parked.core.dispose();
+    return;
+  }
+  const entry = {
+    state: parked,
+    unsubscribe: registry.subscribe(sessionAtom, (session) => {
+      if (session.status === "closed" || session.status === "exited") {
+        evictParkedTerminalCore(sessionAtom);
+        return;
+      }
+      const { core, session: previous, cursor } = entry.state;
+      entry.state = {
+        core,
+        session,
+        cursor: synchronizeTerminalSession(core, previous, session, cursor),
+      };
+    }),
+  };
+  parkedTerminalCores.set(sessionAtom, entry);
+  const oldest = parkedTerminalCores.keys().next().value;
+  if (parkedTerminalCores.size > MAX_PARKED_TERMINAL_CORES && oldest) {
+    evictParkedTerminalCore(oldest);
+  }
+}
+
+export function adoptParkedTerminalCore(
+  sessionAtom: Atom.Atom<TerminalSessionState>,
+): ParkedTerminalCore | null {
+  const parked = parkedTerminalCores.get(sessionAtom);
+  if (!parked) return null;
+  parkedTerminalCores.delete(sessionAtom);
+  parked.unsubscribe();
+  return parked.state;
 }
 
 function parseTerminalColor(value: string, fallback: GhosttyColor): GhosttyColor {
@@ -581,6 +653,10 @@ function TerminalSessionViewport({
     (listener: (session: TerminalSessionState) => void) =>
       appAtomRegistry.subscribe(terminalSessionAtom, listener),
   );
+  const adoptParkedCore = useEffectEvent(() => adoptParkedTerminalCore(terminalSessionAtom));
+  const parkCore = useEffectEvent((parked: ParkedTerminalCore) =>
+    parkTerminalCore(appAtomRegistry, terminalSessionAtom, parked),
+  );
   const writeTerminal = useEffectEvent((data: string) =>
     runTerminalWrite({
       environmentId,
@@ -682,9 +758,15 @@ function TerminalSessionViewport({
           if (terminalRef.current) void showTerminalContextMenu(event);
         },
       });
-      const terminal = await GhosttyTerminalSurface.create(mount, terminalOptions);
+      let parked = null as ParkedTerminalCore | null;
+      const terminal = await GhosttyTerminalSurface.create(mount, terminalOptions, () => {
+        if (cancelled) return null;
+        parked = adoptParkedCore();
+        return parked?.core ?? null;
+      });
       if (cancelled) {
-        terminal.dispose();
+        if (parked) parkCore({ ...parked, core: terminal.releaseCore() });
+        else terminal.dispose();
         return null;
       }
       terminal.setVisible(visibleRef.current);
@@ -703,13 +785,15 @@ function TerminalSessionViewport({
       terminal.setSharedGrid(latestSession.grid);
       const initialOutput = readTerminalOutputUpdate(
         latestSession.output,
-        INITIAL_TERMINAL_OUTPUT_CURSOR,
+        parked?.cursor ?? INITIAL_TERMINAL_OUTPUT_CURSOR,
       );
-      if (initialOutput.type === "reset" && initialOutput.data.length > 0) {
+      if (parked || (initialOutput.type === "reset" && initialOutput.data.length > 0)) {
         writeTerminalOutputUpdate(terminal, initialOutput);
       }
       outputCursorRef.current = initialOutput.cursor;
-      if (latestSession.error !== null) writeSystemMessage(terminal, latestSession.error);
+      if (latestSession.error !== null && latestSession.error !== parked?.session.error) {
+        writeSystemMessage(terminal, latestSession.error);
+      }
       synchronizedStatusRef.current = "closed";
       synchronizeTerminalStatus(terminal, latestSession.status, latestSession.version);
       // Read and subscribe in one synchronous step so no output lands between them.
@@ -1098,7 +1182,11 @@ function TerminalSessionViewport({
       return () => {
         for (const cleanup of cleanups.toReversed()) cleanup();
         if (terminalRef.current === terminal) terminalRef.current = null;
-        terminal.dispose();
+        parkCore({
+          core: terminal.releaseCore(),
+          session: previousSession,
+          cursor: outputCursorRef.current,
+        });
       };
     };
 

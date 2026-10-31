@@ -229,23 +229,30 @@ describe("GhosttyTerminalSurface visibility", () => {
           }),
         );
       },
-      async create(options: Partial<GhosttyTerminalSurfaceOptions> = {}) {
-        const surface = await GhosttyTerminalSurface.create(mount as unknown as HTMLElement, {
-          theme: {
-            foreground: { r: 255, g: 255, b: 255 },
-            background: { r: 0, g: 0, b: 0 },
-            cursor: { r: 255, g: 255, b: 255 },
+      async create(
+        options: Partial<GhosttyTerminalSurfaceOptions> = {},
+        claimCore?: () => GhosttyTerminalCore | null,
+      ) {
+        const surface = await GhosttyTerminalSurface.create(
+          mount as unknown as HTMLElement,
+          {
+            theme: {
+              foreground: { r: 255, g: 255, b: 255 },
+              background: { r: 0, g: 0, b: 0 },
+              cursor: { r: 255, g: 255, b: 255 },
+            },
+            onData,
+            onResize() {},
+            onSelectionChange() {},
+            beforeKey: () => false,
+            onLinkActivate() {},
+            ...options,
+            get visible() {
+              return options.visible ?? true;
+            },
           },
-          onData,
-          onResize() {},
-          onSelectionChange() {},
-          beforeKey: () => false,
-          onLinkActivate() {},
-          ...options,
-          get visible() {
-            return options.visible ?? true;
-          },
-        });
+          claimCore,
+        );
         surfaces.add(surface);
         return surface;
       },
@@ -258,6 +265,28 @@ describe("GhosttyTerminalSurface visibility", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("claims a released core after loading, so a view torn down meanwhile leaves it to the next", async () => {
+    const harness = createHarness();
+    const released = (await harness.create()).releaseCore();
+    let parked: GhosttyTerminalCore | null = released;
+    const claimFor = (setup: { cancelled: boolean }) => () => {
+      if (setup.cancelled) return null;
+      const core = parked;
+      parked = null;
+      return core;
+    };
+    const torn = { cancelled: false };
+    const tornSurface = harness.create({}, claimFor(torn));
+    torn.cancelled = true;
+    const nextSurface = harness.create({}, claimFor({ cancelled: false }));
+
+    const tornCore = (await tornSurface).releaseCore();
+    expect(tornCore).not.toBe(released);
+    expect((await nextSurface).releaseCore()).toBe(released);
+    tornCore.dispose();
+    released.dispose();
   });
 
   it("preserves shell Ctrl+A and ordinary application navigation", async () => {
