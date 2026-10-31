@@ -1,5 +1,5 @@
 {
-  description = "T3 Code desktop app, CLI, and NixOS port spaces";
+  description = "T3 Code desktop, headless server, and NixOS port spaces";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

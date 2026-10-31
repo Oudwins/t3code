@@ -33,5 +33,5 @@ jobs:
             extra-sandbox-paths = /dev/kvm
       - name: Enable KVM for the VM test
         run: sudo chmod a+rw /dev/kvm
-      - name: Build the desktop app and test port spaces
+      - name: Test desktop and server installations with port spaces
         run: nix flake check --print-build-logs

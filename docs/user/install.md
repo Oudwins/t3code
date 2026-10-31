@@ -102,7 +102,8 @@ Nix manages both the desktop app and the bundled
 
 ### T3 Code flake with port spaces
 
-This repository's flake installs the native desktop app and CLI on Linux. Its
+This repository's flake offers the native desktop app and a separate headless
+CLI/backend package on Linux. Its
 NixOS module can also manage the port-space helper, required tools, and sudo
 rules. The desktop runs its backend directly on the host, so there is no
 `appimage-run` sandbox or separate server to pair with.
@@ -143,6 +144,35 @@ the app with `nix profile add 'github:Oudwins/t3code?ref=feat/nixos-port-spaces'
 or try the CLI with
 `nix run 'github:Oudwins/t3code?ref=feat/nixos-port-spaces#t3code-cli' -- --help`.
 Port-space permissions require the NixOS module.
+
+For a server without Electron or a desktop app, use the same module with
+`services.t3code` instead:
+
+```nix
+imports = [ inputs.t3code.nixosModules.default ];
+
+services.t3code = {
+  enable = true;
+  user = "alice";
+  portSpaces.enable = true;
+};
+```
+
+This installs only the CLI/backend and runs it as the named user at boot. The
+default listener is `127.0.0.1:3773`, with state under
+`~/.local/share/t3code-server`. Configure `host`, `port`, and `dataDir` on the
+service to change these. Set `host = "0.0.0.0"` and `openFirewall = true` to
+allow direct connections from other machines. Each client still needs to pair:
+
+```bash
+/run/current-system/sw/bin/t3 --base-dir "$HOME/.local/share/t3code-server" pair
+```
+
+Connect your desktop or mobile client using those pairing details. Install and
+authenticate provider CLIs for the service user. Inspect logs with
+`journalctl -u t3code`. To install only the CLI without a managed service, use
+`nix profile add 'github:Oudwins/t3code?ref=feat/nixos-port-spaces#t3code-cli'`
+and run `t3 serve`.
 
 ### The `t3` command
 
