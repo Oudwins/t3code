@@ -874,6 +874,8 @@ export interface ThreadSearchMatch {
   readonly pickedAt?: number;
   /** Picked for exactly this query, before newer picks for longer ones; see `rankSearchGroups`. */
   readonly pickedExactly?: boolean;
+  /** The query is the thread's whole branch name; listed before every other match. */
+  readonly exact?: boolean;
   /** Below the whole-name class; see `scoreThreadSearch`. */
   readonly groupQuality: number;
 }
@@ -970,6 +972,21 @@ export function scoreThreadSearch(
     .replace(/^(?:pr|pull request|pull)\s*(?=#?\d)/, "")
     .replace(/^#\s*/, "")
     .replace(WORKTREE_BRANCH_PREFIX_PATTERN, "");
+  if (branch && prepareSearchField(branch).text === fieldQuery) {
+    return {
+      score: WHOLE_NAME * threadUsageBoost(thread, now),
+      quality: WHOLE_NAME,
+      groupQuality: WHOLE_NAME,
+      strong: true,
+      exact: true,
+      ranges: [],
+      explain: () => ({
+        label: "Branch",
+        text: branch,
+        ranges: [{ start: 0, end: branch.length }],
+      }),
+    };
+  }
   const fieldMatch = matchSearchFields(fieldQuery, fields, options);
   const referenceMatch = fieldMatch ? null : matchReference(normalizedQuery, thread);
   const match = fieldMatch ?? referenceMatch;
@@ -1095,6 +1112,7 @@ export function rankSearchGroups<
     readonly strong: boolean;
     readonly pickedAt?: number;
     readonly pickedExactly?: boolean;
+    readonly exact?: boolean;
     readonly groupQuality?: number;
   },
 >(
@@ -1123,6 +1141,7 @@ export function rankSearchGroups<
       const exactPickAt = (match: M) => (match.pickedExactly ? (match.pickedAt ?? 0) : 0);
       const sorted = [...items].sort(
         (left, right) =>
+          Number(right.match.exact ?? false) - Number(left.match.exact ?? false) ||
           wordMatch(right.match) - wordMatch(left.match) ||
           exactPickAt(right.match) - exactPickAt(left.match) ||
           matchClass(right.match.quality) - matchClass(left.match.quality) ||
@@ -1132,9 +1151,15 @@ export function rankSearchGroups<
       const best = Math.max(
         ...items.map(({ match }) => matchClass(match.groupQuality ?? match.quality)),
       );
-      return [{ group, ranked: sorted, best, order }];
+      const exact = items.some(({ match }) => match.exact === true);
+      return [{ group, ranked: sorted, best, exact, order }];
     })
-    .sort((left, right) => right.best - left.best || left.order - right.order)
+    .sort(
+      (left, right) =>
+        Number(right.exact) - Number(left.exact) ||
+        right.best - left.best ||
+        left.order - right.order,
+    )
     .map(({ group, ranked: items }) => ({ group, ranked: items }));
 }
 
