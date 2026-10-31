@@ -14,7 +14,7 @@ import {
   US_SHIFTED_TO_UNSHIFTED_KEYS,
 } from "@t3tools/shared/keybindings";
 
-import { shortcutKeyFromEvent } from "../../keybindings";
+import { shortcutConflictKey, shortcutKeyFromEvent } from "../../keybindings";
 import { isMacPlatform } from "../../lib/utils";
 import { METRIC_OPTIONS, WINDOW_OPTIONS } from "../usage/usageShortcuts";
 
@@ -182,12 +182,21 @@ function keybindingRowId(command: KeybindingCommand, key: string, when: string):
   return `${command}\u0000${key}\u0000${when}`;
 }
 
+// Resolve each step so mod+k and ctrl+k collide where mod is Ctrl.
+function shortcutStepConflictKeys(key: string, platform: string): ReadonlyArray<string> | null {
+  const keys: Array<string> = [];
+  for (const step of key.trim().split(/\s+/)) {
+    const shortcut = parseKeybindingShortcut(step);
+    if (!shortcut) return null;
+    keys.push(shortcutConflictKey(shortcut, platform));
+  }
+  return keys;
+}
+
 /** Equal keys collide; so do a chord's leader press and a plain shortcut on that same key. */
-function keysConflict(left: string, right: string): boolean {
-  if (left === right) return true;
-  const leftSteps = left.split(/\s+/);
-  const rightSteps = right.split(/\s+/);
-  return leftSteps.length !== rightSteps.length && leftSteps[0] === rightSteps[0];
+function keysConflict(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+  if (left.length === right.length) return left.every((step, index) => step === right[index]);
+  return left[0] === right[0];
 }
 
 function conflictsWithWhen(leftWhen: string, rightWhen: string): boolean {
@@ -197,13 +206,16 @@ function conflictsWithWhen(leftWhen: string, rightWhen: string): boolean {
 export function keybindingConflictLabels(
   rows: ReadonlyArray<KeybindingRow>,
   input: { readonly rowId: string; readonly key: string; readonly when: string },
+  platform = navigator.platform,
 ): ReadonlyArray<string> {
   if (input.key.trim().length === 0) return [];
+  const inputKeys = shortcutStepConflictKeys(input.key, platform);
+  if (!inputKeys) return [];
   const conflicts: Array<string> = [];
   for (const candidate of rows) {
     if (
       candidate.id !== input.rowId &&
-      keysConflict(candidate.key, input.key) &&
+      keysConflict(shortcutStepConflictKeys(candidate.key, platform) ?? [], inputKeys) &&
       conflictsWithWhen(candidate.when, input.when)
     ) {
       conflicts.push(commandLabel(candidate.command));
@@ -259,6 +271,7 @@ export function groupKeybindingRows(
 
 export function buildKeybindingRows(
   keybindings: ResolvedKeybindingsConfig,
+  platform = navigator.platform,
 ): ReadonlyArray<KeybindingRow> {
   const rowsById = new Map<string, KeybindingRow>();
   for (const binding of keybindings) {
@@ -281,11 +294,15 @@ export function buildKeybindingRows(
   const rows = [...rowsById.values()];
 
   const rowsWithConflicts = rows.map((row) => {
-    const conflicts = keybindingConflictLabels(rows, {
-      rowId: row.id,
-      key: row.key,
-      when: row.when,
-    });
+    const conflicts = keybindingConflictLabels(
+      rows,
+      {
+        rowId: row.id,
+        key: row.key,
+        when: row.when,
+      },
+      platform,
+    );
     return conflicts.length > 0
       ? Object.assign({}, row, { conflicts: [...new Set(conflicts)].toSorted() })
       : row;

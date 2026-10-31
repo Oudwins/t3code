@@ -99,10 +99,10 @@ Spawning through the helper changes what a caller holds:
 - Spawn failure is not detected by the shell-fallback loop: `sudo` starts fine even when the shell
   it was asked to run does not exist.
 - Host-side port discovery does not see a namespace's listeners. `PortScanner` asks
-  `PortSpaces.listeners` per namespace, keeps loopback-reachable ones, and probes them through
-  `PortGateway` (HTTP only), tagging each with its thread. As on the host, only listeners owned by
-  a T3 terminal are probed. Process names come from `/proc/<pid>/exe`: `comm` is the thread name
-  and reads `MainThread` for node.
+  `PortSpaces.listeners` per namespace, keeps loopback-reachable ones, and tags each with its
+  thread. As on the host, only listeners owned by a T3 terminal are listed, and none is requested:
+  owning a process says nothing about its protocol. Process names come from `/proc/<pid>/exe`:
+  `comm` is the thread name and reads `MainThread` for node.
 
 ## Providers
 
