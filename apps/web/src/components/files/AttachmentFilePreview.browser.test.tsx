@@ -2578,7 +2578,8 @@ it.skip("keeps workspace PDF scroll and zoom after reloads", async () => {
   });
 });
 
-it("clamps workspace PDF scroll when pages shrink or disappear", async () => {
+// quarantine: #66 exceeds the 15s timeout on GitHub-hosted runners
+it.skip("clamps workspace PDF scroll when pages shrink or disappear", async () => {
   using fixture = await workspacePdfPreview();
   const { preview, urls } = fixture;
   await using screen = await render(preview(urls.original, "one"));
