@@ -6,6 +6,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadStreamItem,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2ShellSnapshot,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
 import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
@@ -22,7 +23,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/http";
-import { Atom } from "effect/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
@@ -191,6 +192,7 @@ function cachedThreadState(value: EnvironmentThreadState): EnvironmentThreadStat
 export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make")(function* (
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
+  availability: Stream.Stream<boolean> = Stream.never,
 ) {
   const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
   const cache = yield* Persistence.EnvironmentCacheStore;
@@ -242,6 +244,17 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         sequence: initialSequence,
       };
   const state = yield* SubscriptionRef.make(initialState);
+  // Each shell appearance permits one revalidation, without polling a reserved id.
+  const creation = yield* Queue.sliding<boolean>(1);
+  const creationWatcher =
+    Option.isNone(initialState.data) && initialState.status !== "deleted"
+      ? yield* availability.pipe(
+          Stream.changes,
+          Stream.filter((exists) => exists),
+          Stream.runForEach((exists) => Queue.offer(creation, exists)),
+          Effect.forkScoped,
+        )
+      : undefined;
   const canLoadHistory = Option.isSome(httpClient) && Option.isSome(historyController);
   const acceptsBoundedSocketSnapshots = yield* Ref.make(canLoadHistory);
   const lastSequence = yield* SubscriptionRef.make(initialSequence);
@@ -938,9 +951,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       ORCHESTRATION_V2_WS_METHODS.subscribeThread,
       Effect.fn("EnvironmentThreadState.makeSubscribeInput")(function* (session) {
         let current = yield* SubscriptionRef.get(state);
-        // A prior definitive miss (or delete event) already cleared this thread.
-        // Park the subscription attempt without opening the socket so we do not
-        // retry forever against a known-missing id.
+        // Only a deletion event is definitive; a reserved id can be missing before creation.
         if (current.status === "deleted") {
           return yield* Effect.never;
         }
@@ -950,7 +961,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         yield* markSynchronizing;
         yield* Ref.set(resumingLive, false);
 
-        if (Option.isNone(current.data)) {
+        loadSnapshot: while (Option.isNone(current.data)) {
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
             Effect.flatMap(
               Option.match({
@@ -994,14 +1005,21 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                 }),
               );
               current = yield* SubscriptionRef.get(state);
+              if (creationWatcher !== undefined) yield* Fiber.interrupt(creationWatcher);
               break;
             }
             case "missing": {
-              yield* setDeleted();
-              return yield* Effect.never;
+              yield* SubscriptionRef.update(state, (value) => ({
+                ...value,
+                status: "missing" as const,
+              }));
+              yield* remember;
+              yield* Queue.take(creation);
+              yield* markSynchronizing;
+              break;
             }
             case "unavailable": {
-              break;
+              break loadSnapshot;
             }
           }
         }
@@ -1041,11 +1059,14 @@ function threadStateChanges(
   environmentId: EnvironmentIdType,
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
+  availability?: Stream.Stream<boolean>,
 ) {
   return followStreamInEnvironment(
     environmentId,
     Stream.unwrap(
-      makeEnvironmentThreadState(threadId, resumeCache).pipe(Effect.map(SubscriptionRef.changes)),
+      makeEnvironmentThreadState(threadId, resumeCache, availability).pipe(
+        Effect.map(SubscriptionRef.changes),
+      ),
     ),
   );
 }
@@ -1058,6 +1079,9 @@ export function createEnvironmentThreadStateAtoms<R, E>(
     | R,
     E
   >,
+  snapshotAtom: (
+    environmentId: EnvironmentIdType,
+  ) => Atom.Atom<OrchestrationV2ShellSnapshot | null>,
 ) {
   // Cache definitions must outlive collectible live-atom definitions. The
   // registry retains these nodes without retaining environment or RPC scopes.
@@ -1073,12 +1097,21 @@ export function createEnvironmentThreadStateAtoms<R, E>(
   const family = Atom.family((key: string) => {
     const { environmentId, threadId } = parseThreadKey(key);
     const resumeAtom = resumeFamily(key);
+    const existsAtom = Atom.make(
+      (get) =>
+        get(snapshotAtom(environmentId))?.threads.some((thread) => thread.id === threadId) ?? false,
+    );
     return runtime
       .atom(
         (get) => {
           get.mount(resumeAtom);
           const resume = get.once(resumeAtom);
-          const live = threadStateChanges(environmentId, threadId, resume);
+          const live = threadStateChanges(
+            environmentId,
+            threadId,
+            resume,
+            AtomRegistry.toStream(get.registry, existsAtom),
+          );
           return resume.snapshot === undefined
             ? live
             : Stream.concat(Stream.succeed(cachedThreadState(resume.snapshot.state)), live);

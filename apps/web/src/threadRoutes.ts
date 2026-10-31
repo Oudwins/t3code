@@ -42,7 +42,11 @@ export function resolveThreadRouteRenderState(input: {
   if (!input.bootstrapComplete) {
     return "loading";
   }
-  if (input.serverThreadExists || input.unlistedThreadDetail.status === "deleted") {
+  if (
+    input.serverThreadExists ||
+    input.unlistedThreadDetail.status === "deleted" ||
+    input.unlistedThreadDetail.status === "missing"
+  ) {
     return "missing";
   }
   // Shell membership can lag a new thread; its detail decides.

@@ -18,6 +18,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as TestClock from "effect/testing/TestClock";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
@@ -33,7 +34,7 @@ import * as Persistence from "../platform/persistence.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import { createEnvironmentThreadDetailAtoms } from "./threadDetail.ts";
-import { v2Projection, v2ThreadId } from "./orchestrationV2TestFixtures.ts";
+import { v2Projection, v2ShellSnapshot, v2ThreadId } from "./orchestrationV2TestFixtures.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
 import { createEnvironmentThreadStateAtoms, type EnvironmentThreadState } from "./threads.ts";
 import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
@@ -54,7 +55,17 @@ const SNAPSHOT: OrchestrationV2ThreadDetailSnapshot = { snapshotSequence: 7, pro
 const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?: {
   readonly snapshot?: OrchestrationV2ThreadDetailSnapshot;
   readonly snapshotUnavailable?: boolean;
+  readonly snapshotMissing?: boolean;
+  readonly initialMisses?: number;
 }) {
+  let snapshotMissing = options?.snapshotMissing === true;
+  let remainingMisses = options?.initialMisses ?? 0;
+  const snapshotLoads = yield* Queue.unbounded<number>();
+  const shell = Atom.make({
+    ...v2ShellSnapshot,
+    threads: snapshotMissing ? [] : v2ShellSnapshot.threads,
+  });
+  const closedScopes = yield* Queue.unbounded<void>();
   const subscriptions = yield* Queue.unbounded<{
     readonly afterSequence: number | undefined;
     readonly events: Queue.Queue<OrchestrationV2ThreadStreamItem>;
@@ -144,7 +155,9 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
     runStream: (_environmentId, stream) =>
       Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
     followStream: (_environmentId, stream) =>
-      Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+      Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor).pipe(
+        Stream.ensuring(Queue.offer(closedScopes, undefined)),
+      ),
   });
   const historyController = yield* Effect.service(
     ThreadHistoryController.ThreadHistoryController,
@@ -191,6 +204,7 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
           load: () =>
             Effect.sync(() => {
               httpLoads += 1;
+              if (snapshotMissing || remainingMisses-- > 0) return { _tag: "missing" as const };
               if (options?.snapshotUnavailable === true) {
                 return { _tag: "unavailable" as const };
               }
@@ -207,12 +221,12 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
                       },
                     }),
               };
-            }),
+            }).pipe(Effect.tap(() => Queue.offer(snapshotLoads, httpLoads))),
         }),
       ),
     ),
   );
-  const raw = createEnvironmentThreadStateAtoms(runtime);
+  const raw = createEnvironmentThreadStateAtoms(runtime, () => shell);
   const details = createEnvironmentThreadDetailAtoms(raw.stateAtom);
   const ref = { environmentId: TARGET.environmentId, threadId: THREAD_ID };
   const stateAtom = details.stateAtom(ref);
@@ -233,6 +247,12 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
     olderLoads,
     loadEarlier: () => historyController.loadEarlier(TARGET.environmentId, THREAD_ID),
     counts: () => ({ httpLoads, diskLoads, opened, active }),
+    closedScopes,
+    snapshotLoads,
+    createThread: () => {
+      snapshotMissing = false;
+      registry.set(shell, v2ShellSnapshot);
+    },
   };
 });
 
@@ -260,6 +280,61 @@ describe("createEnvironmentThreadStateAtoms", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
+
+  it.effect.each(["creation", "reopening"] as const)(
+    "recovers an early missing snapshot on %s without polling the reserved id",
+    (recovery) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness({ snapshotMissing: true });
+        const unmount = h.registry.mount(h.stateAtom);
+        const missing = yield* observeState(h.registry, h.stateAtom, (state) =>
+          ["missing", "deleted"].includes(state.status),
+        );
+        expect(missing.status).toBe("missing");
+        yield* TestClock.adjust("1 minute");
+        expect(h.counts()).toEqual({ httpLoads: 1, diskLoads: 1, opened: 0, active: 0 });
+        if (recovery === "reopening") {
+          unmount();
+          yield* Queue.take(h.closedScopes);
+        }
+        h.createThread();
+        const release = recovery === "reopening" ? h.registry.mount(h.stateAtom) : unmount;
+        const subscription = yield* Queue.take(h.subscriptions);
+        yield* Queue.offer(subscription.events, { kind: "synchronized" });
+        yield* observeState(h.registry, h.stateAtom, (state) => state.status === "live");
+        expect(currentThread(h.registry, h.stateAtom)).toEqual(THREAD);
+        expect(h.counts()).toEqual({ httpLoads: 2, diskLoads: 1, opened: 1, active: 1 });
+        release();
+        yield* Deferred.await(subscription.closed);
+      }),
+  );
+
+  it.effect.each([1, 2])(
+    "revalidates a missing snapshot only once for a known thread (%s misses)",
+    (initialMisses) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness({ initialMisses });
+        const unmount = h.registry.mount(h.stateAtom);
+        expect(yield* Queue.take(h.snapshotLoads)).toBe(1);
+        expect(yield* Queue.take(h.snapshotLoads)).toBe(2);
+        if (initialMisses === 1) {
+          const subscription = yield* Queue.take(h.subscriptions);
+          yield* Queue.offer(subscription.events, { kind: "synchronized" });
+          yield* observeState(h.registry, h.stateAtom, (state) => state.status === "live");
+          expect(currentThread(h.registry, h.stateAtom)).toEqual(THREAD);
+          unmount();
+          yield* Deferred.await(subscription.closed);
+        } else {
+          yield* observeState(h.registry, h.stateAtom, (state) =>
+            ["missing", "deleted"].includes(state.status),
+          );
+          yield* TestClock.adjust("1 minute");
+          expect(h.counts()).toEqual({ httpLoads: 2, diskLoads: 1, opened: 0, active: 0 });
+          unmount();
+          yield* Queue.take(h.closedScopes);
+        }
+      }),
+  );
 
   it.effect("keeps warm data and resumes a completed cursor without loading another snapshot", () =>
     Effect.gen(function* () {

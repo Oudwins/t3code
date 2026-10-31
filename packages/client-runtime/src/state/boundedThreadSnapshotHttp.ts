@@ -100,7 +100,7 @@ export const layer: Layer.Layer<
           Effect.catchTags({
             EnvironmentResourceNotFoundError: () =>
               Effect.logDebug(
-                "Bounded thread snapshot not found over HTTP; treating the thread as deleted.",
+                "Bounded thread snapshot not found over HTTP; waiting for thread creation.",
               ).pipe(
                 Effect.annotateLogs({ threadId }),
                 Effect.as({
