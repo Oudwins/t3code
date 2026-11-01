@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import type { ShellEnvironmentPatch } from "@t3tools/contracts";
 import * as HostProcess from "./HostProcess.ts";
 import * as Context from "effect/Context";
 const SHELL_ENV_NAME_PATTERN = /^[A-Z0-9_]+$/;
@@ -905,13 +906,13 @@ function resolveKnownWindowsCliDirs(env: NodeJS.ProcessEnv): ReadonlyArray<strin
 }
 
 /** Keep one PATH spelling in copied Windows environment records. */
-export function setWindowsPath(env: NodeJS.ProcessEnv, value: string): void {
+export function setWindowsPath(env: NodeJS.ProcessEnv, value: string | null): void {
   for (const key of Object.keys(env)) {
     if (key.toUpperCase() === "PATH") {
       delete env[key];
     }
   }
-  env.PATH = value;
+  if (value !== null) env.PATH = value;
 }
 
 function mergeWindowsEnv(
@@ -962,3 +963,44 @@ export const resolveWindowsEnvironment = Effect.fn("shell.resolveWindowsEnvironm
     ? { ...baselinePatch, ...profiledPatch }
     : baselinePatch;
 });
+
+// Login-shell variables never copied into the app: the probe shell's own
+// session state, a terminal the app does not have, and settings for the
+// Electron/Node runtime. PATH and the locale have their own merge rules.
+const NOT_IMPORTED_ENV_NAMES = new Set([
+  "PATH",
+  "PWD",
+  "OLDPWD",
+  "SHLVL",
+  "_",
+  "TERM",
+  "COLORTERM",
+  "NODE_OPTIONS",
+]);
+export const isImportedShellEnvName = (name: string): boolean =>
+  !NOT_IMPORTED_ENV_NAMES.has(name) &&
+  name !== "LANG" &&
+  name !== "LANGUAGE" &&
+  !name.startsWith("LC_") &&
+  !name.startsWith("ELECTRON_") &&
+  !name.startsWith("VITE_") &&
+  // T3 Code's own configuration comes from how the app was launched, except
+  // the telemetry opt-out and the GitHub app client, which shell profiles set.
+  (!name.startsWith("T3CODE_") ||
+    name === "T3CODE_TELEMETRY_ENABLED" ||
+    name === "T3CODE_GITHUB_APP_CLIENT_ID");
+// Named patch fields the desktop sets through its own merge rules.
+const MERGED_SHELL_ENV_NAMES = new Set(["PATH", "LANG", "LC_ALL", "LC_CTYPE"]);
+
+export function applyShellEnvironment(
+  env: NodeJS.ProcessEnv,
+  patch: ShellEnvironmentPatch,
+  platform: NodeJS.Platform,
+): void {
+  for (const [key, value] of Object.entries(patch)) {
+    if (!isImportedShellEnvName(key) && !MERGED_SHELL_ENV_NAMES.has(key)) continue;
+    if (key === "PATH" && platform === "win32") setWindowsPath(env, value);
+    else if (value === null) delete env[key];
+    else env[key] = value;
+  }
+}

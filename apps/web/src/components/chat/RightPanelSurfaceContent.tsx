@@ -81,7 +81,7 @@ export function RightPanelSurfaceContent(props: {
   readonly files: RightPanelFileProps;
   readonly sideChatParentPanel: SideChatParentPanel;
 }) {
-  const { surface, threadRef, visible } = props;
+  const { surface, threadRef, visible, onCloseSurface } = props;
   const groupRef = props.groupRef ?? threadRef;
   if (surface === null) return null;
   switch (surface.kind) {
@@ -179,7 +179,7 @@ export function RightPanelSurfaceContent(props: {
           parentRef={threadRef}
           threadId={surface.threadId}
           parentPanel={props.sideChatParentPanel}
-          onClose={() => props.onCloseSurface(surface)}
+          onClose={() => onCloseSurface(surface)}
         />
       );
     case "device":
