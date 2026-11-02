@@ -564,7 +564,8 @@ export const make = Effect.gen(function* () {
       ...Object.entries(shellEnv).flatMap(([name, value]) =>
         inherited[name] === undefined && value !== undefined ? [[name, value]] : [],
       ),
-      ...Object.keys(ShellEnvironmentPatch.schema.fields).map((name) => [
+      // Named and cached keys always travel, as null once the shell stops exporting them.
+      ...[...Object.keys(ShellEnvironmentPatch.schema.fields), ...CACHED_ENV_NAMES].map((name) => [
         name,
         shellEnv[name] ?? null,
       ]),

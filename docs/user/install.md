@@ -146,8 +146,8 @@ Separate several folders with `:` (`;` on Windows). A leading `~` is your home f
 A project you delete stays gone until the server restarts, then it comes back. At startup the
 server also removes projects outside these folders that have no threads, so removing a folder from
 the list removes its project once its threads are gone. On macOS and Linux
-the desktop app reads these from your login shell, so set them in your shell profile and restart
-the app.
+the desktop app reads these from your login shell, so set them in your shell profile. The app
+starts with the values it read last time, so a change applies from the second launch after it.
 
 ## Mobile app
 

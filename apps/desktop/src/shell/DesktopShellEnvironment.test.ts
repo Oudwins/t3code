@@ -253,12 +253,14 @@ describe("DesktopShellEnvironment", () => {
               assert.equal(env.__MISE_DIFF, "fresh-mise");
               assert.isUndefined(env.JAVA_HOME);
               assert.isUndefined(env.SSL_CERT_FILE);
+              assert.isUndefined(env.CODE_PROJECTS);
               const fresh = yield* Stream.runHead(service.updates);
               assert.isTrue(Option.isSome(fresh));
               if (Option.isSome(fresh)) {
                 assert.equal(fresh.value.environment.PATH, env.PATH);
                 assert.isTrue(fresh.value.discovered);
                 assert.equal(fresh.value.environment.SHELL_PROFILE_TOKEN, "from-profile");
+                assert.isNull(fresh.value.environment.CODE_PROJECTS);
               }
               return true;
             }),
