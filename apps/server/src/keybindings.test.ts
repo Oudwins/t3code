@@ -199,7 +199,9 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "mod+g x", command: "terminal.toggle" },
       ]);
       assert.isTrue(
-        resolved.some((entry) => "chord" in entry && entry.command === "terminal.toggle"),
+        resolved.keybindings.some(
+          (entry) => "chord" in entry && entry.command === "terminal.toggle",
+        ),
       );
 
       const reloaded = yield* Effect.gen(function* () {
