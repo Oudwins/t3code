@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
@@ -736,6 +737,7 @@ function useKeybindingRowEditor({
   onSave: (input: ServerUpsertKeybindingInput) => void;
 }) {
   const [draft, setDraft] = useReducer(keybindingRowDraftReducer, row, createKeybindingRowDraft);
+  const pillRef = useRef<HTMLButtonElement>(null);
   const { keyDraft, whenDraft, isRecording, chordArmed, isWhenDraftValid } = draft;
   const whenDraftExpression = whenAstToExpression(whenDraft);
   const isDirty = keyDraft !== row.key || whenDraftExpression !== row.when;
@@ -760,7 +762,13 @@ function useKeybindingRowEditor({
     // Holding the second key down must not replace the chord with a plain key.
     if (event.repeat) return;
     if (event.key === "Escape") {
-      setDraft({ keyDraft: row.key, isRecording: false, chordArmed: false });
+      // An unhandled Escape closes the settings page.
+      event.stopPropagation();
+      const field = event.currentTarget;
+      flushSync(() => setDraft({ keyDraft: row.key, isRecording: false, chordArmed: false }));
+      // The field may unmount for the pill; focus would otherwise drop to the page.
+      if (pillRef.current) pillRef.current.focus();
+      else field.blur();
       return;
     }
     const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform, {
@@ -782,6 +790,7 @@ function useKeybindingRowEditor({
     setDraft,
     save,
     captureKeybinding,
+    pillRef,
   };
 }
 
@@ -821,6 +830,7 @@ function KeybindingKeyControl({
     setDraft,
     save,
     captureKeybinding,
+    pillRef,
   } = editor;
   const showPill =
     !isRecording && !chordArmed && keyDraft === row.key && row.key.length > 0 && !isDirty;
@@ -838,6 +848,7 @@ function KeybindingKeyControl({
       ) : null}
       {showPill ? (
         <button
+          ref={pillRef}
           type="button"
           onClick={() => setDraft({ isRecording: true })}
           aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${formatBindingLabel(row.binding)}`}
@@ -1095,7 +1106,10 @@ function useNewKeybindingDraft({
     // Holding the second key down must not replace the chord with a plain key.
     if (event.repeat) return;
     if (event.key === "Escape") {
+      // An unhandled Escape closes the settings page.
+      event.stopPropagation();
       setDraft({ keyDraft: "", isRecording: false, chordArmed: false });
+      event.currentTarget.blur();
       return;
     }
     const step = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform, {

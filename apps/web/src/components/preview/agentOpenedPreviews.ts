@@ -43,7 +43,7 @@ export function revealServerTabs(
   for (const session of sessions) {
     const force = session.revealRequest?.force === true;
     if (!options.autoShowFloatingPreview && !force) continue;
-    const { byThreadKey, activateSurface } = useRightPanelStore.getState();
+    const { byThreadKey, revealSurface } = useRightPanelStore.getState();
     // The session's panel tab may live in the side panel or in the thread tabs.
     const holder = [threadRef, threadTabsRef(threadRef)].flatMap((ref) => {
       const surface = byThreadKey[scopedThreadKey(ref)]?.surfaces.find(
@@ -52,7 +52,7 @@ export function revealServerTabs(
       return surface ? [{ ref, surface }] : [];
     })[0];
     if (holder && force) {
-      activateSurface(holder.ref, holder.surface.id);
+      revealSurface(holder.ref, holder.surface.id);
     } else if (!holder) {
       usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(session.tabId));
     }
