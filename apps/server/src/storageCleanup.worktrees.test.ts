@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -61,7 +62,7 @@ const withScratch = <A, E, R>(
       .makeTempDirectoryScoped({ prefix: "t3-storage-cleanup-" })
       .pipe(Effect.flatMap(fileSystem.realPath));
     return yield* body({ baseDir });
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+  }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 /**
  * Sweeps one 30-day-old thread whose worktree has uncommitted changes, an

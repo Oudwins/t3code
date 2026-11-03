@@ -1,3 +1,4 @@
+import * as Redacted from "effect/Redacted";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
@@ -19,17 +20,26 @@ export const commandInPortSpace = (
     );
   }
   const { options } = command;
+  // The helper's prologue needs plain text; the rewritten process is spawned like any other.
+  const reveal = (word: string | Redacted.Redacted<string>) =>
+    Redacted.isRedacted(word) ? Redacted.value(word) : word;
+  const args = command.args.map(reveal);
+  const env = Object.fromEntries(
+    Object.entries(
+      options.extendEnv ? { ...process.env, ...options.env } : (options.env ?? process.env),
+    ).map(([key, value]) => [key, value === undefined ? undefined : reveal(value)]),
+  );
   // The shell is what Node would have run, now started by the helper instead.
   const target = options.shell
     ? {
         command: options.shell === true ? "/bin/sh" : options.shell,
-        args: ["-c", [command.command, ...command.args].join(" ")],
+        args: ["-c", [command.command, ...args].join(" ")],
       }
-    : { command: command.command, args: command.args };
+    : { command: command.command, args };
   const wrapped = rewrite({
     ...target,
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-    env: options.extendEnv ? { ...process.env, ...options.env } : (options.env ?? process.env),
+    env,
   });
   return ChildProcess.make(wrapped.command, wrapped.args, {
     ...options,

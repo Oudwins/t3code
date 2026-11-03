@@ -6,7 +6,7 @@
  */
 import { CommandId, ProjectId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -41,7 +41,7 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const projects = yield* ProjectService.ProjectService;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
 
   // Roots that have a project, so a pass only looks at what is new, and roots
   // already reported, so a bad folder is one warning rather than one per pass.
@@ -79,7 +79,7 @@ const make = Effect.gen(function* () {
   const ensureProject = Effect.fn("ProjectDirectoryDiscovery.ensureProject")(function* (
     workspaceRoot: string,
   ) {
-    const id = yield* crypto.randomUUIDv4();
+    const id = yield* random.uuidV4();
     const { created } = yield* projects.bootstrap({
       commandId: CommandId.make(`discovered-project:${id}`),
       projectId: ProjectId.make(id),
@@ -117,7 +117,7 @@ const make = Effect.gen(function* () {
     projectId: ProjectId,
     workspaceRoot: string,
   ) {
-    const id = yield* crypto.randomUUIDv4();
+    const id = yield* random.uuidV4();
     // Without `force`, delete refuses a project that still has threads.
     yield* projects.delete({ commandId: CommandId.make(`pruned-project:${id}`), projectId });
     yield* Effect.logInfo("Removed a project outside the configured folders", { workspaceRoot });

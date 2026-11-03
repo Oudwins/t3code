@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import {
@@ -100,6 +101,7 @@ const runWithCursorFile = (input: {
           }),
           ServerSettings.layerTest(input.settings),
           NodeServices.layer,
+          NodeCrypto.layer,
         ),
       ),
     );
@@ -112,7 +114,7 @@ const runWithCursorFile = (input: {
       return result;
     }).pipe(Effect.provide(layer));
     return { result, open, write };
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)), Effect.scoped);
 
 it.effect("runs the Cursor worktree config ahead of the environment default", () =>
   Effect.gen(function* () {
@@ -261,6 +263,7 @@ const makeReleaseHarness = (input: { readonly async: boolean; readonly writeFail
         }),
         ServerSettings.layerTest(),
         NodeServices.layer,
+        NodeCrypto.layer,
       ),
     ),
   );
@@ -447,6 +450,7 @@ const makeHarness = Effect.fn(function* (options: {
         }),
         ServerSettings.layerTest(),
         NodeServices.layer,
+        NodeCrypto.layer,
       ),
     ),
   );
