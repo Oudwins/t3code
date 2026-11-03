@@ -345,6 +345,8 @@ distribution needs a private signing key.
 
 For a CI build without publishing a release or tag, manually run `Fork release`
 with `build_only` enabled and the version to use in the artifacts.
+PRs changing the Android release workflow or app configuration build only the APK,
+using version `0.0.0`, and never publish a release.
 
 ## Android APK mirror
 
