@@ -1,9 +1,9 @@
 name: Fork release
 
-# Full CLI-archive + desktop-build release for this private fork, adapted
+# CLI, desktop, and standalone Android release for this private fork, adapted
 # from upstream's release.yml/release-desktop.yml:
 #   - Triggered by pushing a `v*.*.*` tag (or workflow_dispatch), not on every
-#     push to main. macOS/Windows hosted runners bill at a real multiplier on
+#     push to main. macOS hosted runners bill at a real multiplier on
 #     a private repo, so routine pushes don't pay that cost.
 #   - Runners are swapped from upstream's blacksmith-* fleet (a paid runner
 #     service this fork has no access to) to standard GitHub-hosted runners.
@@ -13,12 +13,10 @@ name: Fork release
 #   - No npm publish: `t3 update` pulls CLI archives straight from the GitHub
 #     Release (see packages/shared/src/cliRelease.ts), so npm is only needed
 #     for the initial `npx t3` bootstrap, which this fork does not provide.
-#   - Signing secrets (CSC_*, APPLE_*, AZURE_*) are intentionally left unset;
+#   - Signing secrets (CSC_*, APPLE_*) are intentionally left unset;
 #     release-desktop.yml already falls back to unsigned/ad-hoc builds when
 #     they're absent.
-#   - Windows arm64 hosted runners (`windows-11-arm`) have uncertain
-#     availability on personal accounts, so that job is best-effort and does
-#     not block the release if it fails.
+#   - Android builds locally with Gradle, with upstream Expo OTA updates disabled.
 
 on:
   push:
@@ -30,6 +28,10 @@ on:
         description: "Version to release (for example 1.2.3)"
         required: true
         type: string
+      build_only:
+        description: "Build artifacts without publishing a release"
+        type: boolean
+        default: false
 
 concurrency:
   group: fork-release-${{ github.ref }}
@@ -202,78 +204,96 @@ jobs:
       resource_key: darwin-arm64
       cli_archive: true
 
-  # release-desktop.yml cross-builds Windows on Linux (`build-exe --target`
-  # extracts the downloaded Node zip with tar, which Git Bash's GNU tar cannot
-  # do on a Windows host), so only the native checks run on Windows.
-  desktop_win_x64:
-    name: Desktop Windows x64
-    needs: [preflight, build_bundle]
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
-    with:
-      version: ${{ needs.preflight.outputs.version }}
-      ref: ${{ needs.preflight.outputs.ref }}
-      release_channel: stable
-      relay_client_tracing: false
-      clerk_publishable_key: ""
-      clerk_jwt_template: ""
-      clerk_cli_oauth_client_id: ""
-      relay_url: ""
-      label: Windows x64
-      runner: ubuntu-latest
-      verify_runner: windows-2025
-      platform: win
-      target: nsis
-      arch: x64
-      rust_target: x86_64-pc-windows-msvc
-      resource_key: win32-x64
-      cli_archive: true
+  android:
+    name: Android APK (ARM64)
+    needs: [preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      APP_VARIANT: production
+      CI: "1"
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=3072
+      T3CODE_ANDROID_PACKAGE: com.oudwins.t3code
+      T3CODE_ANDROID_VERSION_CODE: ${{ github.run_number }}
+      T3CODE_MOBILE_VERSION: ${{ needs.preflight.outputs.version }}
+      T3CODE_MOBILE_UPDATES_ENABLED: "0"
+      MOBILE_VERSION_POLICY: appVersion
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
-  # Best-effort: windows-11-arm hosted runner availability is not guaranteed
-  # on every account/plan. A failure here does not block the release.
-  desktop_win_arm64:
-    name: Desktop Windows arm64
-    needs: [preflight, build_bundle]
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
-    with:
-      version: ${{ needs.preflight.outputs.version }}
-      ref: ${{ needs.preflight.outputs.ref }}
-      release_channel: stable
-      relay_client_tracing: false
-      clerk_publishable_key: ""
-      clerk_jwt_template: ""
-      clerk_cli_oauth_client_id: ""
-      relay_url: ""
-      label: Windows arm64
-      runner: ubuntu-latest
-      verify_runner: windows-11-arm
-      platform: win
-      target: nsis
-      arch: arm64
-      rust_target: aarch64-pc-windows-msvc
-      resource_key: win32-arm64
-      cli_archive: true
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/mobile...
+              - --prod=false
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Generate Android project
+        working-directory: apps/mobile
+        run: vp exec expo prebuild --clean --platform android --no-install
+
+      # Expo's template signs release builds with its fixed development key.
+      - name: Build standalone APK
+        working-directory: apps/mobile/android
+        run: >-
+          ./gradlew :app:assembleRelease
+          -PreactNativeArchitectures=arm64-v8a
+          '-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=512m'
+          --no-daemon --max-workers=2
+
+      - name: Verify standalone APK
+        run: |
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+          "$build_tools/apksigner" verify "$apk"
+          test "$(apkanalyzer manifest application-id "$apk")" = "$T3CODE_ANDROID_PACKAGE"
+          test "$(apkanalyzer manifest version-code "$apk")" = "$T3CODE_ANDROID_VERSION_CODE"
+          test "$(apkanalyzer manifest version-name "$apk")" = "$T3CODE_MOBILE_VERSION"
+          unzip -Z1 "$apk" | grep -Fx 'assets/index.android.bundle'
+
+      - name: Prepare release asset
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          mkdir -p release-assets
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
+            "release-assets/T3-Code-${RELEASE_VERSION}-android-arm64.apk"
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk
+          path: release-assets/*.apk
+          if-no-files-found: error
+          retention-days: 1
 
   release:
     name: Publish GitHub Release
-    needs:
-      [
-        preflight,
-        desktop_linux_x64,
-        desktop_linux_arm64,
-        desktop_mac_arm64,
-        desktop_win_x64,
-        desktop_win_arm64,
-      ]
-    # desktop_win_arm64 is deliberately not required to succeed (best-effort).
-    if: |
-      !cancelled() &&
-      needs.preflight.result == 'success' &&
-      needs.desktop_linux_x64.result == 'success' &&
-      needs.desktop_linux_arm64.result == 'success' &&
-      needs.desktop_mac_arm64.result == 'success' &&
-      needs.desktop_win_x64.result == 'success'
+    needs: [preflight, desktop_linux_x64, desktop_linux_arm64, desktop_mac_arm64, android]
+    if: ${{ !inputs.build_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -311,7 +331,13 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Write CLI archive checksums
+      - name: Download Android APK
+        uses: actions/download-artifact@v8
+        with:
+          name: android-apk
+          path: release-assets
+
+      - name: Write CLI and Android checksums
         shell: bash
         run: |
           set -euo pipefail
@@ -322,7 +348,7 @@ jobs:
             echo "No CLI archives were produced." >&2
             exit 1
           fi
-          sha256sum "${archives[@]}" > SHA256SUMS
+          sha256sum "${archives[@]}" ./*.apk > SHA256SUMS
           cat SHA256SUMS
 
       - name: Merge macOS updater manifests
@@ -336,20 +362,6 @@ jobs:
             fi
           done
 
-      - name: Merge Windows updater manifests
-        run: |
-          shopt -s nullglob
-          for x64_manifest in release-assets/*-win-x64.yml; do
-            arm64_manifest="${x64_manifest%-x64.yml}-arm64.yml"
-            merged_manifest="${x64_manifest%-win-x64.yml}.yml"
-            if [[ -f "$arm64_manifest" ]]; then
-              node scripts/merge-update-manifests.ts --platform win "$x64_manifest" "$arm64_manifest" "$merged_manifest"
-              rm -f "$x64_manifest" "$arm64_manifest"
-            else
-              mv "$x64_manifest" "$merged_manifest"
-            fi
-          done
-
       - id: release_files
         name: Resolve release asset list
         shell: bash
@@ -360,7 +372,7 @@ jobs:
             echo 'release-assets/*.zip'
             echo 'release-assets/*.AppImage'
             echo 'release-assets/*.deb'
-            echo 'release-assets/*.exe'
+            echo 'release-assets/*.apk'
             echo 'release-assets/*.blockmap'
             echo 'release-assets/*.yml'
             echo 'release-assets/*.tar.gz'

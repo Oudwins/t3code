@@ -333,6 +333,19 @@ selected profile's version. Before releasing `3.0.0` to the App Store, advance
 `build.testflight.env.T3CODE_MOBILE_VERSION` in `apps/mobile/eas.json` to the next
 unreleased major and get its first beta build approved.
 
+## Fork Android releases
+
+The fork release workflow builds an ARM64 Android APK directly with Gradle and
+attaches it to the same release as Linux and macOS. It bundles its JavaScript,
+requires no Metro server or Expo account, and disables upstream Expo OTA updates.
+The `com.oudwins.t3code` package can coexist with the official app. Builds use
+Expo's fixed template development signing key, so they can update previous fork
+installs without a signing secret. These APKs are for sideloading; store
+distribution needs a private signing key.
+
+For a CI build without publishing a release or tag, manually run `Fork release`
+with `build_only` enabled and the version to use in the artifacts.
+
 ## Android APK mirror
 
 `.github/workflows/mobile-android-apk.yml` checks the Google Play Alpha closed-testing
