@@ -11,6 +11,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { vi } from "vite-plus/test";
 
 vi.mock("electron", () => ({}));
@@ -67,7 +68,9 @@ import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as MacPermissions from "../permissions/MacPermissions.ts";
+import * as LocalPortForwarder from "../portForward/LocalPortForwarder.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as PortSpaceProxy from "../preview/PortSpaceProxy.ts";
 
 it.effect(
   "starts the backend and window while Linux registration is stalled and cancels it on shutdown",
@@ -205,7 +208,15 @@ it.effect(
             Layer.mock(ElectronShell.ElectronShell, {}),
             Layer.mock(ElectronTheme.ElectronTheme, {}),
             Layer.mock(ElectronWindow.ElectronWindow, {}),
+            Layer.unwrap(
+              SubscriptionRef.make<LocalPortForwarder.PortForwardingStatus | null>(null).pipe(
+                Effect.map((status) =>
+                  Layer.mock(LocalPortForwarder.LocalPortForwarder, { status }),
+                ),
+              ),
+            ),
             Layer.mock(MacPermissions.MacPermissions, {}),
+            Layer.mock(PortSpaceProxy.PortSpaceProxy, {}),
             Layer.mock(PreviewManager.PreviewManager, {
               isBrowserPartition: () => {
                 throw new Error("unexpected browser partition lookup");
