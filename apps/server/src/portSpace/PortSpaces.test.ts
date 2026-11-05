@@ -245,14 +245,15 @@ describe("PortSpaces.wrapSpawn", () => {
       script: string,
     ) =>
       withPortSpaces({}, (portSpaces) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
+          const hostPath = (yield* HostProcess.Environment).PATH ?? "";
           const { env } = portSpaces.wrapSpawn(threadA, { command: "x", args: [], ...input });
           return NodeChildProcess.spawnSync(
             "sh",
             ["-c", `eval "$T3_PORTSPACE_PROLOGUE"; ${script}`],
             {
               env: {
-                PATH: process.env.PATH ?? "",
+                PATH: hostPath,
                 T3_PORTSPACE_PROLOGUE: env.T3_PORTSPACE_PROLOGUE ?? "",
               },
               encoding: "utf8",
