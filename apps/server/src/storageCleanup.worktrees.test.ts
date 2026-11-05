@@ -182,6 +182,7 @@ const sweepWorktree = (options: {
         branch: "feature",
         worktreePath: worktree,
         status: options.threadStatus ?? "idle",
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
         settledOverride: options.threadState === "settled" ? "settled" : null,
         settledAt:
           options.threadState === "settled" ? DateTime.makeUnsafe(nowMs - 30 * DAY_MS) : null,

@@ -15,7 +15,7 @@ import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { getTerminalLabel, nextTerminalId } from "@t3tools/shared/terminalLabels";
 import { readEnvironmentScope } from "../state/session";
 
-import { BrowserSettingsReadError } from "../browser/openFileInPreview";
+import { isBrowserSettingsReadError } from "../browser/openFileInPreview";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { confirmTerminalClose } from "../lib/terminalCloseConfirm";
 import { readLocalApi } from "../localApi";
@@ -128,7 +128,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     });
     if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
     const error = squashAtomCommandFailure(result);
-    if (error instanceof BrowserSettingsReadError) {
+    if (isBrowserSettingsReadError(error)) {
       toastManager.add(
         stackedThreadToast({
           type: "error",

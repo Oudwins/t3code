@@ -4,6 +4,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { AsyncResult, Atom } from "effect/reactivity";
 
@@ -18,6 +19,11 @@ import { environmentSession } from "./session";
 const TUNNEL_RENEW_INTERVAL = Duration.minutes(4);
 const TUNNEL_RETRY_BASE_SECONDS = 5;
 const TUNNEL_RETRY_MAX_SECONDS = 30;
+
+class PortSpaceTunnelError extends Schema.TaggedError<PortSpaceTunnelError>()(
+  "PortSpaceTunnelError",
+  { cause: Schema.Defect() },
+) {}
 
 /**
  * Runs `attempt` now, again every renewal interval after a success, and after a
@@ -80,9 +86,12 @@ const portSpaceTunnelAtom = Atom.family((environmentId: EnvironmentId) =>
       return tunnelRenewals(
         resolvePortSpaceTunnelAccess({ prepared }).pipe(
           Effect.flatMap((access) =>
-            Effect.tryPromise(() => bridge.setPortSpaceTunnel({ environmentId, access })),
+            Effect.tryPromise({
+              try: () => bridge.setPortSpaceTunnel({ environmentId, access }),
+              catch: (cause) => new PortSpaceTunnelError({ cause }),
+            }),
           ),
-          Effect.match({ onFailure: () => false, onSuccess: () => true }),
+          Effect.isSuccess,
         ),
       );
     })

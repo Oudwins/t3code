@@ -183,6 +183,8 @@ Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
 `previewOpen`, `rightPanelOpen`, `threadTabActive`, `modelPickerOpen`, `usagePageOpen`,
 `composerFocus`, `draftThreadRoute`, `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
 `threadTabActive` is true while one of a thread's tabs is showing instead of the conversation.
+`rightPanelOpen` applies only to `rightPanel.new` and is true while the right panel is
+open; the default `mod+t` uses it to open the panel's new-tab menu.
 `draftThreadRoute` is true on a draft thread, including a restored draft, until it is first sent.
 `editableFocus` is true while a text field, the composer, or another editor has
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the

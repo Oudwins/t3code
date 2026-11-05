@@ -518,9 +518,9 @@ export const make = Effect.gen(function* () {
     // Filtered before `inFlight` too: an ignored gate that never settles must not force a full
     // read on every pass.
     const detail = { ...hostDetail, checks: watchedChecks(hostDetail.checks, ignoredChecks) };
-    const headSha = detail.headSha ?? null;
     for (const target of group.targets) {
       const life = lifeOf(target);
+      const headSha = detail.headSha ?? life.headSha;
       const pushed = life.headSha !== null && headSha !== life.headSha;
       lives.set(lifeKey(target), {
         ...life,
