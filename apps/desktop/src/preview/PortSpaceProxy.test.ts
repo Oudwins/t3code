@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Tests drive the proxy over real loopback sockets and WebSockets.
-import { NodeWS } from "@effect/platform-node/NodeSocket";
+import * as NodeWS from "@effect/platform-node/NodeWS";
 import { assert, describe, it } from "@effect/vitest";
 import type { Session } from "electron";
 import * as Effect from "effect/Effect";

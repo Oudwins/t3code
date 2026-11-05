@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -8,7 +9,7 @@ import {
   ThreadId,
   type OrchestrationV2AppThread,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -61,7 +62,7 @@ type Services =
   | EventSink.EventSinkV2
   | ProjectDirectoryDiscovery.ProjectDirectoryDiscovery
   | ServerConfig.ServerConfig
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
   | FileSystem.FileSystem
   | Path.Path
   | Scope.Scope;
@@ -99,7 +100,7 @@ const run = <A, E>(
           projectDirs: (options.projects ?? []).map(resolve),
         }),
       ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     return yield* body(root).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));

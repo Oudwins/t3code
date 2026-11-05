@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The SOCKS listener and tunnel sockets are Node streams at the Electron main boundary.
 /** A per-thread SOCKS5 proxy that sends loopback requests through the environment's port tunnel. */
-import { NodeWS } from "@effect/platform-node/NodeSocket";
+import * as NodeWS from "@effect/platform-node/NodeWS";
 import type { Session } from "electron";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

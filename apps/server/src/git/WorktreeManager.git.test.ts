@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -20,7 +21,7 @@ import * as WorktreePool from "./WorktreePool.ts";
 // The manager, pool and git driver are real; only the moment a reuse starts can be held back.
 const BaseLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-worktree-manager-git-test-",
-}).pipe(Layer.provideMerge(NodeServices.layer));
+}).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const makeLayer = (hooks: { readonly beforeReuse?: Effect.Effect<void> } = {}) =>
   WorktreeManager.layer.pipe(
