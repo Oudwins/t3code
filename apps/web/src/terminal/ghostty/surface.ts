@@ -665,9 +665,14 @@ export class GhosttyTerminalSurface {
     this.stopObservingResize = observeResize(mount, () => this.fit());
   }
 
+  /**
+   * `claimCore` may return a core released by an earlier surface, keeping its emulator state.
+   * It runs after loading, so a view torn down meanwhile never takes the core from its successor.
+   */
   static async create(
     mount: HTMLElement,
     options: GhosttyTerminalSurfaceOptions,
+    claimCore?: () => GhosttyTerminalCore | null,
   ): Promise<GhosttyTerminalSurface> {
     const canvas = document.createElement("canvas");
     canvas.className = "block size-full cursor-text";
@@ -709,14 +714,18 @@ export class GhosttyTerminalSurface {
     const fontFamily = await loadTerminalFontFamily(options.font?.family, fontSize);
     const metrics = measureGhosttyCell(context, fontSize, fontFamily);
     const grid = terminalGridSize(mount.clientWidth, mount.clientHeight, metrics, CONTENT_PADDING);
-    const core = await GhosttyTerminalCore.create(
-      grid.cols,
-      grid.rows,
-      metrics.width,
-      metrics.height,
-      options.theme,
-      options.onData,
-    );
+    const existingCore = claimCore?.() ?? null;
+    existingCore?.setPtyWriter(options.onData);
+    const core =
+      existingCore ??
+      (await GhosttyTerminalCore.create(
+        grid.cols,
+        grid.rows,
+        metrics.width,
+        metrics.height,
+        options.theme,
+        options.onData,
+      ));
     const surface = new GhosttyTerminalSurface(
       mount,
       canvas,
@@ -1060,6 +1069,20 @@ export class GhosttyTerminalSurface {
 
   dispose(): void {
     if (this.disposed) return;
+    this.teardown();
+    this.core.dispose();
+  }
+
+  /** Tears down the view but keeps the emulator, so a later surface can adopt it. */
+  releaseCore(): GhosttyTerminalCore {
+    this.teardown();
+    this.core.setPtyWriter(null);
+    this.core.clearSelection();
+    return this.core;
+  }
+
+  private teardown(): void {
+    if (this.disposed) return;
     this.disposed = true;
     this.stopObservingResize();
     document.fonts.removeEventListener("loadingdone", this.onFontsLoaded);
@@ -1077,7 +1100,6 @@ export class GhosttyTerminalSurface {
       window.clearTimeout(this.compositionSuppressionTimer);
     }
     this.removeEvents();
-    this.core.dispose();
     if (
       this.canvas.parentElement === this.mount ||
       this.input.parentElement === this.mount ||
