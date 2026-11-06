@@ -136,19 +136,14 @@ open.
 Threads that are busy move into two collapsed sections below the active list. **Working** holds
 threads whose agent is running. **Waiting** holds threads whose agent has stopped but will come back
 without you: it is waiting on a subagent, a watched pull request, or a background command or monitor
-it says it is waiting on, or checks are still running on the thread's linked pull request. A dev
-server or other process an agent leaves running does not keep a thread there. A thread returns to
+it says it is waiting on. A dev server or other process an agent leaves running does not keep a
+thread there. A thread returns to
 the top of the active list when it finishes, fails, or needs an approval or answer. Both sections
 list the thread you last sent work to first. Pinned threads stay in the pinned section.
 
 This is on by default. Turn it off with **Settings → General → Working section** on web and desktop,
 or **Settings → General → Working section** on iOS and Android. Each device keeps its own
 choice.
-
-A thread with checks still running on its pull request shows as waiting even when its agent has
-finished, so it is not marked ready until the checks settle. The same holds while the agent is
-watching the pull request and the required checks have not yet passed. policy-bot's approval
-status never settles on its own, so it is ignored.
 
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.

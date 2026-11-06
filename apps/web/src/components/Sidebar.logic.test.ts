@@ -407,31 +407,6 @@ describe("resolveSidebarThreadStatus", () => {
     ).toBe("approval");
   });
 
-  it("reports waiting for a ready thread whose linked pull request has checks running", () => {
-    const link = (checksState: "pending" | "passing" | "failing", state = "open" as const) =>
-      ({
-        snapshot: { state, checksState },
-        source: "agent",
-      }) as never;
-    expect(resolveSidebarThreadStatus({ ...idle, pullRequests: [link("pending")] })).toBe(
-      "waiting",
-    );
-    expect(resolveSidebarThreadStatus({ ...idle, pullRequests: [link("passing")] })).toBe("ready");
-    expect(
-      resolveSidebarThreadStatus({ ...idle, pullRequests: [link("pending", "merged" as never)] }),
-    ).toBe("ready");
-    expect(
-      resolveSidebarThreadStatus({
-        ...idle,
-        hasPendingUserInput: true,
-        pullRequests: [link("pending")],
-      }),
-    ).toBe("input");
-    expect(resolveSidebarThreadStatus({ ...idle, runtime, pullRequests: [link("pending")] })).toBe(
-      "working",
-    );
-  });
-
   it("shows a waiting guest message as a Request, below the agent's own requests", () => {
     expect(resolveSidebarThreadStatus({ ...idle, pendingGuestMessageCount: 1, runtime })).toBe(
       "request",

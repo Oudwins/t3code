@@ -1,4 +1,3 @@
-import { threadHasRunningChecks } from "@t3tools/shared/threadPullRequests";
 import {
   canSnooze,
   effectiveSnoozed,
@@ -270,8 +269,7 @@ export function resolveThreadListV2Status(
     | "pendingGuestMessageCount"
     | "runtime"
     | "blockedOnThreadWait"
-  > &
-    Partial<Pick<EnvironmentThreadShell, "pullRequests">>,
+  >,
 ): ThreadListV2Status {
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
     return "approval";
@@ -297,9 +295,6 @@ export function resolveThreadListV2Status(
   }
   if (thread.runtime?.status === "failed") {
     return thread.runtime.lastErrorClass === "usage_limit" ? "limited" : "failed";
-  }
-  if (threadHasRunningChecks(thread.pullRequests ?? [])) {
-    return "waiting";
   }
   return "ready";
 }
