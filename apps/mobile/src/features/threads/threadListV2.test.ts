@@ -83,18 +83,6 @@ describe("resolveThreadListV2SnoozeMenuSelection", () => {
   });
 });
 
-const pullRequestWithChecks = (checksState: "pending" | "passing", state = "open" as const) =>
-  ({
-    projectId: ProjectId.make("project-1"),
-    repository: "pingdotgg/t3code",
-    number: 42,
-    url: "https://github.com/pingdotgg/t3code/pull/42",
-    source: "agent",
-    linkedAt: NOW,
-    stack: null,
-    snapshot: { state, checksState },
-  }) as never;
-
 describe("resolveThreadListV2SnoozePresets", () => {
   it("reads preset times from the list minute, not the clock at first render", () => {
     using _timers = { [Symbol.dispose]: () => vi.useRealTimers() };
@@ -163,20 +151,6 @@ describe("layoutThreadListV2RowMenuActions", () => {
 });
 
 describe("resolveThreadListV2Status", () => {
-  it("reports waiting while a linked pull request has checks running", () => {
-    const thread = (checksState: "pending" | "passing") =>
-      makeThread({
-        id: ThreadId.make("ci"),
-        title: "ci",
-        pullRequests: [pullRequestWithChecks(checksState)],
-      });
-    expect(resolveThreadListV2Status(thread("pending"))).toBe("waiting");
-    expect(resolveThreadListV2Status(thread("passing"))).toBe("ready");
-    expect(resolveThreadListV2Status({ ...thread("pending"), hasPendingUserInput: true })).toBe(
-      "input",
-    );
-  });
-
   it("presents decoded thread waits as Waiting while preserving requests and older servers", () => {
     const raw = makeRawThreadShell({
       status: "running",
@@ -1710,32 +1684,20 @@ describe("Working section beta", () => {
     const waitingThreads = [
       ...threads,
       makeThread({ id: ThreadId.make("parked"), title: "parked", runtime: idle }),
-      makeThread({
-        id: ThreadId.make("ci-pending"),
-        title: "ci-pending",
-        pullRequests: [pullRequestWithChecks("pending")],
-      }),
-      makeThread({
-        id: ThreadId.make("ci-passing"),
-        title: "ci-passing",
-        pullRequests: [pullRequestWithChecks("passing")],
-      }),
     ];
     const buildWaiting = (input: Partial<Parameters<typeof buildThreadListV2Items>[0]> = {}) =>
       build({ threads: waitingThreads, ...input });
 
-    it("folds parked and CI-pending threads into a shelf of their own, apart from Working", () => {
+    it("folds parked threads into a shelf of their own, apart from Working", () => {
       const layout = buildWaiting();
       expect(layout.workingCount).toBe(1);
-      expect(layout.waitingCount).toBe(2);
-      expect(ids(layout)).toContain("ci-passing");
+      expect(layout.waitingCount).toBe(1);
       expect(ids(layout)).not.toContain("parked");
-      expect(ids(layout)).not.toContain("ci-pending");
       expect(layout.waitingShelfHeaderIndex).toBe(ids(layout).length);
       expect(layout.workingShelfHeaderIndex).toBe(ids(layout).length);
 
       const expanded = buildWaiting({ waitingShelfExpanded: true });
-      expect(ids(expanded).slice(-2).toSorted()).toEqual(["ci-pending", "parked"]);
+      expect(ids(expanded).at(-1)).toBe("parked");
       expect(ids(buildWaiting({ selectedThreadKey: `${environmentId}:parked` })).at(-1)).toBe(
         "parked",
       );
@@ -1745,7 +1707,6 @@ describe("Working section beta", () => {
       const layout = buildWaiting({ workingShelfEnabled: false });
       expect(layout.waitingCount).toBe(0);
       expect(ids(layout)).toContain("parked");
-      expect(ids(layout)).toContain("ci-pending");
     });
 
     it("places the shelf after Working and before Snoozed", () => {
@@ -1766,7 +1727,7 @@ describe("Working section beta", () => {
       const working = kinds.indexOf("v2-working-shelf");
       const waiting = kinds.indexOf("v2-waiting-shelf");
       expect(kinds.slice(working, waiting)).toEqual(["v2-working-shelf", "working"]);
-      expect(kinds.slice(waiting + 1).toSorted()).toEqual(["ci-pending", "parked"]);
+      expect(kinds.slice(waiting + 1)).toEqual(["parked"]);
     });
   });
 

@@ -1,6 +1,4 @@
 // @effect-diagnostics globalTimers:off - Shelf placement timers run in web and native clients, outside an Effect runtime.
-import { threadHasRunningChecks } from "@t3tools/shared/threadPullRequests";
-
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { toSortableTimestamp } from "./threadSort.ts";
 import { effectiveSnoozed } from "./threadSettled.ts";
@@ -40,16 +38,10 @@ export function isThreadWorking(thread: WorkingThreadInput): boolean {
   return !needsUser(thread);
 }
 
-type WaitingThreadInput = WorkingThreadInput & Pick<EnvironmentThreadShell, "pullRequests">;
-
 /** Threads that stopped but will come back without the user: background work that wakes the
-    agent, or checks still running on a linked pull request. Clients with only a Working section
-    fold the background-work case there through `isThreadWorking`. */
-export function isThreadWaiting(thread: WaitingThreadInput): boolean {
-  if (threadRuntimeIsActive(thread.runtime) || needsUser(thread)) return false;
-  if (thread.runtime?.status === "idle") return true;
-  if (thread.runtime?.status === "failed") return false;
-  return threadHasRunningChecks(thread.pullRequests);
+    agent. Clients with only a Working section fold them there through `isThreadWorking`. */
+export function isThreadWaiting(thread: WorkingThreadInput): boolean {
+  return thread.runtime?.status === "idle" && !needsUser(thread);
 }
 
 type InboxThreadInput = Pick<

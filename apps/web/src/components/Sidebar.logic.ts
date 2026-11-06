@@ -3,10 +3,7 @@ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environ
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import {
-  threadHasRunningChecks,
-  threadPullRequestSearchTerms,
-} from "@t3tools/shared/threadPullRequests";
+import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
 import {
   isAtomCommandInterrupted,
@@ -929,9 +926,7 @@ type SidebarThreadStatusInput = Pick<
   | "pendingGuestMessageCount"
   | "runtime"
   | "blockedOnThreadWait"
-> & {
-  pullRequests?: SidebarThreadSummary["pullRequests"] | undefined;
-};
+>;
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
@@ -961,11 +956,6 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   }
   if (thread.runtime?.status === "failed") {
     return thread.runtime.lastErrorClass === "usage_limit" ? "limited" : "failed";
-  }
-  // Checks still running on a linked pull request: nothing for the user to do
-  // yet, so the thread is not ready.
-  if (threadHasRunningChecks(thread.pullRequests ?? [])) {
-    return "waiting";
   }
   return "ready";
 }
