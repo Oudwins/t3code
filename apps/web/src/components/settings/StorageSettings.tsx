@@ -686,7 +686,7 @@ export function WorktreeCleanupSection() {
               <SettingsRow
                 title="Delete even when in use"
                 status={ruleStatus("worktreeForce")}
-                description="For settled, archived, and deleted threads, also remove worktrees with uncommitted changes, ignored files, open terminals, or live sessions. Terminals and sessions are closed and uncommitted work is permanently lost."
+                description="For settled, archived, and deleted threads, also remove worktrees with uncommitted changes, ignored files, open terminals, or live sessions. Terminals and sessions close; uncommitted work is lost."
                 serverScoped={!isProjectScope}
                 control={
                   <Switch
@@ -771,7 +771,7 @@ export function WorktreeReuseSection() {
           <SettingsRow
             title="Reuse worktrees"
             status={reuseStatus("enabled")}
-            description="Keep removed worktrees on standby and give them to new threads instead of creating new ones. A reused worktree gets a new location, is reset to the requested branch, and the setup script runs again; ignored files such as node_modules are kept."
+            description="Keep removed worktrees on standby for new threads instead of creating new ones. A reused worktree moves, resets to the requested branch, and reruns setup; ignored files like node_modules stay."
             serverScoped
             settingKeys={["worktreeReuse"]}
             control={
