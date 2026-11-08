@@ -921,7 +921,7 @@ function DeviceIntegrationControls({
                   .finally(() => setPending(null));
               }}
             >
-              {pending === `update-${tool}` ? "Updating…" : `Update to v${version.requiredVersion}`}
+              {pending === `update-${tool}` ? "Updating…" : "Update"}
             </Button>
           ) : null}
           {state.supportsToolInspection ? (
@@ -1069,7 +1069,7 @@ function PortSpacesIntegrationSettings() {
         {...searchableSetting("port-spaces")}
         serverScoped
         settingKeys={["enablePortSpaces"]}
-        description="Give each thread its own network, so several threads and agents can run a server on the same port. Each thread's servers show up in its preview tab, which needs the desktop app. Needs a Linux environment."
+        description="Give each thread its own network, so threads and agents can run servers on the same port. Each thread's servers show in its preview tab in the desktop app. Needs a Linux environment."
         status={
           settings.enablePortSpaces && environmentId ? (
             <PortSpacesStatusNote key={environmentId} environmentId={environmentId} />

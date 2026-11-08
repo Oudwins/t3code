@@ -722,7 +722,7 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
-const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
+const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 7;
 
 function AutoSettleDaysInput({
   value,
@@ -901,7 +901,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("working-shelf")}
-          description="Fold busy threads into a Working section, and threads waiting on background work or pull request checks into a Waiting section. They return to the top of the inbox when they need you. The boring sidebar in Labs has no Working or Waiting section."
+          description="Fold busy threads into a Working section, and threads waiting on background work into a Waiting section. They return to the top of the inbox when they need you. The boring sidebar in Labs has neither."
           resetAction={
             settings.sidebarWorkingShelfEnabled !==
             DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled ? (
