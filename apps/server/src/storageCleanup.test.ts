@@ -1992,6 +1992,8 @@ describe("storage cleanup reports and local file policies", () => {
             ...DEFAULT_SERVER_SETTINGS.storageCleanup,
             worktreeAfterDays: 8,
             worktreeOnDelete,
+            // Forced removal ignores live sessions; this covers the retirement wait.
+            worktreeForce: false,
           });
           fixture.setThreads([]);
           fixture.setDeletedThreads([
