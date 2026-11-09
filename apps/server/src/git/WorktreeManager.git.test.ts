@@ -149,7 +149,7 @@ it.effect("queues the moved checkout for removal when the failed reuse cannot re
 
     // The checkout cannot create a branch that exists, and git refuses to remove a locked worktree.
     yield* git(cwd, ["branch", "taken"]);
-    const moved = pathService.join(worktreesDir, pathService.basename(cwd), "taken");
+    let moved = "";
     const exit = yield* manager
       .createWorktree(
         {
@@ -162,20 +162,30 @@ it.effect("queues the moved checkout for removal when the failed reuse cannot re
         {
           progress: {
             onWorktreeClaimed: (path) =>
-              driver
-                .execute({
-                  operation: "WorktreeManager.git.test",
-                  cwd,
-                  args: ["worktree", "lock", path],
-                  timeoutMs: 10_000,
-                })
-                .pipe(Effect.orDie, Effect.asVoid),
+              Effect.sync(() => {
+                moved = path;
+              }).pipe(
+                Effect.andThen(
+                  driver
+                    .execute({
+                      operation: "WorktreeManager.git.test",
+                      cwd,
+                      args: ["worktree", "lock", path],
+                      timeoutMs: 10_000,
+                    })
+                    .pipe(Effect.orDie, Effect.asVoid),
+                ),
+              ),
           },
         },
       )
       .pipe(Effect.exit);
 
     assert.isTrue(Exit.isFailure(exit));
+    assert.equal(
+      pathService.dirname(moved),
+      pathService.join(worktreesDir, pathService.basename(cwd)),
+    );
     assert.equal(yield* fileSystem.exists(parked), false);
     // The checkout survived the failed rollback at its new path, so that is the path queued.
     assert.equal(yield* fileSystem.exists(moved), true);
