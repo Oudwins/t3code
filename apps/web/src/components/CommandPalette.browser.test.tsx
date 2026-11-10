@@ -57,7 +57,10 @@ describe("CommandPalette open intents", () => {
     await expect
       .element(page.getByPlaceholder("Search threads, or type > for commands..."))
       .toHaveFocus();
-    await userEvent.keyboard(">New thread in...");
+    await userEvent.keyboard(">");
+    await expect.element(page.getByRole("option").first()).toHaveAttribute("data-highlighted");
+    // After typing, the first arrow keeps the first row highlighted.
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}");
     await expect
       .element(page.getByRole("option", { name: /^New thread in\.\.\./ }))
       .toHaveAttribute("data-highlighted");
