@@ -55,6 +55,20 @@ const isFailedCheck = (check: PullRequestCheck) =>
 const workflowRunOf = (url: string | null) => url?.match(/^.*\/actions\/runs\/\d+/)?.[0] ?? null;
 const approvalKey = (check: PullRequestCheck) => workflowRunOf(check.url) ?? check.name;
 
+// Ignoring a check after it was held for approval releases that hold.
+export function withoutIgnoredHolds(
+  watch: ThreadPullRequestWatch,
+  all: ReadonlyArray<PullRequestCheck>,
+  kept: ReadonlyArray<PullRequestCheck>,
+) {
+  if (watch.awaitingApproval === undefined || all.length === kept.length) return watch;
+  const ignored = new Set(all.filter((check) => !kept.includes(check)).map(approvalKey));
+  return {
+    ...watch,
+    awaitingApproval: watch.awaitingApproval.filter((key) => !ignored.has(key)),
+  };
+}
+
 export function evaluatePullRequestWatch(
   watch: ThreadPullRequestWatch,
   detail: Pick<

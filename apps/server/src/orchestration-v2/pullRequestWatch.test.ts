@@ -10,6 +10,7 @@ import {
   evaluatePullRequestWatch as evaluate,
   pullRequestWatchMessage,
   watchedChecks,
+  withoutIgnoredHolds,
 } from "./pullRequestWatch.ts";
 
 // These cases read the head once or at one moment, so the no-checks notice never comes due.
@@ -624,5 +625,27 @@ describe("watchedChecks", () => {
       ),
     });
     assert.deepEqual(evaluatePullRequestWatch(watch(), rejected, noRemarks).changes, []);
+
+    const gate = { ...check("policy-bot: main", "action-required"), url: null };
+    const job = {
+      ...check("deploy", "action-required"),
+      url: "https://github.com/o/r/actions/runs/5/job/1",
+    };
+    const held = evaluatePullRequestWatch(
+      watch(),
+      detail({ checks: [required("test", "success"), gate, job] }),
+      noRemarks,
+    );
+    assert.isFalse(held.next.passed);
+    const all = [required("test", "success"), gate, job];
+    const kept = watchedChecks(all, ["^policy-bot", "^deploy$"]);
+    assert.deepEqual(
+      evaluatePullRequestWatch(
+        withoutIgnoredHolds(held.next, all, kept),
+        detail({ checks: kept }),
+        noRemarks,
+      ).changes,
+      [{ kind: "checks-passed", count: 1, required: true }],
+    );
   });
 });
