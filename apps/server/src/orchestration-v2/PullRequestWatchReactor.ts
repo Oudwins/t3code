@@ -41,6 +41,7 @@ import {
   PULL_REQUEST_WATCH_NO_CHECKS_MS,
   pullRequestWatchMessage,
   watchedChecks,
+  withoutIgnoredHolds,
 } from "./pullRequestWatch.ts";
 
 /** Checks take minutes; faster sweeps waste the account's shared host quota. */
@@ -180,6 +181,8 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
     left.passed === right.passed &&
     left.passedChecks.join("\n") === right.passedChecks.join("\n") &&
     (left.owedChecks ?? []).join("\n") === (right.owedChecks ?? []).join("\n") &&
+    (left.awaitingApproval ?? []).join("\n") === (right.awaitingApproval ?? []).join("\n") &&
+    (left.approvalAnnounced ?? false) === (right.approvalAnnounced ?? false) &&
     left.remarksThrough === right.remarksThrough &&
     left.remarkIds.join("\n") === right.remarkIds.join("\n") &&
     left.conflicting === right.conflicting &&
@@ -570,7 +573,12 @@ export const make = Effect.gen(function* () {
       remarks: fingerprint?.remarks ?? null,
     });
     yield* eachTarget(group, (target) => {
-      const report = evaluatePullRequestWatch(target.watch, detail, remarks, now);
+      const report = evaluatePullRequestWatch(
+        withoutIgnoredHolds(target.watch, hostDetail.checks, detail.checks),
+        detail,
+        remarks,
+        now,
+      );
       if (report.changes.length > 0) {
         const wake = pullRequestWatchMessage({
           number: target.link.number,
