@@ -319,7 +319,7 @@ review is terminal. An open or unsynced link keeps it active.
 
 Ask the agent to watch, monitor, or babysit a pull request and it calls `watch_pull_request`. While
 the thread is active, the server checks the pull request every two minutes and wakes the agent when a
-check fails, the required checks pass, someone else comments or reviews, or the branch starts to
+check fails or waits for a maintainer's approval, the required checks pass, someone else comments or reviews, or the branch starts to
 conflict. A check that stays pending until someone acts, such as an approval bot, would keep
 the agent waiting; add a pattern for it under **Settings → Source control → Ignored checks** and
 watches neither wait for nor report it. Each pattern is a case-insensitive regular expression
