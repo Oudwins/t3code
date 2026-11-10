@@ -55,9 +55,9 @@ describe("CommandPalette open intents", () => {
 
     openCommandPalette({});
     await expect
-      .element(page.getByPlaceholder("Search commands, projects, and threads..."))
+      .element(page.getByPlaceholder("Search threads, or type > for commands..."))
       .toHaveFocus();
-    await userEvent.keyboard("{ArrowDown}");
+    await userEvent.keyboard(">{ArrowDown}");
     await expect
       .element(page.getByRole("option", { name: /^New thread in\.\.\./ }))
       .toHaveAttribute("data-highlighted");
