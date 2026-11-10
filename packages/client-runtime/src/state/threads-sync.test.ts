@@ -805,7 +805,7 @@ describe("EnvironmentThreads", () => {
       socketSnapshots: true,
       httpSnapshot: { _tag: "missing" },
       failure: new Error("Thread not found"),
-      status: "deleted",
+      status: "missing",
       loads: [0, 1],
     },
     // A defect never retries on its own, so the socket-only open resubscribes once.
@@ -814,7 +814,7 @@ describe("EnvironmentThreads", () => {
       socketSnapshots: true,
       httpSnapshot: { _tag: "missing" },
       failure: TEST_DEFECT,
-      status: "deleted",
+      status: "missing",
       loads: [0, 1],
     },
     // Authorization failures are never retried, so the error must show at once.
@@ -857,7 +857,7 @@ describe("EnvironmentThreads", () => {
         yield* TestClock.adjust("250 millis");
         const settled = yield* awaitThreadState(
           harness.observed,
-          (value) => value.status === "deleted" || Option.isSome(value.error),
+          (value) => value.status === "missing" || Option.isSome(value.error),
         );
         expect(settled.status).toBe(status);
         expect(yield* Ref.get(harness.loaderCalls)).toBe(after);
@@ -906,9 +906,9 @@ describe("EnvironmentThreads", () => {
       yield* harness.replaceSession;
       const settled = yield* awaitThreadState(
         harness.observed,
-        (value) => value.status === "deleted",
+        (value) => value.status === "missing",
       );
-      expect(settled.status).toBe("deleted");
+      expect(settled.status).toBe("missing");
       expect(yield* Ref.get(harness.loaderCalls)).toBe(1);
     }),
   );
