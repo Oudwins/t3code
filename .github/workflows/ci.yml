@@ -121,7 +121,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.outputs.build != 'false' || needs.changes.outputs.typecheck != 'false') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -179,10 +179,16 @@ jobs:
       - name: Finish installing browser secret helper build libraries
         id: apt
         if: ${{ !cancelled() && needs.changes.outputs.build != 'false' }}
-        timeout-minutes: 5
+        timeout-minutes: 11
         run: |
-          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
+          # Bounded here, not by the step timeout, so a stalled install still prints its log.
+          for _ in $(seq 600); do test -s "$RUNNER_TEMP/apt-status" && break; sleep 1; done
           cat "$RUNNER_TEMP/apt.log"
+          if ! test -s "$RUNNER_TEMP/apt-status"; then
+            pgrep -af 'apt|dpkg' || true
+            echo "::error::apt did not finish within 10 minutes"
+            exit 1
+          fi
           exit "$(cat "$RUNNER_TEMP/apt-status")"
 
       - name: Build desktop pipeline
@@ -270,7 +276,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -317,10 +323,16 @@ jobs:
         run: node --test .github/scripts/check-nightly-release.test.cjs .github/scripts/vercel-deployment-output.test.cjs .github/scripts/mobile-preview-comment.test.cjs
 
       - name: Finish installing browser secret helper build libraries
-        timeout-minutes: 5
+        timeout-minutes: 11
         run: |
-          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
+          # Bounded here, not by the step timeout, so a stalled install still prints its log.
+          for _ in $(seq 600); do test -s "$RUNNER_TEMP/apt-status" && break; sleep 1; done
           cat "$RUNNER_TEMP/apt.log"
+          if ! test -s "$RUNNER_TEMP/apt-status"; then
+            pgrep -af 'apt|dpkg' || true
+            echo "::error::apt did not finish within 10 minutes"
+            exit 1
+          fi
           exit "$(cat "$RUNNER_TEMP/apt-status")"
 
       # `changes` lists the affected packages, or nothing when all of them are.
