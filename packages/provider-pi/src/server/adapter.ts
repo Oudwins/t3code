@@ -21,6 +21,7 @@ import {
   type OrchestrationV2UserInputQuestion,
   type ProviderApprovalDecision,
   type ProviderInstanceId,
+  type MessageId,
   type OrchestrationV2ProviderTurnTokenUsage,
 } from "@t3tools/contracts";
 import { PiSettings } from "../settings.ts";
@@ -379,6 +380,8 @@ interface ActivePiTurn {
   activeProviderRetry: PiProviderRetryState | null;
   failure: ReturnType<typeof makeProviderFailure> | null;
   rejectedPromptFailure: ReturnType<typeof makeProviderFailure> | null;
+  /** Steers Pi queued in send order; it reads them at a step boundary, after running tools return. */
+  readonly unreadSteers: Array<MessageId>;
   stopTreeRefs?: PiTurnTreeRefs | null;
 }
 
@@ -416,6 +419,7 @@ interface PiPromptSend {
   readonly providerTurnId: OrchestrationV2ProviderTurn["id"];
   readonly kind: "turn_start" | "steer";
   readonly record: PiRpcRecord;
+  readonly messageId?: MessageId;
 }
 
 interface PiThreadState {
@@ -635,6 +639,20 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
 
       const emit = (event: ProviderAdapter.ProviderAdapterV2Event) =>
         Queue.offer(events, event).pipe(Effect.asVoid);
+
+      const emitSteerStatus = (
+        turn: ActivePiTurn,
+        messageId: MessageId,
+        status: "pending" | "completed" | "cancelled",
+      ) =>
+        emit({
+          type: "steer.updated",
+          driver: PI_PROVIDER,
+          threadId: turn.turnInput.threadId,
+          runId: turn.turnInput.runId,
+          messageId,
+          status,
+        });
 
       const updateProviderSession =
         /* Provider events include streaming deltas; avoid a span for each update. */
@@ -1724,6 +1742,10 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           }
         }
         yield* cancelPendingPrompts(completedAt);
+        // Stop clears Pi's queue, so an unread steer was dropped; otherwise Pi read it before settling.
+        for (const messageId of turn.unreadSteers.splice(0)) {
+          yield* emitSteerStatus(turn, messageId, interrupted ? "cancelled" : "completed");
+        }
         const treeRefs =
           turn.stopTreeRefs !== undefined ? turn.stopTreeRefs : yield* captureTurnTreeRefs();
         const tokenUsage = readUsage
@@ -1942,9 +1964,14 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             return;
           }
           case "message_start": {
-            if (turn !== null && recordString(event["message"], "role") === "assistant") {
+            const role = recordString(event["message"], "role");
+            if (turn !== null && role === "assistant") {
               turn.sawAgentActivity = true;
               turn.messageOrdinal += 1;
+            }
+            const readSteer = role === "user" ? turn?.unreadSteers.shift() : undefined;
+            if (turn !== null && readSteer !== undefined) {
+              yield* emitSteerStatus(turn, readSteer, "completed");
             }
             return;
           }
@@ -2238,6 +2265,14 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               yield* scheduleSettleProbe(responseTurn, true);
             }
             if (event["success"] === true) {
+              if (
+                pendingPrompt?.messageId !== undefined &&
+                responseTurn !== null &&
+                recordString(recordField(event, "data"), "disposition") === "queued"
+              ) {
+                responseTurn.unreadSteers.push(pendingPrompt.messageId);
+                yield* emitSteerStatus(responseTurn, pendingPrompt.messageId, "pending");
+              }
               // Command-only prompts emit no agent_settled; probe idle and re-queue behind preceding native events.
               if (
                 pendingPrompt?.kind === "turn_start" &&
@@ -2813,6 +2848,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               activeProviderRetry: null,
               failure: null,
               rejectedPromptFailure: null,
+              unreadSteers: [],
             };
             // Lock only install/send/start events; correlated setup must leave the pump free for dialogs.
             yield* Effect.gen(function* () {
@@ -2939,6 +2975,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                   yield* sendPrompt({
                     providerTurnId: turn.providerTurn.id,
                     kind: "steer",
+                    messageId: steerInput.message.messageId,
                     record: {
                       type: "prompt",
                       message: payload.message,
