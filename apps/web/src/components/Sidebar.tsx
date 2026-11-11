@@ -188,6 +188,7 @@ import {
   isSidebarThreadWorking,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  orderSidebarDraftIds,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentAttentionThreadId,
@@ -2879,13 +2880,26 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       };
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
-        navigateToThreadKey(
-          resolveAdjacentThreadId({
-            threadIds: orderedThreadKeys,
-            currentThreadId: routeRowThreadKey,
-            direction: traversalDirection,
-          }),
-        );
+        // Drafts sit above the thread rows, so they lead the cycle.
+        const draftKeys = orderSidebarDraftIds({
+          ...useComposerDraftStore.getState(),
+          scopedProjectKeys,
+          routeDraftId: routeDraftIdForRows,
+        }).map((draftId) => `draft:${draftId}`);
+        const target = resolveAdjacentThreadId({
+          threadIds: [...draftKeys, ...orderedThreadKeys],
+          currentThreadId:
+            routeRowThreadKey ??
+            (routeDraftIdForRows === null ? null : `draft:${routeDraftIdForRows}`),
+          direction: traversalDirection,
+        });
+        if (target?.startsWith("draft:")) {
+          event.preventDefault();
+          event.stopPropagation();
+          navigateToDraft(DraftId.make(target.slice("draft:".length)));
+          return;
+        }
+        navigateToThreadKey(target);
         return;
       }
       const attentionDirection = threadAttentionTraversalDirectionFromCommand(command);
@@ -2920,10 +2934,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   }, [
     keybindings,
     navigateToThread,
+    navigateToDraft,
     orderedThreadKeys,
+    routeDraftIdForRows,
     routePreviewOpen,
     routeRowThreadKey,
     routeTerminalOpen,
+    scopedProjectKeys,
     threadByKey,
   ]);
 

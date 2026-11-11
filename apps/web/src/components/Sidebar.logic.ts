@@ -39,6 +39,11 @@ import {
   type ThreadSortInput,
 } from "@t3tools/client-runtime/state/thread-sort";
 import type { SidebarThreadSummary, Thread } from "../types";
+import {
+  composerDraftHasUserContent,
+  type ComposerThreadDraftState,
+  type DraftSessionState,
+} from "../composerDraftStore";
 import { normalizeSearchText } from "../lib/utils";
 import { isLatestRunSettled } from "../session-logic";
 import { observeIntersection } from "../lib/observeIntersection";
@@ -857,6 +862,26 @@ export function resolveAdjacentThreadId<T>(input: {
   }
 
   return currentIndex < threadIds.length - 1 ? (threadIds[currentIndex + 1] ?? null) : null;
+}
+
+/** Draft ids in sidebar order. The open draft stays listed while empty so traversal can leave it. */
+export function orderSidebarDraftIds(input: {
+  draftThreadsByThreadKey: Readonly<Record<string, DraftSessionState>>;
+  draftsByThreadKey: Readonly<Record<string, ComposerThreadDraftState>>;
+  scopedProjectKeys: ReadonlySet<string> | null;
+  routeDraftId: string | null;
+}) {
+  return Object.entries(input.draftThreadsByThreadKey)
+    .filter(
+      ([draftKey, session]) =>
+        session.promotedTo == null &&
+        (input.scopedProjectKeys === null ||
+          input.scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)) &&
+        (draftKey === input.routeDraftId ||
+          composerDraftHasUserContent(input.draftsByThreadKey[draftKey])),
+    )
+    .toSorted(([, left], [, right]) => right.createdAt.localeCompare(left.createdAt))
+    .map(([draftKey]) => draftKey);
 }
 
 /**
