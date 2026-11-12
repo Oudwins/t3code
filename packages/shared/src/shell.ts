@@ -210,7 +210,10 @@ function envCaptureEnd(name: string): string {
 
 const DEBUG_TRAP_SHELLS = new Set(["bash", "zsh", "sh", "ksh", "ksh93"]);
 
-function buildEnvironmentCaptureCommand(shell: string, names: ReadonlyArray<string>): string {
+export function buildEnvironmentCaptureCommand(
+  shell: string,
+  names: ReadonlyArray<string>,
+): string {
   const executableName = NodePath.basename(shell).toLowerCase();
   const isNushell = executableName.startsWith("nu");
 

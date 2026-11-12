@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
+import * as DeviceService from "../device/DeviceService.ts";
 import * as PortGateway from "../portSpace/PortGateway.ts";
 import * as PortSpaces from "../portSpace/PortSpaces.ts";
 import * as PreviewManager from "../preview/Manager.ts";
@@ -45,6 +46,7 @@ const withService = <A, E>(
   const terminals = Layer.mock(TerminalManager.TerminalManager)({});
   const previews = Layer.mock(PreviewManager.PreviewManager)({});
   const scheduledTasks = Layer.mock(ScheduledTaskService.ScheduledTaskService)({});
+  const devices = Layer.mock(DeviceService.DeviceService)({});
   return Effect.gen(function* () {
     const service = yield* ResourceCleanupService.ResourceCleanupService;
     return yield* use(service, released, relaysStopped);
@@ -52,7 +54,7 @@ const withService = <A, E>(
     Effect.provide(
       ResourceCleanupService.layer.pipe(
         Layer.provideMerge(
-          Layer.mergeAll(portSpaces, portGateway, terminals, previews, scheduledTasks),
+          Layer.mergeAll(portSpaces, portGateway, terminals, previews, scheduledTasks, devices),
         ),
         Layer.provideMerge(ServerConfig.layerTest("/tmp", { prefix: "t3-cleanup-" })),
         Layer.provideMerge(NodeServices.layer),

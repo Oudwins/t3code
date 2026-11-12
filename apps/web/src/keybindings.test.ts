@@ -770,7 +770,8 @@ describe("resolveShortcutCommand", () => {
     );
     assert.strictEqual(
       resolveShortcutCommand(
-        event({ key: "+", code: "Digit1", ctrlKey: true }),
+        // The fork's default thread jumps are mod+shift+1-9.
+        event({ key: "+", code: "Digit1", ctrlKey: true, shiftKey: true }),
         DEFAULT_RESOLVED_KEYBINDINGS,
         { platform: "Linux", context: { isDesktop: true } },
       ),
