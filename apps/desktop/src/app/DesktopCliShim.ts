@@ -99,12 +99,13 @@ export const renderCliShim = (input: {
     `if [ -x ${shellWord(`${target.appDirectory}/AppRun`)} ] && command -v appimage-run >/dev/null 2>&1; then`,
     `  exec appimage-run -w ${shellWord(target.appDirectory)} ${shellWord(`${target.appDirectory}/resources/app.asar/${SERVER_ENTRY}`)} "$@"`,
     "fi",
-    // The runtime stays mounted until killed; traps unmount it because background jobs ignore Ctrl-C.
+    // Its own session keeps a group signal (Ctrl-C, SSH hangup) from unmounting it under the
+    // running server; the traps unmount it after. Without setsid the extract fallback runs.
     "work=$(mktemp -d) || exit 1",
-    '"$app" --appimage-mount >"$work/mount" 2>/dev/null &',
+    'setsid "$app" --appimage-mount >"$work/mount" 2>/dev/null &',
     "mounter=$!",
     `trap 'kill "$mounter" 2>/dev/null; rm -rf "$work"' EXIT`,
-    "trap 'exit 130' INT TERM",
+    "trap 'exit 130' INT TERM HUP",
     "mount=",
     'while kill -0 "$mounter" 2>/dev/null; do',
     '  mount=$(head -n 1 "$work/mount")',
