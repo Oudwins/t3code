@@ -38,6 +38,7 @@ import {
   groupSidebarThreadsByProject,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
+  orderSidebarDraftIds,
 } from "./Sidebar.logic";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
@@ -309,6 +310,69 @@ describe("resolveAdjacentAttentionThreadId", () => {
         needsAttention: flagged("a"),
       }),
     ).toBeNull();
+  });
+});
+
+describe("orderSidebarDraftIds", () => {
+  const session = (projectId: string, createdAt: string) => ({
+    threadId: ThreadId.make(`thread-${createdAt}`),
+    environmentId: EnvironmentId.make("env"),
+    projectId: ProjectId.make(projectId),
+    logicalProjectKey: projectId,
+    createdAt,
+    runtimeMode: "approval-required" as const,
+    interactionMode: "plan" as const,
+    branch: null,
+    worktreePath: null,
+    envMode: "local" as const,
+    startFromOrigin: false,
+  });
+  const composer = (prompt: string) => ({
+    prompt,
+    images: [],
+    files: [],
+    nonPersistedImageIds: [],
+    persistedAttachments: [],
+    terminalContexts: [],
+    previewAnnotations: [],
+    reviewComments: [],
+    threadContexts: [],
+    environmentContexts: [],
+    modelSelectionByProvider: {},
+    activeProvider: null,
+    runtimeMode: null,
+    interactionMode: null,
+  });
+  const draftThreadsByThreadKey = {
+    old: session("p1", "2026-01-01"),
+    new: session("p1", "2026-01-03"),
+    empty: session("p1", "2026-01-04"),
+    other: session("p2", "2026-01-02"),
+    sent: {
+      ...session("p1", "2026-01-05"),
+      promotedTo: scopeThreadRef(EnvironmentId.make("env"), ThreadId.make("t")),
+    },
+  };
+  const draftsByThreadKey = {
+    old: composer("a"),
+    new: composer("b"),
+    empty: composer(""),
+    other: composer("c"),
+    sent: composer("d"),
+  };
+
+  it("lists drafts with content newest first, keeping the open draft and honoring scope", () => {
+    const input = { draftThreadsByThreadKey, draftsByThreadKey };
+    expect(orderSidebarDraftIds({ ...input, scopedProjectKeys: null, routeDraftId: null })).toEqual(
+      ["new", "other", "old"],
+    );
+    expect(
+      orderSidebarDraftIds({
+        ...input,
+        scopedProjectKeys: new Set(["env:p1"]),
+        routeDraftId: "empty",
+      }),
+    ).toEqual(["empty", "new", "old"]);
   });
 });
 
