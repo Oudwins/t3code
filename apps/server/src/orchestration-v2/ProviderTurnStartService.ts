@@ -30,14 +30,18 @@ import {
   CLAUDE_PROVIDER,
   CLAUDE_QUERY_ENDED_BEFORE_TURN_DETAIL,
 } from "./Adapters/ClaudeAdapterV2.ts";
-import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
+import { withTurnStartReservation, withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
+import {
+  makeRestoreMissingWorktree,
+  type WorktreeRecreateError,
+  type WorktreeRecreateNoBaseError,
+} from "../workspace/restoreMissingWorktree.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
@@ -78,28 +82,6 @@ export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStart
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
-
-class WorktreeRecreateError extends Schema.TaggedError<WorktreeRecreateError>()(
-  "WorktreeRecreateError",
-  {
-    worktreePath: Schema.String,
-    branch: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Could not recreate the worktree for branch '${this.branch}' at ${this.worktreePath}.`;
-  }
-}
-
-class WorktreeRecreateNoBaseError extends Schema.TaggedError<WorktreeRecreateNoBaseError>()(
-  "WorktreeRecreateNoBaseError",
-  { worktreePath: Schema.String, branch: Schema.String },
-) {
-  override get message(): string {
-    return `Could not recreate branch '${this.branch}' at ${this.worktreePath}: the project workspace has no commit to start it from.`;
-  }
-}
 
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
 const isProviderAdapterProtocolError = Schema.is(ProviderAdapter.ProviderAdapterProtocolError);
@@ -182,7 +164,6 @@ export const layer: Layer.Layer<
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
     const worktreeManager = yield* WorktreeManager.WorktreeManager;
     const projects = yield* ProjectService.ProjectService;
     const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
@@ -191,71 +172,8 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const restoreMissingWorktree = yield* makeRestoreMissingWorktree;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
-    const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
-
-    const resolveRecreateBase = Effect.fn("ProviderTurnStartService.resolveRecreateBase")(
-      function* (cwd: string) {
-        // Recovery can follow an external checkout, before the status cache expires.
-        yield* gitWorkflow.invalidateLocalStatus(cwd);
-        const { refName: currentBranch } = yield* gitWorkflow.localStatus({ cwd });
-        if (currentBranch !== null) {
-          const refName = `refs/heads/${currentBranch}`;
-          return { refName, baseRefName: refName };
-        }
-        if (yield* gitWorkflow.hasCommit({ cwd, refName: "refs/remotes/origin/HEAD" })) {
-          const { commitSha } = yield* gitWorkflow.resolveRemoteTrackingCommit({
-            cwd,
-            refName: "HEAD",
-            fallbackRemoteName: "origin",
-          });
-          // Start from the commit so the thread branch does not track the default branch.
-          return { refName: commitSha, baseRefName: "refs/remotes/origin/HEAD" };
-        }
-        if (yield* gitWorkflow.hasCommit({ cwd, refName: "HEAD" })) {
-          return { refName: "HEAD", baseRefName: undefined };
-        }
-        return null;
-      },
-    );
-
-    const recreateMissingWorktree = Effect.fn("ProviderTurnStartService.recreateMissingWorktree")(
-      function* (input: {
-        readonly cwd: string;
-        readonly worktreePath: string;
-        readonly branch: string;
-      }) {
-        const { cwd, worktreePath, branch } = input;
-        yield* gitWorkflow.pruneWorktrees({ cwd });
-        const localBranchNames = yield* gitWorkflow.listLocalBranchNames(cwd);
-        if (localBranchNames.includes(branch)) {
-          yield* worktreeManager.createWorktree({ cwd, refName: branch, path: worktreePath });
-          return;
-        }
-        // Push keeps the tracking ref current, so recovery reads it without fetching.
-        const pushedRef = `refs/remotes/origin/${branch}`;
-        if (yield* gitWorkflow.hasCommit({ cwd, refName: pushedRef })) {
-          yield* gitWorkflow.createWorktree({
-            cwd,
-            refName: pushedRef,
-            newRefName: branch,
-            path: worktreePath,
-          });
-          return;
-        }
-        const base = yield* resolveRecreateBase(cwd);
-        if (base === null) {
-          return yield* new WorktreeRecreateNoBaseError({ worktreePath, branch });
-        }
-        yield* worktreeManager.createWorktree({
-          cwd,
-          refName: base.refName,
-          newRefName: branch,
-          ...(base.baseRefName === undefined ? {} : { baseRefName: base.baseRefName }),
-          path: worktreePath,
-        });
-      },
-    );
 
     // Build draining callbacks outside startup scope so they cannot retain full thread history.
     const makeRunControls = (input: {
@@ -860,8 +778,7 @@ export const layer: Layer.Layer<
       const goalDriver =
         session.driver === "codex" ||
         session.driver === "claudeAgent" ||
-        (session.driver === "opencode" &&
-          session.providerSession.capabilities.turns.supportsNativeGoals === true);
+        session.providerSession.capabilities.turns.supportsNativeGoals === true;
       const goalCommand = goalDriver && parseGoalCommand(message) !== null;
       // The provider turn marks cancellation work delivered; restart continuations use their own text or resume natively.
       const noteContinuation = isRestartNoteContinuation(
@@ -1868,52 +1785,21 @@ export const layer: Layer.Layer<
       start: Effect.fn("ProviderTurnStartService.start")(
         function* (input) {
           const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
-          const { worktreePath, branch } = thread;
+          const { worktreePath } = thread;
           // Storage cleanup removes worktrees under the same lease. Only startup
           // holds it; the provider turn runs after it is released.
           const leased = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
             worktreePath === null ? effect : withWorkspaceLease(path.resolve(worktreePath), effect);
-          let setupFailure: Error | undefined;
-          let recreateFailure: WorktreeRecreateError | WorktreeRecreateNoBaseError | undefined;
-          if (worktreePath !== null && branch !== null) {
-            const recreated = yield* leased(
-              Effect.gen(function* () {
-                const exists = yield* fileSystem
-                  .exists(worktreePath)
-                  .pipe(Effect.orElseSucceed(() => true));
-                if (exists || !(yield* isManagedWorktreePath(worktreePath))) return undefined;
-                const project = yield* projects.getById(thread.projectId).pipe(
-                  Effect.map(Option.getOrUndefined),
-                  Effect.orElseSucceed(() => undefined),
-                );
-                if (project === undefined) return undefined;
-                yield* Effect.logWarning("provider turn start recreating missing worktree", {
-                  threadId: thread.id,
-                  worktreePath,
-                  branch,
-                });
-                return yield* recreateMissingWorktree({
-                  cwd: project.workspaceRoot,
-                  worktreePath,
-                  branch,
-                }).pipe(
-                  Effect.mapError((cause) =>
-                    cause._tag === "WorktreeRecreateNoBaseError"
-                      ? cause
-                      : new WorktreeRecreateError({ worktreePath, branch, cause }),
-                  ),
-                  Effect.as(project),
-                  Effect.result,
-                );
-              }),
-            );
-            if (recreated?._tag === "Failure") recreateFailure = recreated.failure;
+          const startup = Effect.gen(function* () {
+            const recreated = yield* leased(Effect.result(restoreMissingWorktree(thread)));
+            const recreateFailure = recreated._tag === "Failure" ? recreated.failure : undefined;
+            const project = recreated._tag === "Success" ? recreated.success : undefined;
+            let setupFailure: Error | undefined;
             // A recreated worktree gets a new one's setup, blocking or async alike. Setup that
             // fails, cannot start, or is interrupted removes the worktree so the next turn retries;
             // the provider never starts in a checkout that skipped it. Setup opens its terminal
             // under this same non-reentrant lease, so it runs between the leased steps.
-            if (recreated?._tag === "Success") {
-              const project = recreated.success;
+            if (project !== undefined && worktreePath !== null) {
               const removeRecreated = () =>
                 leased(
                   worktreeManager
@@ -1937,14 +1823,22 @@ export const layer: Layer.Layer<
               );
               if (setupFailure !== undefined) yield* removeRecreated();
             }
-          }
-          const providerTurn = yield* leased(
-            start({
-              ...input,
-              ...(setupFailure === undefined ? {} : { setupFailure }),
-              ...(recreateFailure === undefined ? {} : { recreateFailure }),
-            }),
-          );
+            return yield* leased(
+              start({
+                ...input,
+                ...(setupFailure === undefined ? {} : { setupFailure }),
+                ...(recreateFailure === undefined ? {} : { recreateFailure }),
+              }),
+            );
+          });
+          const cwd =
+            worktreePath ??
+            (yield* projects
+              .getById(thread.projectId, { includeDeleted: true })
+              .pipe(Effect.map((project) => Option.getOrUndefined(project)?.workspaceRoot)));
+          const providerTurn = yield* cwd === undefined
+            ? startup
+            : withTurnStartReservation(fileSystem, path, path.resolve(cwd), startup);
           if (providerTurn !== undefined) yield* providerTurn;
         },
         (effect, input) =>
