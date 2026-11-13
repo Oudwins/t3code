@@ -134,11 +134,11 @@ open.
 
 Threads that are busy move into two collapsed sections below the active list. **Working** holds
 threads whose agent is running. **Waiting** holds threads whose agent has stopped but will come back
-without you: it is waiting on a subagent, a watched pull request, or a background command or monitor
-it says it is waiting on. A dev server or other process an agent leaves running does not keep a
-thread there. A thread returns to
-the top of the active list when it finishes, fails, or needs an approval or answer. Both sections
-list the thread you last sent work to first. Pinned threads stay in the pinned section.
+without you: it is waiting on a subagent, a watched pull request with checks still running, or a
+background command or monitor it says it is waiting on. A dev server or other process an agent
+leaves running does not keep a thread there. A thread returns to the top of the active list when it
+finishes, fails, or needs an approval or answer. Both sections list the thread you last sent work to
+first. Pinned threads stay in the pinned section.
 
 This is on by default. Turn it off with **Settings → General → Working section** on web and desktop,
 or **Settings → General → Working section** on iOS and Android. Each device keeps its own
@@ -283,6 +283,7 @@ On mobile, open a subagent from its conversation card or **Agents**. On iOS
 layouts with an inspector, its thread opens beside the parent. Maximize it to
 fill the screen; close the full-screen view to return to the parent and inspector.
 Stop on a thread also stops the subagents it delegated to.
+Before archiving the parent, wait for its delegated tasks to finish or cancel them.
 
 Subagent threads started by the agent can't take messages; message the parent
 thread instead. When such a subagent needs an approval or an answer, the parent
