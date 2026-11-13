@@ -554,7 +554,9 @@ export const layerExecutor: Layer.Layer<
           case "terminal.cleanup":
             return Effect.partition(
               [
-                resourceCleanup.cleanupTerminals(effect.threadId),
+                resourceCleanup
+                  .cleanupTerminals(effect.threadId)
+                  .pipe(Effect.andThen(resourceCleanup.releasePortSpace(effect.threadId))),
                 resourceCleanup.cleanupDevices(effect.threadId),
               ],
               (cleanup) => cleanup,
@@ -562,7 +564,6 @@ export const layerExecutor: Layer.Layer<
               Effect.flatMap(([, [failure]]) =>
                 failure === undefined ? Effect.void : Effect.fail(failure),
               ),
-              Effect.andThen(resourceCleanup.releasePortSpace(effect.threadId)),
               Effect.mapError(
                 (cause) =>
                   new OrchestrationEffectExecutionError({
