@@ -31,6 +31,7 @@ import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "./ProviderTurnStartService.ts";
+import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
@@ -93,6 +94,7 @@ function layerExecutorFor(input: {
       ProviderTurnControlService.ProviderTurnControlServiceV2.of({
         interrupt: input.interrupt ?? (() => Effect.void),
         steer: () => Effect.void,
+        applyModelSelection: () => Effect.void,
         interruptAndAwaitTerminal: (request) =>
           record(
             request.replacementProviderSessionId === undefined
@@ -376,7 +378,7 @@ it.effect("requeues a claim when a pre-execution worker check fails", () =>
     );
 
     const exit = yield* EffectWorker.OrchestrationEffectWorkerV2.pipe(
-      Effect.flatMap((worker) => worker.runOnce),
+      Effect.flatMap((worker) => worker.runOnce()),
       Effect.provide(layerWorker),
       Effect.exit,
     );
@@ -446,7 +448,7 @@ it.effect("arms cancellation before the durable pre-execution check", () =>
     );
 
     const exit = yield* EffectWorker.OrchestrationEffectWorkerV2.pipe(
-      Effect.flatMap((worker) => worker.runOnce),
+      Effect.flatMap((worker) => worker.runOnce()),
       Effect.provide(layerWorker),
       Effect.exit,
     );
@@ -512,7 +514,7 @@ it.effect("terminalizes a process-bound claim when success settlement fails", ()
     );
 
     const exit = yield* EffectWorker.OrchestrationEffectWorkerV2.pipe(
-      Effect.flatMap((worker) => worker.runOnce),
+      Effect.flatMap((worker) => worker.runOnce()),
       Effect.provide(layerWorker),
       Effect.exit,
     );
@@ -636,4 +638,41 @@ it.effect.each(["confirmed", "unconfirmed", "failed"] as const)(
         outcome === "confirmed" ? ["stop-child", "settle-child"] : ["stop-child"],
       );
     }),
+);
+
+it.effect("releases a thread's port space when its device cleanup fails", () =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const events = yield* Ref.make<ReadonlyArray<string>>([]);
+    const record = (event: string) => Ref.update(events, (current) => [...current, event]);
+    const exit = yield* Effect.gen(function* () {
+      const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+      return yield* Effect.exit(
+        executor.execute({
+          ...restartEffect(now, { type: "detach" }),
+          request: { type: "terminal.cleanup" },
+        }),
+      );
+    }).pipe(
+      Effect.provide(layerExecutorFor({ events })),
+      Effect.provideService(
+        ResourceCleanupService.ResourceCleanupService,
+        ResourceCleanupService.ResourceCleanupService.of({
+          cleanupScheduledTasks: () => Effect.void,
+          cleanupTerminals: () => record("terminals"),
+          cleanupPreviews: () => Effect.void,
+          releasePortSpace: () => record("port-space"),
+          cleanupDevices: (threadId) =>
+            new ResourceCleanupService.ResourceCleanupError({
+              operation: "device",
+              threadId,
+              cause: "device host disconnected",
+            }),
+          cleanupAttachments: () => Effect.void,
+        }),
+      ),
+    );
+    assert.isTrue(Exit.isFailure(exit));
+    assert.deepEqual(yield* Ref.get(events), ["terminals", "port-space"]);
+  }),
 );

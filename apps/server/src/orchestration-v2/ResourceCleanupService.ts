@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as DeviceService from "../device/DeviceService.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as PortGateway from "../portSpace/PortGateway.ts";
 import * as PortSpaces from "../portSpace/PortSpaces.ts";
@@ -20,6 +21,7 @@ export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupErro
     operation: Schema.Literals([
       "terminal",
       "preview",
+      "device",
       "attachment",
       "portSpace",
       "scheduled-tasks",
@@ -36,6 +38,8 @@ export class ResourceCleanupService extends Context.Reference<{
   readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   /** Stops the thread's relay, kills whatever still runs in its port space and deletes the namespace. */
   readonly releasePortSpace: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
+  /** Releases the thread's device claims, as `device_close` does; the devices stay booted. */
+  readonly cleanupDevices: (threadId: ThreadId) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
   ) => Effect.Effect<void, ResourceCleanupError>;
@@ -45,6 +49,7 @@ export class ResourceCleanupService extends Context.Reference<{
     cleanupTerminals: () => Effect.void,
     cleanupPreviews: () => Effect.void,
     releasePortSpace: () => Effect.void,
+    cleanupDevices: () => Effect.void,
     cleanupAttachments: () => Effect.void,
   }),
 }) {}
@@ -56,6 +61,7 @@ export const layer = Layer.effect(
     const previews = yield* PreviewManager.PreviewManager;
     const portSpaces = yield* PortSpaces.PortSpaces;
     const portGateway = yield* PortGateway.PortGateway;
+    const devices = yield* DeviceService.DeviceService;
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
     const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
@@ -108,6 +114,21 @@ export const layer = Layer.effect(
               (cause) => new ResourceCleanupError({ operation: "preview", threadId, cause }),
             ),
           );
+      }),
+      cleanupDevices: Effect.fn("ResourceCleanupService.cleanupDevices")(function* (
+        threadId: ThreadId,
+      ) {
+        // One close per session, so a reconnecting host does not keep the other hosts' claims.
+        const sessions = yield* devices.sessionsForThread(threadId);
+        const [, failures] = yield* Effect.partition(
+          sessions,
+          (session) =>
+            devices.close({ threadId, hostId: session.hostId, deviceId: session.deviceId }),
+          { concurrency: 1 },
+        );
+        const [failure] = failures;
+        if (failure !== undefined)
+          return yield* new ResourceCleanupError({ operation: "device", threadId, cause: failure });
       }),
       cleanupAttachments: Effect.fn("ResourceCleanupService.cleanupAttachments")(function (
         attachmentIds: ReadonlyArray<string>,

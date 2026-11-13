@@ -210,7 +210,10 @@ function envCaptureEnd(name: string): string {
 
 const DEBUG_TRAP_SHELLS = new Set(["bash", "zsh", "sh", "ksh", "ksh93"]);
 
-function buildEnvironmentCaptureCommand(shell: string, names: ReadonlyArray<string>): string {
+export function buildEnvironmentCaptureCommand(
+  shell: string,
+  names: ReadonlyArray<string>,
+): string {
   const executableName = NodePath.basename(shell).toLowerCase();
   const isNushell = executableName.startsWith("nu");
 
@@ -292,6 +295,21 @@ function extractEnvironmentValue(output: string, name: string): string | undefin
   return value.length > 0 ? value : undefined;
 }
 
+/** Reads the values `buildEnvironmentCaptureCommand` printed; unset or empty names are omitted. */
+export function extractEnvironmentValues(
+  output: string,
+  names: ReadonlyArray<string>,
+): Partial<Record<string, string>> {
+  const environment: Partial<Record<string, string>> = {};
+  for (const name of names) {
+    const value = extractEnvironmentValue(output, name);
+    if (value !== undefined) {
+      environment[name] = value;
+    }
+  }
+  return environment;
+}
+
 export type ShellEnvironmentReader = (
   shell: string,
   names: ReadonlyArray<string>,
@@ -317,15 +335,7 @@ export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
     stdio: ["ignore", "pipe", "ignore"],
   });
 
-  const environment: Partial<Record<string, string>> = {};
-  for (const name of names) {
-    const value = extractEnvironmentValue(output, name);
-    if (value !== undefined) {
-      environment[name] = value;
-    }
-  }
-
-  return environment;
+  return extractEnvironmentValues(output, names);
 };
 
 export type WindowsShellEnvironmentReader = (

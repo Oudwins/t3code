@@ -31,6 +31,7 @@ import {
   supportsSharedSettingsSync,
 } from "@t3tools/client-runtime/state/shared-settings";
 import { ensureLocalApi } from "~/localApi";
+import { subscribeBrowserClientSettingsWrites } from "~/clientPersistenceStorage";
 import {
   getThemeDefinition,
   getThemePreviewSidebarArtwork,
@@ -81,6 +82,7 @@ let followingOtherWindows = false;
 let otherWindowSaves = 0;
 let otherWindowSaveDuringHydration: ClientSettings | null = null;
 let missedOtherWindowSave = false;
+let unsubscribeOtherTabClientSettings: (() => void) | null = null;
 
 function emitClientSettingsChange() {
   for (const listener of clientSettingsListeners) {
@@ -162,6 +164,9 @@ async function hydrateClientSettings(): Promise<void> {
       if (settings) {
         replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...settings });
       }
+      unsubscribeOtherTabClientSettings ??= subscribeBrowserClientSettingsWrites(
+        refreshClientSettingsFromOtherTab,
+      );
       setClientSettingsHydrationStatus("ready");
     } catch (error) {
       if (hydrationGeneration === clientSettingsHydrationGeneration) {
@@ -220,6 +225,20 @@ async function catchUpWithOtherWindows(): Promise<void> {
   }
 }
 
+function refreshClientSettingsFromOtherTab(): void {
+  void enqueueClientSettingsPersistence(async () => {
+    const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
+    if (persistedSettings) {
+      replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+    }
+  }).catch((error) => {
+    console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} refresh failed`, {
+      operation: "refresh",
+      ...safeErrorLogAttributes(error),
+    });
+  });
+}
+
 const defaultClientSettingsPersistence = (settings: ClientSettings): Promise<void> =>
   ensureLocalApi().persistence.setClientSettings(settings);
 
@@ -257,10 +276,16 @@ export function persistClientSettingsPatch(
         if (clientSettingsHydrationStatus !== "ready") {
           await hydrateClientSettings();
         }
-        replaceClientSettingsSnapshot({ ...getClientSettingsSnapshot(), ...patch });
       } finally {
         deferredClientSettingsPatchCount -= 1;
       }
+    }
+    // Also reapplies an optimistic patch that a refresh from another tab replaced.
+    const current = getClientSettingsSnapshot();
+    if (
+      !Object.entries(patch).every(([key, value]) => current[key as keyof ClientSettings] === value)
+    ) {
+      replaceClientSettingsSnapshot({ ...current, ...patch });
     }
     await persist(getClientSettingsSnapshot());
   }).catch((error) => {
@@ -812,6 +837,8 @@ export function __resetClientSettingsPersistenceForTests(): void {
   otherWindowSaves = 0;
   otherWindowSaveDuringHydration = null;
   missedOtherWindowSave = false;
+  unsubscribeOtherTabClientSettings?.();
+  unsubscribeOtherTabClientSettings = null;
   clientSettingsListeners.clear();
   clientSettingsHydrationListeners.clear();
 }

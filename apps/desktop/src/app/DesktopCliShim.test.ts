@@ -41,54 +41,23 @@ const run = (shim: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEnv =
 const REPORTER =
   '#!/bin/sh\necho "node=$ELECTRON_RUN_AS_NODE cli=$T3CODE_CLI_PATH home=$T3CODE_HOME"\nprintf "%s\\n" "$@"\nexit 3\n';
 
-const fakeAppImage = (mode: "mount" | "extract" | "appimage-run") => {
+const fakeAppImage = (canMount = true, app = REPORTER) => {
   const root = tempRoot();
-  const image = NodePath.join(root, "image with spaces");
-  const tools = NodePath.join(root, "tools");
-  NodeFS.mkdirSync(tools);
-  for (const tool of ["cp", "head", "mktemp", "rm", "sleep", "touch"]) {
-    const executable = NodeChildProcess.execFileSync("sh", ["-c", 'command -v "$1"', "_", tool], {
-      encoding: "utf8",
-    }).trim();
-    NodeFS.symlinkSync(executable, NodePath.join(tools, tool));
-  }
-  writeExecutable(NodePath.join(image, "t3code"), REPORTER);
-  if (mode === "appimage-run") {
-    const entry = NodePath.join(image, "resources/app.asar/apps/server/dist/bin.mjs");
-    NodeFS.mkdirSync(NodePath.dirname(entry), { recursive: true });
-    NodeFS.writeFileSync(
-      entry,
-      [
-        "if (!import.meta.main) process.exit(9);",
-        "console.log(`node=${process.env.ELECTRON_RUN_AS_NODE} cli=${process.env.T3CODE_CLI_PATH} home=${process.env.T3CODE_HOME}`);",
-        'console.log(process.argv.slice(1).join("\\n"));',
-        "process.exit(3);",
-      ].join("\n"),
-    );
-    writeExecutable(NodePath.join(image, "AppRun"), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
-    writeExecutable(
-      NodePath.join(tools, "appimage-run"),
-      [
-        "#!/bin/sh",
-        '[ "$1" = -w ] || { echo "unexpected startup text"; exit 9; }',
-        'export APPDIR="$2"',
-        "shift 2",
-        'exec "$APPDIR/AppRun" "$@"',
-        "",
-      ].join("\n"),
-    );
-  }
+  const image = NodePath.join(root, "image");
+  writeExecutable(NodePath.join(image, "t3code"), app);
   const appImage = NodePath.join(root, "T3 Code.AppImage");
   writeExecutable(
     appImage,
     [
       "#!/bin/sh",
-      ...(mode === "appimage-run" ? ["echo 'bad option: --appimage-extract' >&2; exit 9"] : []),
       `if [ "$1" = --appimage-extract ]; then cp -R '${image}' squashfs-root; exit 0; fi`,
       '[ "$1" = --appimage-mount ] || exit 9',
       '[ -n "$APPIMAGE_EXTRACT_AND_RUN" ] && exit 8',
-      mode === "mount" ? `echo '${image}'` : 'echo "Cannot mount AppImage"; exit 1',
-      `trap 'touch "${root}/unmounted"; exit 0' TERM`,
+      `echo $$ >'${root}/mounter.pid'`,
+      canMount ? `echo '${image}'` : 'echo "Cannot mount AppImage"; exit 1',
+      // Like the FUSE runtime, any of these unmounts. fd 3 reports to the test when it is open.
+      `trap 'echo unmounted >&3 2>/dev/null; touch "${root}/unmounted"; exit 0' TERM HUP INT`,
+      "trap 'echo mounted >&3 2>/dev/null' WINCH",
       "while :; do sleep 0.05; done",
       "",
     ].join("\n"),
@@ -99,25 +68,142 @@ const fakeAppImage = (mode: "mount" | "extract" | "appimage-run") => {
     appDirectory: image,
     executableName: "t3code",
   });
-  return { root, image, appImage, shim, tools };
+  return { root, image, appImage, shim };
+};
+
+// NixOS cannot run the AppImage's own runtime, so the launcher hands the extracted app to appimage-run.
+const fakeNixAppImage = () => {
+  const { root, image, appImage, shim } = fakeAppImage(false);
+  writeExecutable(appImage, "#!/bin/sh\necho 'bad option: --appimage-extract' >&2; exit 9\n");
+  const tools = NodePath.join(root, "tools");
+  NodeFS.mkdirSync(tools);
+  for (const tool of ["cp", "head", "mktemp", "rm", "sleep", "touch"]) {
+    const executable = NodeChildProcess.execFileSync("sh", ["-c", 'command -v "$1"', "_", tool], {
+      encoding: "utf8",
+    }).trim();
+    NodeFS.symlinkSync(executable, NodePath.join(tools, tool));
+  }
+  const entry = NodePath.join(image, "resources/app.asar/apps/server/dist/bin.mjs");
+  NodeFS.mkdirSync(NodePath.dirname(entry), { recursive: true });
+  NodeFS.writeFileSync(
+    entry,
+    [
+      "if (!import.meta.main) process.exit(9);",
+      "console.log(`node=${process.env.ELECTRON_RUN_AS_NODE} cli=${process.env.T3CODE_CLI_PATH} home=${process.env.T3CODE_HOME}`);",
+      'console.log(process.argv.slice(1).join("\\n"));',
+      "process.exit(3);",
+    ].join("\n"),
+  );
+  writeExecutable(NodePath.join(image, "AppRun"), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+  writeExecutable(
+    NodePath.join(tools, "appimage-run"),
+    [
+      "#!/bin/sh",
+      '[ "$1" = -w ] || { echo "unexpected startup text"; exit 9; }',
+      'export APPDIR="$2"',
+      "shift 2",
+      'exec "$APPDIR/AppRun" "$@"',
+      "",
+    ].join("\n"),
+  );
+  return { root, image, shim, tools };
+};
+
+// Stays up after a signal until the test lets it finish, like a server shutting down.
+const SLOW_SERVER = [
+  "#!/bin/sh",
+  "trap 'echo stopping >&3; read go; echo stopped >&3; exit 0' TERM HUP",
+  "echo ready",
+  "while :; do sleep 0.05; done",
+  "",
+].join("\n");
+
+// The launcher mounts only under setsid, which stock macOS and Windows lack; there it extracts instead.
+const hasSetsid = NodeChildProcess.spawnSync("setsid", ["true"]).status === 0;
+
+const lines = (stream: NodeJS.ReadableStream) => {
+  const seen: Array<string> = [];
+  const waiters: Array<() => void> = [];
+  let buffer = "";
+  stream.setEncoding("utf8");
+  stream.on("data", (chunk: string) => {
+    buffer += chunk;
+    const parts = buffer.split("\n");
+    buffer = parts.pop()!;
+    seen.push(...parts);
+    for (const wake of waiters.splice(0)) wake();
+  });
+  const until = async (match: (line: string) => boolean) => {
+    for (;;) {
+      const line = seen.find(match);
+      if (line !== undefined) return line;
+      await new Promise<void>((resolve) => waiters.push(resolve));
+    }
+  };
+  return { seen, until };
 };
 
 describe("renderCliShim", () => {
-  it.each(["mount", "extract", "appimage-run"] as const)("runs the AppImage CLI via %s", (mode) => {
-    const { root, image, shim, tools } = fakeAppImage(mode);
+  it.skipIf(!hasSetsid).each(["SIGTERM", "SIGHUP"] as const)(
+    "keeps the AppImage mounted until the server exits after %s to the process group",
+    async (signal) => {
+      const { root, shim } = fakeAppImage(true, SLOW_SERVER);
+      const child = NodeChildProcess.spawn(shim, [], {
+        detached: true,
+        env: { PATH: process.env.PATH },
+        stdio: ["pipe", "pipe", "ignore", "pipe"],
+      });
+      let mounter: number | undefined;
+      try {
+        const stdout = lines(child.stdout!);
+        const events = lines(child.stdio[3] as NodeJS.ReadableStream);
+        const exited = new Promise((resolve) => child.on("close", resolve));
+        await stdout.until((line) => line === "ready");
+        mounter = Number(NodeFS.readFileSync(NodePath.join(root, "mounter.pid"), "utf8"));
+
+        // Ctrl-C in a terminal, a closed SSH session, or a service manager signals the whole group.
+        process.kill(-child.pid!, signal);
+        // The shell runs pending traps in ascending signal number, and WINCH outnumbers TERM and
+        // HUP, so a mounter that also got the group signal unmounts before it answers this probe.
+        process.kill(mounter, "SIGWINCH");
+        const mount = await events.until((line) => line === "mounted" || line === "unmounted");
+        expect(mount).toBe("mounted");
+
+        await events.until((line) => line === "stopping");
+        child.stdin!.end("go\n");
+        await exited;
+        expect(events.seen.slice(-2)).toEqual(["stopped", "unmounted"]);
+      } finally {
+        for (const pid of [-child.pid!, mounter]) {
+          if (pid === undefined) continue;
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {}
+        }
+      }
+    },
+  );
+
+  it("extracts the AppImage where it cannot be mounted", () => {
+    const { shim } = fakeAppImage(false);
+    const result = run(shim, ["--version"], { APPIMAGE_EXTRACT_AND_RUN: "1" });
+    expect(result.status).toBe(3);
+    expect(result.stdout).toMatch(
+      /squashfs-root\/resources\/app\.asar\/apps\/server\/dist\/bin\.mjs/,
+    );
+  });
+
+  it("runs the AppImage CLI through appimage-run on NixOS", () => {
+    const { root, image, shim, tools } = fakeNixAppImage();
     const args = ["portspace", "setup", "path with spaces", "literal '$value' $(echo unexpected)"];
     const result = run(shim, args, { PATH: tools, APPIMAGE_EXTRACT_AND_RUN: "1" });
     expect(result.status).toBe(3);
     expect(result.stdout.split("\n")[0]).toBe(`node=1 cli=${shim} home=${root}/home`);
-    const lines = result.stdout.split("\n").slice(1);
-    expect(lines[0]).toEqual(
-      mode === "extract"
-        ? expect.stringMatching(
-            /squashfs-root\/resources\/app\.asar\/apps\/server\/dist\/bin\.mjs$/,
-          )
-        : `${image}/resources/app.asar/apps/server/dist/bin.mjs`,
-    );
-    expect(lines.slice(1)).toEqual([...args, ""]);
+    expect(result.stdout.split("\n").slice(1)).toEqual([
+      `${image}/resources/app.asar/apps/server/dist/bin.mjs`,
+      ...args,
+      "",
+    ]);
   });
 
   it("keeps the install's T3 home under sudo, unless one is set", () => {
