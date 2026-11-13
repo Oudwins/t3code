@@ -815,6 +815,8 @@ export interface ThreadSearchSubject {
   readonly pullRequests?: ReadonlyArray<{
     readonly number: number;
     readonly title?: string | null;
+    /** Matched only by the whole query, after the thread's own branch. */
+    readonly headBranch?: string | null;
     /** Values such as URLs, matched only by the whole query. */
     readonly references?: ReadonlyArray<string>;
   }>;
@@ -912,8 +914,11 @@ export interface ThreadSearchMatch {
   readonly pickedAt?: number;
   /** Picked for exactly this query, before newer picks for longer ones; see `rankSearchGroups`. */
   readonly pickedExactly?: boolean;
-  /** The query is the thread's whole branch name; listed before every other match. */
-  readonly exact?: boolean;
+  /**
+   * The query is a whole branch name: 2 for the thread's own branch, 1 for a
+   * pull request's head branch. Higher lists first, before every other match.
+   */
+  readonly exact?: number;
   /** Below the whole-name class; see `scoreThreadSearch`. */
   readonly groupQuality: number;
 }
@@ -1033,22 +1038,25 @@ export function scoreThreadSearch(
 ): ThreadSearchMatch | null {
   const fields = threadSearchFields(thread);
   const fieldQuery = threadFieldQuery(normalizedQuery);
+  const isWholeBranch = (branch: string | null): branch is string =>
+    branch !== null && prepareSearchField(branch).text === fieldQuery;
+  const wholeBranchMatch = (exact: number, label: string, branch: string) => ({
+    score: WHOLE_NAME * threadUsageBoost(thread, now),
+    quality: WHOLE_NAME,
+    wholeWords: true,
+    groupQuality: WHOLE_NAME,
+    strong: true,
+    exact,
+    ranges: [],
+    explain: () => ({ label, text: branch, ranges: [{ start: 0, end: branch.length }] }),
+  });
   const branch = searchableBranch(thread.branch);
-  if (branch && prepareSearchField(branch).text === fieldQuery) {
-    return {
-      score: WHOLE_NAME * threadUsageBoost(thread, now),
-      quality: WHOLE_NAME,
-      wholeWords: true,
-      groupQuality: WHOLE_NAME,
-      strong: true,
-      exact: true,
-      ranges: [],
-      explain: () => ({
-        label: "Branch",
-        text: branch,
-        ranges: [{ start: 0, end: branch.length }],
-      }),
-    };
+  if (isWholeBranch(branch)) return wholeBranchMatch(2, "Branch", branch);
+  for (const pullRequest of thread.pullRequests ?? []) {
+    const headBranch = searchableBranch(pullRequest.headBranch);
+    if (isWholeBranch(headBranch)) {
+      return wholeBranchMatch(1, `PR #${pullRequest.number} branch`, headBranch);
+    }
   }
   const fieldMatch = matchSearchFields(fieldQuery, fields, options);
   const referenceMatch = fieldMatch ? null : matchReference(normalizedQuery, thread);
@@ -1176,7 +1184,7 @@ export function rankSearchGroups<
     readonly strong: boolean;
     readonly pickedAt?: number;
     readonly pickedExactly?: boolean;
-    readonly exact?: boolean;
+    readonly exact?: number;
     readonly groupQuality?: number;
     readonly wholeWords?: boolean;
   },
@@ -1210,7 +1218,7 @@ export function rankSearchGroups<
       const wholeWord = (match: M) => Number(match.wholeWords ?? match.quality >= WHOLE_WORD);
       const sorted = [...items].sort(
         (left, right) =>
-          Number(right.match.exact ?? false) - Number(left.match.exact ?? false) ||
+          (right.match.exact ?? 0) - (left.match.exact ?? 0) ||
           wordMatch(right.match) - wordMatch(left.match) ||
           exactPickAt(right.match) - exactPickAt(left.match) ||
           matchClass(right.match.quality) - matchClass(left.match.quality) ||
@@ -1221,14 +1229,12 @@ export function rankSearchGroups<
       const best = Math.max(
         ...items.map(({ match }) => matchClass(match.groupQuality ?? match.quality)),
       );
-      const exact = items.some(({ match }) => match.exact === true);
+      const exact = Math.max(...items.map(({ match }) => match.exact ?? 0));
       return [{ group, ranked: sorted, best, exact, order }];
     })
     .sort(
       (left, right) =>
-        Number(right.exact) - Number(left.exact) ||
-        right.best - left.best ||
-        left.order - right.order,
+        right.exact - left.exact || right.best - left.best || left.order - right.order,
     )
     .map(({ group, ranked: items }) => ({ group, ranked: items }));
 }
