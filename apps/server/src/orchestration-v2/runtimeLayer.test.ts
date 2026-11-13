@@ -4602,6 +4602,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       yield* watch(true, "start");
 
       let reads = 0;
+      // A new watch baselines its first read, so the gate passes on a later one.
+      let status: "pending" | "success" = "pending";
       const reactor = yield* PullRequestWatchReactor.make.pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -4620,7 +4622,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
                       at: "2026-10-02T12:00:00.000Z",
                     }),
                     checks: [
-                      { name: "test", status: "success" as const },
+                      { name: "test", status },
                       { name: "policy-bot: main", status: "pending" as const },
                     ].map((check) => ({ ...check, description: null, url: null, required: true })),
                   };
@@ -4638,6 +4640,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         ),
       );
       yield* reactor.sweep;
+      status = "success";
+      yield* TestClock.adjust("10 minutes");
+      yield* reactor.sweep;
       yield* TestClock.adjust("2 minutes");
       yield* reactor.sweep;
 
@@ -4646,7 +4651,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         messages.flatMap((message) => message.notification?.summary ?? []),
         ["#13: checks passed"],
       );
-      assert.equal(reads, 1);
+      assert.equal(reads, 2);
       yield* watch(false, "end");
     }),
   );

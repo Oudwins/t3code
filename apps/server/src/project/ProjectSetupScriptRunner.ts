@@ -241,10 +241,12 @@ export const make = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom;
   const serviceScope = yield* Effect.scope;
   // Cursor scripts are picked before the terminal reports its shell, so quote for the expected one.
+  // Cursor's quoting has no Nushell form, so Nushell falls back to POSIX.
+  const expectedShell = resolveCompletionShell(
+    platform === "win32" ? "powershell" : ((yield* HostProcess.Environment).SHELL ?? ""),
+  );
   const cursorScriptShell =
-    resolveCompletionShell(
-      platform === "win32" ? "powershell" : ((yield* HostProcess.Environment).SHELL ?? ""),
-    ) ?? "posix";
+    expectedShell === null || expectedShell === "nushell" ? "posix" : expectedShell;
   const loadCursorSetupScript = yield* CursorWorktreeSetup.makeCursorSetupLoader;
 
   const observeTerminalCompletion = Effect.fn("ProjectSetupScriptRunner.observeTerminalCompletion")(
