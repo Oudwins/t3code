@@ -16,6 +16,8 @@ function latestUpdatedAt(link: ThreadPullRequestLink): number {
 export interface ThreadSearchPullRequest {
   readonly number: number;
   readonly title: string | null;
+  /** Matched only by the whole query, after the thread's own branch. */
+  readonly headBranch: string | null;
   /** `owner/repo#123` and the pull request URL, matched only by a whole query. */
   readonly references: ReadonlyArray<string>;
 }
@@ -31,9 +33,11 @@ export function threadSearchPullRequests(thread: {
   const entry = (
     link: Pick<ThreadLinkedPullRequest, "number" | "repository" | "url">,
     title: string | null,
+    headBranch: string | null = null,
   ): ThreadSearchPullRequest => ({
     number: link.number,
     title,
+    headBranch,
     references: [`${link.repository}#${link.number}`, link.url],
   });
   const branch = thread.branchPullRequest ? [entry(thread.branchPullRequest, null)] : [];
@@ -45,7 +49,11 @@ export function threadSearchPullRequests(thread: {
     );
     return branch.concat(
       newestFirst.map((link, index) =>
-        entry(link, index < SEARCHED_PULL_REQUEST_TITLES ? (link.snapshot?.title ?? null) : null),
+        entry(
+          link,
+          index < SEARCHED_PULL_REQUEST_TITLES ? (link.snapshot?.title ?? null) : null,
+          link.snapshot?.headBranch ?? null,
+        ),
       ),
     );
   }

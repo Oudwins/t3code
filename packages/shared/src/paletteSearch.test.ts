@@ -219,6 +219,26 @@ describe("scoreThreadSearch", () => {
       text: "cmdk-search-v2",
       ranges: [{ start: 0, end: 14 }],
     });
+
+    // A pull request's head branch comes after the thread's own branch, before other matches.
+    const reviewer = thread("Review", {
+      activityAt: NOW,
+      branch: "t3/review",
+      pullRequests: [
+        { number: 7, headBranch: "unrelated" },
+        { number: 12, headBranch: "t3/cmdk-search-v2" },
+      ],
+    });
+    expect(rankTitles("t3/cmdk-search-v2", [titled, reviewer, subject])).toEqual([
+      "Cmd+K search",
+      "Review",
+      "cmdk-search-v2",
+    ]);
+    expect(scoreThreadSearch("cmdk-search-v2", reviewer, NOW)?.explain?.()).toEqual({
+      label: "PR #12 branch",
+      text: "cmdk-search-v2",
+      ranges: [{ start: 0, end: 14 }],
+    });
   });
 
   it("ranks a title holding the words above the app's own branch prefix and project name", () => {
