@@ -770,7 +770,7 @@ describe("resolveShortcutCommand", () => {
     );
     assert.strictEqual(
       resolveShortcutCommand(
-        event({ key: "+", code: "Digit1", ctrlKey: true }),
+        event({ key: "+", code: "Digit1", ctrlKey: true, shiftKey: true }),
         DEFAULT_RESOLVED_KEYBINDINGS,
         { platform: "Linux", context: { isDesktop: true } },
       ),
