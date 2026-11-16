@@ -47,7 +47,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
-import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -127,7 +126,7 @@ interface HarnessOptions {
   readonly closeTerminal?: TerminalManager.TerminalManager["Service"]["close"];
   readonly adapters?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>;
   readonly managedFolders?: Layer.Layer<ManagedProjectFolders.ManagedProjectFolders>;
-  readonly createWorktree?: WorktreeManager.WorktreeManager["Service"]["createWorktree"];
+  readonly createWorktree?: GitWorkflow.GitWorkflowService["Service"]["createWorktree"];
   readonly fetchWorktreeBaseCommit?: GitWorkflow.GitWorkflowService["Service"]["fetchWorktreeBaseCommit"];
   readonly remoteExists?: GitWorkflow.GitWorkflowService["Service"]["remoteExists"];
   readonly hasCommit?: GitWorkflow.GitWorkflowService["Service"]["hasCommit"];
@@ -213,9 +212,9 @@ function makeHarness(options: HarnessOptions = {}) {
       getShell: () => Effect.die("unused"),
       listShells: () => Effect.die("unused"),
     }),
-    Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree }),
     Layer.mock(GitWorkflow.GitWorkflowService)({
       repositoryRoot: () => Effect.succeed(project.workspaceRoot),
+      createWorktree,
       renameBranch,
       fetchWorktreeBaseCommit:
         options.fetchWorktreeBaseCommit ??

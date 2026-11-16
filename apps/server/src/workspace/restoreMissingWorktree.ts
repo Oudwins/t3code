@@ -9,7 +9,6 @@ import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
-import * as WorktreeManager from "../git/WorktreeManager.ts";
 import { scratchFolderRoot } from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
@@ -53,7 +52,6 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
-  const worktreeManager = yield* WorktreeManager.WorktreeManager;
   const projects = yield* ProjectService.ProjectService;
   const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -137,7 +135,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
     yield* gitWorkflow.pruneWorktrees({ cwd });
     const localBranchNames = yield* gitWorkflow.listLocalBranchNames(cwd);
     if (localBranchNames.includes(branch)) {
-      yield* worktreeManager.createWorktree({ cwd, refName: branch, path: worktreePath });
+      yield* gitWorkflow.createWorktree({ cwd, refName: branch, path: worktreePath });
       return;
     }
     const remoteName = yield* gitWorkflow
@@ -158,7 +156,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
     if (base === null) {
       return yield* new WorktreeRecreateNoBaseError({ worktreePath, branch });
     }
-    yield* worktreeManager.createWorktree({
+    yield* gitWorkflow.createWorktree({
       cwd,
       refName: base.refName,
       newRefName: branch,
@@ -167,6 +165,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
     });
   });
 
+  // Returns the project when it recreated the worktree, so the caller can run its setup.
   return Effect.fn("restoreMissingWorktree")(function* (thread: WorktreeThread) {
     const { worktreePath, branch } = thread;
     if (worktreePath === null) return;
@@ -196,7 +195,6 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
           : new WorktreeRecreateError({ worktreePath, branch, cause }),
       ),
     );
-    // Turn start runs the project's setup in a worktree it recreated.
     return project;
   });
 });

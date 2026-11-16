@@ -121,6 +121,7 @@ function ChatBeside({
       modelPickerOpen: false,
     }),
     threadFindActive: false,
+    conversationHidden: false,
     composerRef: {
       current: {
         insertTextAtEnd: (key: string) => {

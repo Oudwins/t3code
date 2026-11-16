@@ -171,7 +171,7 @@ async function startAfterMissingWorktree(options?: {
   const startRootRun = vi.fn(() => Effect.void);
   const pruneWorktrees = vi.fn(() => Effect.void);
   const createWorktree = vi.fn(
-    (): ReturnType<WorktreeManager.WorktreeManager["Service"]["createWorktree"]> =>
+    (): ReturnType<GitWorkflow.GitWorkflowService["Service"]["createWorktree"]> =>
       options?.recreateFails
         ? Effect.fail(
             new GitCommandError({
@@ -217,8 +217,12 @@ async function startAfterMissingWorktree(options?: {
                 ),
         } as never),
         layerWorktreeLocation(),
-        Layer.mock(GitWorkflow.GitWorkflowService)({ pruneWorktrees, listLocalBranchNames }),
-        Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree, removeWorktree }),
+        Layer.mock(GitWorkflow.GitWorkflowService)({
+          pruneWorktrees,
+          listLocalBranchNames,
+          createWorktree,
+        }),
+        Layer.mock(WorktreeManager.WorktreeManager)({ removeWorktree }),
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeedSome(project as never),
         }),
@@ -625,7 +629,6 @@ function makeLocalCommandHarness(input: {
   readonly worktreesDir?: string;
   readonly workspaceRoot?: string;
   readonly gitWorkflow?: GitWorkflow.GitWorkflowService["Service"];
-  readonly worktreeManager?: WorktreeManager.WorktreeManager["Service"];
   readonly fileSystem?: FileSystem.FileSystem;
   readonly previousNativeSession?: boolean;
   readonly previousMessages?: ReadonlyArray<string>;
@@ -1412,7 +1415,7 @@ function makeLocalCommandHarness(input: {
         runtimeMode: thread.runtimeMode,
       } as never),
   );
-  const createWorktree = vi.fn<WorktreeManager.WorktreeManager["Service"]["createWorktree"]>(() =>
+  const createWorktree = vi.fn<GitWorkflow.GitWorkflowService["Service"]["createWorktree"]>(() =>
     Effect.succeed({} as never),
   );
   const getThreadRecords = vi.fn<ProjectionStore.ProjectionStoreV2Shape["getThreadRecords"]>((id) =>
@@ -1492,11 +1495,10 @@ function makeLocalCommandHarness(input: {
           ? Layer.mock(GitWorkflow.GitWorkflowService)({
               pruneWorktrees: () => Effect.void,
               listLocalBranchNames: () => Effect.succeed(["feature/restore"]),
+              createWorktree,
             })
           : Layer.succeed(GitWorkflow.GitWorkflowService, input.gitWorkflow),
-        input.worktreeManager === undefined
-          ? Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree })
-          : Layer.succeed(WorktreeManager.WorktreeManager, input.worktreeManager),
+        Layer.mock(WorktreeManager.WorktreeManager)({}),
         Layer.mock(ProjectService.ProjectService)({
           getById: () =>
             Effect.succeedSome({
@@ -2161,11 +2163,6 @@ effectIt.effect(
           worktreesDir,
           fileSystem,
           gitWorkflow,
-          worktreeManager: WorktreeManager.WorktreeManager.of({
-            createWorktree: driver.createWorktree,
-            removeWorktree: driver.removeWorktree,
-            sweep: Effect.void,
-          }),
           failReadsAfterRunning: true,
         });
         const open = harness.open.getMockImplementation()!;

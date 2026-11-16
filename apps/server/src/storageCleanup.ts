@@ -1252,7 +1252,8 @@ const make = Effect.gen(function* () {
         if (thread.branch === null && !scratch) return keep("thread has no branch");
         if (group.some((member) => member.branch !== thread.branch))
           return keep("a subagent thread's branch differs from this worktree's branch");
-        if (!force && (yield* hasTerminal(worktreePaths))) return keep(waitForStop("open terminal"));
+        if (!force && (yield* hasTerminal(worktreePaths)))
+          return keep(waitForStop("open terminal"));
         if (
           [...group, ...settlementChain.slice(1)].some(
             (member) =>
