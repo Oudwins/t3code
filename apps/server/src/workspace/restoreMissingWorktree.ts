@@ -6,7 +6,6 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
-import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import { isWithinRoot } from "./KnownWorkspaces.ts";
@@ -44,7 +43,6 @@ interface WorktreeThread {
 export const makeRestoreMissingWorktree = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
-  const worktreeManager = yield* WorktreeManager.WorktreeManager;
   const projects = yield* ProjectService.ProjectService;
   const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
 
@@ -84,7 +82,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
     yield* gitWorkflow.pruneWorktrees({ cwd });
     const localBranchNames = yield* gitWorkflow.listLocalBranchNames(cwd);
     if (localBranchNames.includes(branch)) {
-      yield* worktreeManager.createWorktree({ cwd, refName: branch, path: worktreePath });
+      yield* gitWorkflow.createWorktree({ cwd, refName: branch, path: worktreePath });
       return;
     }
     const remoteName = yield* gitWorkflow
@@ -105,7 +103,7 @@ export const makeRestoreMissingWorktree = Effect.gen(function* () {
     if (base === null) {
       return yield* new WorktreeRecreateNoBaseError({ worktreePath, branch });
     }
-    yield* worktreeManager.createWorktree({
+    yield* gitWorkflow.createWorktree({
       cwd,
       refName: base.refName,
       newRefName: branch,

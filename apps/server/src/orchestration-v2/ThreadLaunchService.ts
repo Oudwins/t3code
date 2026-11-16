@@ -42,7 +42,6 @@ import {
 } from "@t3tools/shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
-import * as WorktreeManager from "../git/WorktreeManager.ts";
 import { parseGitCloneProgressLine } from "../project/gitCloneProgress.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
@@ -245,7 +244,6 @@ const make = Effect.gen(function* () {
   const cloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
   const terminals = yield* TerminalManager.TerminalManager;
   const git = yield* GitWorkflow.GitWorkflowService;
-  const worktreeManager = yield* WorktreeManager.WorktreeManager;
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -576,7 +574,7 @@ const make = Effect.gen(function* () {
         }
         yield* setupTracker.stageStatus(threadId, "checkout", "running");
         let submoduleProgressReportedAt = Number.NEGATIVE_INFINITY;
-        const worktree = yield* worktreeManager
+        const worktree = yield* git
           .createWorktree(
             {
               cwd: project.workspaceRoot,

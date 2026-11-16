@@ -1472,12 +1472,10 @@ const make = Effect.gen(function* () {
             const sessionRows = yield* sql<{ payload_json: string }>`
                 SELECT payload_json FROM orchestration_v2_projection_provider_sessions WHERE status != 'stopped'
               `;
-            const liveSessions = (yield* Effect.forEach(sessionRows, (row) =>
-              decodeCleanupSession(row.payload_json),
-            )).filter((session) => {
-              const cwd = path.resolve(session.cwd);
-              return cwd === worktreePath || inside(worktreePath, cwd);
-            });
+            const liveSessions = yield* Effect.filter(
+              yield* Effect.forEach(sessionRows, (row) => decodeCleanupSession(row.payload_json)),
+              (session) => occupies(worktreePaths, session.cwd),
+            );
             yield* Effect.forEach(liveSessions, (session) => providerSessions.close(session.id), {
               discard: true,
             });
