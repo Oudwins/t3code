@@ -48,7 +48,7 @@ interface WorktreeThread {
   readonly branch: string | null;
 }
 
-export const makeRestoreMissingWorktree = Effect.gen(function* () {
+const makeRestoreMissingWorktree = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;

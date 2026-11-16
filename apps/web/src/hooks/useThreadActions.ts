@@ -49,7 +49,6 @@ import {
   readEnvironmentThreadRefs,
   readProject,
   readThreadShell,
-  readDelegatedUnderParent,
   readThreadShells,
 } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
