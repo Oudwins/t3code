@@ -35,7 +35,10 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
-import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
+import {
+  withCheckpointRestoreReservation,
+  withWorkspaceLease,
+} from "../workspace/workspaceLease.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -147,7 +150,7 @@ async function startAfterMissingWorktree(options?: {
   const startRootRun = vi.fn(() => Effect.void);
   const pruneWorktrees = vi.fn(() => Effect.void);
   const createWorktree = vi.fn(
-    (): ReturnType<WorktreeManager.WorktreeManager["Service"]["createWorktree"]> =>
+    (): ReturnType<GitWorkflow.GitWorkflowService["Service"]["createWorktree"]> =>
       options?.recreateFails
         ? Effect.fail(
             new GitCommandError({
@@ -192,8 +195,12 @@ async function startAfterMissingWorktree(options?: {
                 ),
         } as never),
         layerWorktreeLocation(),
-        Layer.mock(GitWorkflow.GitWorkflowService)({ pruneWorktrees, listLocalBranchNames }),
-        Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree, removeWorktree }),
+        Layer.mock(GitWorkflow.GitWorkflowService)({
+          pruneWorktrees,
+          listLocalBranchNames,
+          createWorktree,
+        }),
+        Layer.mock(WorktreeManager.WorktreeManager)({ removeWorktree }),
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeedSome(project as never),
         }),
@@ -496,11 +503,11 @@ it.each([
 function makeLocalCommandHarness(input: {
   readonly text: string;
   readonly nativeGoals?: boolean;
+  readonly goalDriver?: "opencode" | "antigravity";
   readonly worktreePath?: string;
   readonly worktreesDir?: string;
   readonly workspaceRoot?: string;
   readonly gitWorkflow?: GitWorkflow.GitWorkflowService["Service"];
-  readonly worktreeManager?: WorktreeManager.WorktreeManager["Service"];
   readonly fileSystem?: FileSystem.FileSystem;
   readonly previousNativeSession?: boolean;
   readonly previousMessages?: ReadonlyArray<string>;
@@ -566,7 +573,9 @@ function makeLocalCommandHarness(input: {
   };
   const providerThread: OrchestrationV2ThreadProjection["providerThreads"][number] = {
     id: providerThreadId,
-    driver: ProviderDriverKind.make(input.nativeGoals === undefined ? "codex" : "opencode"),
+    driver: ProviderDriverKind.make(
+      input.nativeGoals === undefined ? "codex" : (input.goalDriver ?? "opencode"),
+    ),
     providerInstanceId: newInstanceId,
     providerSessionId,
     appThreadId: threadId,
@@ -1131,7 +1140,7 @@ function makeLocalCommandHarness(input: {
         runtimeMode: thread.runtimeMode,
       } as never),
   );
-  const createWorktree = vi.fn<WorktreeManager.WorktreeManager["Service"]["createWorktree"]>(() =>
+  const createWorktree = vi.fn<GitWorkflow.GitWorkflowService["Service"]["createWorktree"]>(() =>
     Effect.succeed({} as never),
   );
   const getThreadRecords = vi.fn<ProjectionStore.ProjectionStoreV2Shape["getThreadRecords"]>((id) =>
@@ -1204,11 +1213,10 @@ function makeLocalCommandHarness(input: {
           ? Layer.mock(GitWorkflow.GitWorkflowService)({
               pruneWorktrees: () => Effect.void,
               listLocalBranchNames: () => Effect.succeed(["feature/restore"]),
+              createWorktree,
             })
           : Layer.succeed(GitWorkflow.GitWorkflowService, input.gitWorkflow),
-        input.worktreeManager === undefined
-          ? Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree })
-          : Layer.succeed(WorktreeManager.WorktreeManager, input.worktreeManager),
+        Layer.mock(WorktreeManager.WorktreeManager)({}),
         Layer.mock(ProjectService.ProjectService)({
           getById: () =>
             Effect.succeedSome({
@@ -1364,6 +1372,12 @@ effectIt.effect(
           upstream: "refs/remotes/origin/feature/restore",
           base: "",
         },
+        "pushed-sole-remote": {
+          tip: threadTip,
+          file: "thread.txt",
+          upstream: "refs/remotes/upstream/feature/restore",
+          base: "",
+        },
         detached: { tip: baseTip, file: null, upstream: null, base: "main" },
         "detached-no-remote": { tip: projectTip, file: "project.txt", upstream: null, base: "" },
       } as const;
@@ -1378,7 +1392,11 @@ effectIt.effect(
           yield* git(workspaceRoot, ["switch", "--detach"]);
           expect(yield* git(workspaceRoot, ["branch", "--show-current"])).toBe("");
         }
+        if (scenario === "pushed-sole-remote") {
+          yield* git(workspaceRoot, ["remote", "rename", "origin", "upstream"]);
+        }
         if (scenario === "detached") {
+          yield* git(workspaceRoot, ["remote", "rename", "upstream", "origin"]);
           yield* git(workspaceRoot, ["push", "origin", "--delete", "feature/restore"]);
         }
         if (scenario === "detached-no-remote") {
@@ -1396,11 +1414,6 @@ effectIt.effect(
           worktreesDir,
           fileSystem,
           gitWorkflow,
-          worktreeManager: WorktreeManager.WorktreeManager.of({
-            createWorktree: driver.createWorktree,
-            removeWorktree: driver.removeWorktree,
-            sweep: Effect.void,
-          }),
           failReadsAfterRunning: true,
         });
         const open = harness.open.getMockImplementation()!;
@@ -1601,12 +1614,18 @@ effectIt.effect.each([
     }),
 );
 
-effectIt.effect.each([false, true])(
-  "OpenCode goal prompts defer switched-provider history only with native support: %s",
-  (nativeGoals) =>
+effectIt.effect.each([
+  { goalDriver: "opencode", nativeGoals: false },
+  { goalDriver: "opencode", nativeGoals: true },
+  { goalDriver: "antigravity", nativeGoals: false },
+  { goalDriver: "antigravity", nativeGoals: true },
+] as const)(
+  "$goalDriver goal prompts defer switched-provider history only with native support: $nativeGoals",
+  ({ goalDriver, nativeGoals }) =>
     Effect.gen(function* () {
       const harness = makeLocalCommandHarness({
         text: "/goal all tests pass",
+        goalDriver,
         nativeGoals,
         sideChat: { contextRun: "failed", switchedProvider: true },
       });
@@ -1779,6 +1798,92 @@ effectIt.effect.each(["cleanup-first", "startup-first"])(
         }),
       );
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+// regression: #12341 a turn start overlapping a checkpoint restore wrote into the checkout
+// The filesystem is synchronous so the turn start either reaches the provider or parks on the
+// lease before the restore is released; realPath models the symlink alias and missing worktrees.
+effectIt.effect.each([
+  {
+    overlap: "a project-root thread during a restore of the project checkout",
+    restorePath: "/tmp/native-account-project",
+    worktreePath: undefined,
+    realPaths: {},
+    missing: [],
+  },
+  {
+    overlap: "a symlink alias of the restoring checkout",
+    restorePath: "/tmp/restore-overlap/link",
+    worktreePath: "/tmp/restore-overlap/checkout",
+    realPaths: { "/tmp/restore-overlap/link": "/tmp/restore-overlap/checkout" },
+    missing: [],
+  },
+  {
+    overlap: "a directory inside the restoring checkout",
+    restorePath: "/tmp/restore-overlap/checkout",
+    worktreePath: "/tmp/restore-overlap/checkout/packages/app",
+    realPaths: {},
+    missing: [],
+  },
+  {
+    overlap: "a not-yet-recreated worktree under a symlink alias of the restoring one",
+    restorePath: "/tmp/restore-overlap/link/missing-child",
+    worktreePath: "/tmp/restore-overlap/checkout/missing-child",
+    realPaths: { "/tmp/restore-overlap/link": "/tmp/restore-overlap/checkout" },
+    missing: [
+      "/tmp/restore-overlap/link/missing-child",
+      "/tmp/restore-overlap/checkout/missing-child",
+    ],
+  },
+] as const)(
+  "does not start provider work in $overlap until the restore finishes",
+  ({ restorePath, worktreePath, realPaths, missing }) =>
+    Effect.gen(function* () {
+      const order: Array<string> = [];
+      const releaseRestore = yield* Deferred.make<void>();
+      const restoreEntered = yield* Deferred.make<void>();
+      const fileSystem = FileSystem.makeNoop({
+        exists: () => Effect.succeed(true),
+        realPath: (candidate) =>
+          (missing as ReadonlyArray<string>).includes(candidate)
+            ? Effect.fail(
+                PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "FileSystem",
+                  method: "realPath",
+                  pathOrDescriptor: candidate,
+                }),
+              )
+            : Effect.succeed((realPaths as Record<string, string>)[candidate] ?? candidate),
+      });
+      const harness = makeLocalCommandHarness({
+        text: "Continue",
+        ...(worktreePath === undefined ? {} : { worktreePath }),
+        fileSystem,
+        failReadsAfterRunning: true,
+      });
+      const open = harness.open.getMockImplementation()!;
+      harness.open.mockImplementation(() =>
+        Effect.sync(() => order.push("provider session opened")).pipe(Effect.andThen(open())),
+      );
+      // The reservation CheckpointRollbackServiceV2.execute holds around its
+      // isolation check, provider rollback, and git restore of `restorePath`.
+      const restore = yield* withCheckpointRestoreReservation(
+        fileSystem,
+        yield* Path.Path,
+        restorePath,
+        Deferred.succeed(restoreEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseRestore)),
+          Effect.andThen(Effect.sync(() => order.push("checkpoint files restored"))),
+        ),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(restoreEntered);
+      const startup = yield* harness.start.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.succeed(releaseRestore, undefined);
+      yield* Fiber.join(restore);
+      yield* Fiber.join(startup);
+      expect(order).toEqual(["checkpoint files restored", "provider session opened"]);
+    }).pipe(Effect.provide(Path.layer)),
 );
 
 effectIt.effect("reads current startup state after waiting for the workspace lease", () =>
