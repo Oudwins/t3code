@@ -1,4 +1,5 @@
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { threadKey } from "@t3tools/client-runtime/state/entities";
+import { DEFAULT_CLIENT_SETTINGS, EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -6,6 +7,7 @@ import { act, render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { LAST_USED_PROJECT_STORAGE_KEY } from "../hooks/useHandleNewThread";
+import { __setClientSettingsForTests } from "../hooks/useSettings";
 import { removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { makeThreadFixture } from "../test-fixtures";
 import type { Project, Thread } from "../types";
@@ -14,20 +16,27 @@ import { CommandPalette } from "./CommandPalette";
 const entities = vi.hoisted(() => ({
   projects: [] as ReadonlyArray<Project>,
   threads: [] as ReadonlyArray<Thread>,
+  delegatedUnderParent: new Set<string>() as ReadonlySet<string>,
 }));
 vi.mock("../state/entities", async (original) => ({
   ...(await original<typeof import("../state/entities")>()),
   useProjects: () => entities.projects,
   useVisibleThreadShells: () => entities.threads,
+  useDelegatedUnderParent: () => entities.delegatedUnderParent,
 }));
 
-function setup(state: { projects?: ReadonlyArray<Project>; threads?: ReadonlyArray<Thread> } = {}) {
+function setup(state: Partial<typeof entities> & { threadsOnly?: boolean } = {}) {
   // Earlier browser test files share this origin's localStorage; a remembered project
   // that is not listed here hides the default "New thread in <project>" row.
   removeLocalStorageItem(LAST_USED_PROJECT_STORAGE_KEY);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    commandPaletteThreadsOnly: state.threadsOnly ?? true,
+  });
   useCommandPaletteStore.setState(useCommandPaletteStore.getInitialState(), true);
   entities.projects = state.projects ?? [];
   entities.threads = state.threads ?? [];
+  entities.delegatedUnderParent = state.delegatedUnderParent ?? new Set();
 }
 
 describe("CommandPalette open intents", () => {
@@ -77,7 +86,9 @@ describe("CommandPalette open intents", () => {
       document.dispatchEvent(pointer("pointerup", 50, window.innerHeight - 30));
     });
     expect(onDrop).toHaveBeenCalledOnce();
-    expect((onDrop.mock.calls[0]![0] as CustomEvent).detail).toEqual([{ environmentId, threadId }]);
+    expect((onDrop.mock.calls[0]![0] as CustomEvent).detail).toEqual([
+      { environmentId, threadId, title: "Drag this thread" },
+    ]);
     expect(screen.router?.state.location.pathname).toBe(pathname);
   });
 
@@ -137,11 +148,15 @@ describe("CommandPalette open intents", () => {
     await expect.element(input).toHaveValue("acme");
   });
 
-  it("opens a searched project's latest listed thread, not a newer subagent", async () => {
+  it("opens a searched project's latest listed thread, not a newer subagent, delegated task, or parked thread", async () => {
     const environmentId = EnvironmentId.make("local");
     const projectId = ProjectId.make("acme");
     const parentId = ThreadId.make("parent");
+    const delegatedId = ThreadId.make("delegated");
     setup({
+      // Threads-only search hides project rows.
+      threadsOnly: false,
+      delegatedUnderParent: new Set([threadKey({ environmentId, threadId: delegatedId })]),
       projects: [
         {
           id: projectId,
@@ -173,12 +188,32 @@ describe("CommandPalette open intents", () => {
             relationshipToParent: "subagent",
           },
         }),
+        makeThreadFixture({
+          id: delegatedId,
+          environmentId,
+          projectId,
+          latestUserMessageAt: "2026-03-04T00:00:00.000Z",
+        }),
+        makeThreadFixture({
+          id: ThreadId.make("settled"),
+          environmentId,
+          projectId,
+          latestUserMessageAt: "2026-03-05T00:00:00.000Z",
+          settledOverride: "settled",
+        }),
+        makeThreadFixture({
+          id: ThreadId.make("snoozed"),
+          environmentId,
+          projectId,
+          latestUserMessageAt: "2026-03-06T00:00:00.000Z",
+          snoozedUntil: "2999-01-01T00:00:00.000Z",
+        }),
       ],
     });
     await using screen = await render(<CommandPalette>{null}</CommandPalette>);
 
     openCommandPalette({ query: "Acme" });
-    await page.getByRole("option", { name: /Acme/ }).first().click();
+    await page.getByRole("option", { name: /^Acme/ }).first().click();
 
     await vi.waitFor(() => expect(screen.router?.state.location.pathname).toBe("/local/parent"));
   });

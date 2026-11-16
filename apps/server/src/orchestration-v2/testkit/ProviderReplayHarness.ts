@@ -76,6 +76,7 @@ import {
   makeProviderReplayGate,
   type ProviderReplayGate,
 } from "@t3tools/provider-testing/replayGate";
+import { layerThreadWorktreeRestore } from "../../workspace/restoreMissingWorktree.ts";
 
 export function makeReplayServerConfig(
   scenario: string,
@@ -451,6 +452,9 @@ export function layerWithRegistry<Error>(
         layerRuntime,
         layerServerConfig,
         layerServerSettings,
+        layerThreadWorktreeRestore.pipe(
+          Layer.provide(Layer.merge(layerServerConfig, layerServerSettings)),
+        ),
       ),
     ),
   );
@@ -554,6 +558,7 @@ export function layerWithRegistry<Error>(
         layerThreadTitleRegenerationTest,
         layerServerSettings,
         layerThreadManagementProvided,
+        layerStores,
       ),
     ),
   );

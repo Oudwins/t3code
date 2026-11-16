@@ -19,6 +19,7 @@ import { isBrowserSettingsReadError } from "../browser/openFileInPreview";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { confirmTerminalClose } from "../lib/terminalCloseConfirm";
 import { readLocalApi } from "../localApi";
+import { requestWorkspaceFocus } from "../lib/workspaceFocus";
 import {
   isPreviewSupportedInRuntime,
   setActivePreviewTab,
@@ -285,6 +286,12 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     }
     if (surface.kind === "terminal") {
       requestTerminalFocus();
+    }
+    if (surface.kind === "side-chat") {
+      requestWorkspaceFocus({
+        area: "panel",
+        selector: `[data-side-chat-pane="${CSS.escape(surface.threadId)}"] [data-workspace-area="composer"] [contenteditable="true"]`,
+      });
     }
     if (surface.kind === "diff" && !diffOpen) {
       onDiffPanelOpen?.();

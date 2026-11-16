@@ -28,6 +28,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as WorktreeManager from "./git/WorktreeManager.ts";
 import * as WorktreePool from "./git/WorktreePool.ts";
 import { CodexProviderCapabilitiesV2 } from "./orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -249,6 +251,15 @@ const sweepWorktree = (options: {
         }),
         Layer.mock(Orchestrator.OrchestratorV2)({ streamDomainEvents: Stream.empty }),
         gitManager,
+        Layer.mock(ThreadManagement.ThreadManagementService)({
+          dispatch: () => Effect.succeed({ sequence: 0, storedEvents: [] }),
+        }),
+        Layer.mock(GitWorkflowService.GitWorkflowService)({
+          currentBranch: (cwd) =>
+            run(cwd, "branch", "--show-current").pipe(
+              Effect.map((result) => result.stdout.trim() || null),
+            ),
+        }),
         manager,
         Layer.mock(TerminalManager.TerminalManager)({
           subscribeMetadata: (listener) =>
