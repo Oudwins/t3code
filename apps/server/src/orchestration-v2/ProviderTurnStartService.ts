@@ -13,8 +13,11 @@ import {
   isCompactionCommandMessage,
   parseGoalCommand,
   RunId,
+  RunAttemptId,
+  NodeId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -30,14 +33,18 @@ import {
   CLAUDE_PROVIDER,
   CLAUDE_QUERY_ENDED_BEFORE_TURN_DETAIL,
 } from "./Adapters/ClaudeAdapterV2.ts";
-import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
+import { withTurnStartReservation, withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as WorktreeManager from "../git/WorktreeManager.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
+import {
+  ThreadWorktreeRestore,
+  type WorktreeRecreateError,
+  type WorktreeRecreateNoBaseError,
+} from "../workspace/restoreMissingWorktree.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
@@ -56,6 +63,7 @@ import { deliverContextHandoffs, withInlineContext } from "./ContextHandoffDeliv
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { unsentManualContinuationSource } from "./manualContinuation.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import {
   ContextHandoffBackgroundWorkError,
@@ -76,32 +84,20 @@ export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStart
   {
     runId: RunId,
     cause: Schema.optional(Schema.Defect()),
+    attemptId: Schema.optional(RunAttemptId),
+    rootNodeId: Schema.optional(NodeId),
   },
 ) {}
 
-class WorktreeRecreateError extends Schema.TaggedError<WorktreeRecreateError>()(
-  "WorktreeRecreateError",
-  {
-    worktreePath: Schema.String,
-    branch: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Could not recreate the worktree for branch '${this.branch}' at ${this.worktreePath}.`;
-  }
-}
+/** Runs that ended without completing: their provider turn may still project as running. */
+const NON_COMPLETING_TERMINAL_RUN_STATUSES: ReadonlySet<OrchestrationV2Run["status"]> = new Set([
+  "failed",
+  "interrupted",
+  "cancelled",
+  "rolled_back",
+]);
 
-class WorktreeRecreateNoBaseError extends Schema.TaggedError<WorktreeRecreateNoBaseError>()(
-  "WorktreeRecreateNoBaseError",
-  { worktreePath: Schema.String, branch: Schema.String },
-) {
-  override get message(): string {
-    return `Could not recreate branch '${this.branch}' at ${this.worktreePath}: the project workspace has no commit to start it from.`;
-  }
-}
-
-const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
+export const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
 const isProviderAdapterProtocolError = Schema.is(ProviderAdapter.ProviderAdapterProtocolError);
 const isProviderAdapterOpenSessionError = Schema.is(
   ProviderAdapter.ProviderAdapterOpenSessionError,
@@ -128,6 +124,21 @@ const refusedBeforePrompt = (error: unknown): boolean =>
     error.detail === CLAUDE_QUERY_ENDED_BEFORE_TURN_DETAIL) ||
   (Predicate.hasProperty(error, "cause") && refusedBeforePrompt(error.cause));
 
+/** Missing execution records cannot be repaired by retrying a start. */
+export class ProviderTurnStartRunStateMissingError extends Schema.TaggedError<ProviderTurnStartRunStateMissingError>()(
+  "ProviderTurnStartRunStateMissingError",
+  {
+    runId: RunId,
+  },
+) {}
+
+export const isProviderTurnStartRunStateMissingError = Schema.is(
+  ProviderTurnStartRunStateMissingError,
+);
+
+const START_GAVE_UP_MESSAGE =
+  "T3 Code could not start this turn. Send the message again; if it keeps failing, check the server logs.";
+
 const startFailureMessage = (error: Error): string => {
   const nestedCause = "cause" in error ? error.cause : undefined;
   return (
@@ -146,6 +157,12 @@ export interface ProviderTurnStartServiceV2Shape {
     readonly runId: RunId;
     readonly willRetry?: boolean;
   }) => Effect.Effect<void, ProviderTurnStartError>;
+  readonly failStartingRun: (input: {
+    readonly threadId: ThreadId;
+    readonly runId: RunId;
+    readonly attemptId: RunAttemptId;
+    readonly rootNodeId: NodeId;
+  }) => Effect.Effect<void, ProviderTurnStartError | ProviderTurnStartRunStateMissingError>;
 }
 
 export class ProviderTurnStartServiceV2 extends Context.Service<
@@ -167,6 +184,7 @@ export const layer: Layer.Layer<
   | WorktreeManager.WorktreeManager
   | ProjectService.ProjectService
   | ProjectSetupScriptRunner.ProjectSetupScriptRunner
+  | ThreadWorktreeRestore
   | ProviderAuthService.ProviderAuthService
   | ProjectionStore.ProjectionStoreV2
   | ProviderSessionManager.ProviderSessionManagerV2
@@ -182,7 +200,6 @@ export const layer: Layer.Layer<
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
     const worktreeManager = yield* WorktreeManager.WorktreeManager;
     const projects = yield* ProjectService.ProjectService;
     const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
@@ -191,71 +208,8 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const worktreeRestore = yield* ThreadWorktreeRestore;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
-    const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
-
-    const resolveRecreateBase = Effect.fn("ProviderTurnStartService.resolveRecreateBase")(
-      function* (cwd: string) {
-        // Recovery can follow an external checkout, before the status cache expires.
-        yield* gitWorkflow.invalidateLocalStatus(cwd);
-        const { refName: currentBranch } = yield* gitWorkflow.localStatus({ cwd });
-        if (currentBranch !== null) {
-          const refName = `refs/heads/${currentBranch}`;
-          return { refName, baseRefName: refName };
-        }
-        if (yield* gitWorkflow.hasCommit({ cwd, refName: "refs/remotes/origin/HEAD" })) {
-          const { commitSha } = yield* gitWorkflow.resolveRemoteTrackingCommit({
-            cwd,
-            refName: "HEAD",
-            fallbackRemoteName: "origin",
-          });
-          // Start from the commit so the thread branch does not track the default branch.
-          return { refName: commitSha, baseRefName: "refs/remotes/origin/HEAD" };
-        }
-        if (yield* gitWorkflow.hasCommit({ cwd, refName: "HEAD" })) {
-          return { refName: "HEAD", baseRefName: undefined };
-        }
-        return null;
-      },
-    );
-
-    const recreateMissingWorktree = Effect.fn("ProviderTurnStartService.recreateMissingWorktree")(
-      function* (input: {
-        readonly cwd: string;
-        readonly worktreePath: string;
-        readonly branch: string;
-      }) {
-        const { cwd, worktreePath, branch } = input;
-        yield* gitWorkflow.pruneWorktrees({ cwd });
-        const localBranchNames = yield* gitWorkflow.listLocalBranchNames(cwd);
-        if (localBranchNames.includes(branch)) {
-          yield* worktreeManager.createWorktree({ cwd, refName: branch, path: worktreePath });
-          return;
-        }
-        // Push keeps the tracking ref current, so recovery reads it without fetching.
-        const pushedRef = `refs/remotes/origin/${branch}`;
-        if (yield* gitWorkflow.hasCommit({ cwd, refName: pushedRef })) {
-          yield* gitWorkflow.createWorktree({
-            cwd,
-            refName: pushedRef,
-            newRefName: branch,
-            path: worktreePath,
-          });
-          return;
-        }
-        const base = yield* resolveRecreateBase(cwd);
-        if (base === null) {
-          return yield* new WorktreeRecreateNoBaseError({ worktreePath, branch });
-        }
-        yield* worktreeManager.createWorktree({
-          cwd,
-          refName: base.refName,
-          newRefName: branch,
-          ...(base.baseRefName === undefined ? {} : { baseRefName: base.baseRefName }),
-          path: worktreePath,
-        });
-      },
-    );
 
     // Build draining callbacks outside startup scope so they cannot retain full thread history.
     const makeRunControls = (input: {
@@ -358,6 +312,12 @@ export const layer: Layer.Layer<
       return {
         ...session,
         startTurn: (input: Parameters<typeof session.startTurn>[0]) => start(input),
+        ...(session.resumeTurn === undefined
+          ? {}
+          : {
+              resumeTurn: (input: ProviderAdapter.ProviderAdapterV2ResumeTurnInput) =>
+                start(ProviderAdapter.resumeTurnInput(input)),
+            }),
         ...(session.compactThread === undefined
           ? {}
           : {
@@ -366,13 +326,111 @@ export const layer: Layer.Layer<
       };
     };
 
-    const start = Effect.fn("orchestrationV2.providerTurnStart.start")(function* (input: {
-      readonly threadId: ThreadId;
-      readonly runId: RunId;
-      readonly willRetry?: boolean;
-      readonly setupFailure?: Error;
-      readonly recreateFailure?: WorktreeRecreateError | WorktreeRecreateNoBaseError;
-    }) {
+    const settleRunBeforeStart = Effect.fn("orchestrationV2.providerTurnStart.settleBeforeStart")(
+      function* (input: {
+        readonly run: OrchestrationV2Run;
+        readonly rootNode: OrchestrationV2ExecutionNode;
+        readonly attempt: OrchestrationV2RunAttempt;
+        readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+        readonly signal: string;
+        readonly status: "completed" | "failed";
+        readonly now: DateTime.Utc;
+        readonly startedAt?: DateTime.Utc;
+        readonly providerInstanceId: OrchestrationV2Run["providerInstanceId"];
+        readonly itemProviderThreadId: OrchestrationV2ProviderThread["id"] | null;
+        readonly item:
+          | Pick<Extract<OrchestrationV2TurnItem, { type: "error" }>, "type" | "title" | "failure">
+          | Pick<
+              Extract<OrchestrationV2TurnItem, { type: "command_execution" }>,
+              "type" | "title" | "input" | "output" | "exitCode"
+            >;
+        readonly providerThreadUpdate?: OrchestrationV2ProviderThread;
+      }) {
+        const { run, rootNode, attempt, turnItems, now, status } = input;
+        const runId = run.id;
+        const started = input.startedAt === undefined ? {} : { startedAt: input.startedAt };
+        const item: OrchestrationV2TurnItem = {
+          id: idAllocator.derive.runSignalTurnItem({ runId, signal: input.signal }),
+          threadId: run.threadId,
+          runId,
+          nodeId: rootNode.id,
+          providerThreadId: input.itemProviderThreadId,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal:
+            Math.max(
+              0,
+              ...turnItems.filter((item) => item.runId === runId).map((item) => item.ordinal),
+            ) + 1,
+          status,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          ...input.item,
+        };
+        const eventPayloads = [
+          { type: "turn-item.updated", payload: item },
+          { type: "run.updated", payload: { ...run, status, ...started, completedAt: now } },
+          {
+            type: "run-attempt.updated",
+            payload: { ...attempt, status, ...started, completedAt: now },
+          },
+          {
+            type: "node.updated",
+            payload: { ...rootNode, status, ...started, completedAt: now },
+          },
+          ...(input.providerThreadUpdate === undefined
+            ? []
+            : [
+                {
+                  type: "provider-thread.updated" as const,
+                  payload: input.providerThreadUpdate,
+                },
+              ]),
+        ] as const;
+        const events = yield* Effect.forEach(eventPayloads, (event) =>
+          Effect.gen(function* () {
+            return {
+              ...event,
+              id: yield* idAllocator.allocate.event({ threadId: run.threadId }),
+              threadId: run.threadId,
+              runId,
+              nodeId: rootNode.id,
+              providerInstanceId: input.providerInstanceId,
+              occurredAt: now,
+            } satisfies OrchestrationV2DomainEvent;
+          }),
+        );
+        const written = yield* eventSink.writeIfRunCurrent({
+          threadId: run.threadId,
+          runId,
+          activeAttemptId: attempt.id,
+          expectedStatus: "starting",
+          events,
+        });
+        // A steering restart that cannot start still ends a run whose earlier turns counted.
+        if (written.committed) {
+          yield* turnAnalytics.runSettled({
+            runId,
+            status,
+            completedAt: now,
+            childrenRunning: false,
+          });
+        }
+      },
+    );
+
+    const start = Effect.fn("orchestrationV2.providerTurnStart.start")(function* (
+      input: {
+        readonly threadId: ThreadId;
+        readonly runId: RunId;
+        readonly willRetry?: boolean;
+        readonly setupFailure?: Error;
+        readonly recreateFailure?: WorktreeRecreateError | WorktreeRecreateNoBaseError;
+      },
+      captureStartingRun: (run: OrchestrationV2Run) => void,
+    ) {
       const { runId } = input;
       const projection = yield* projectionStore.getTurnStartContext(input.threadId, runId);
       const run = projection.runs.find((candidate) => candidate.id === runId);
@@ -382,6 +440,7 @@ export const layer: Layer.Layer<
       if (run.status !== "starting") {
         return;
       }
+      captureStartingRun(run);
       const rootNode = projection.nodes.find((candidate) => candidate.id === run.rootNodeId);
       const attempt = projection.attempts.find((candidate) => candidate.id === run.activeAttemptId);
       const providerThread = projection.providerThreads.find(
@@ -454,100 +513,16 @@ export const layer: Layer.Layer<
           cause: `Run ${runId} is missing its execution projection state.`,
         });
       }
-      const settleRunBeforeStart = Effect.fn("orchestrationV2.providerTurnStart.settleBeforeStart")(
-        function* (input: {
-          readonly signal: string;
-          readonly status: "completed" | "failed";
-          readonly now: DateTime.Utc;
-          readonly startedAt?: DateTime.Utc;
-          readonly providerInstanceId: OrchestrationV2Run["providerInstanceId"];
-          readonly itemProviderThreadId: OrchestrationV2ProviderThread["id"];
-          readonly item:
-            | Pick<
-                Extract<OrchestrationV2TurnItem, { type: "error" }>,
-                "type" | "title" | "failure"
-              >
-            | Pick<
-                Extract<OrchestrationV2TurnItem, { type: "command_execution" }>,
-                "type" | "title" | "input" | "output" | "exitCode"
-              >;
-          readonly providerThreadUpdate?: OrchestrationV2ProviderThread;
-        }) {
-          const { now, status } = input;
-          const started = input.startedAt === undefined ? {} : { startedAt: input.startedAt };
-          const item: OrchestrationV2TurnItem = {
-            id: idAllocator.derive.runSignalTurnItem({ runId, signal: input.signal }),
-            threadId: projection.thread.id,
-            runId,
-            nodeId: rootNode.id,
-            providerThreadId: input.itemProviderThreadId,
-            providerTurnId: null,
-            nativeItemRef: null,
-            parentItemId: null,
-            ordinal:
-              Math.max(
-                0,
-                ...projection.turnItems
-                  .filter((item) => item.runId === runId)
-                  .map((item) => item.ordinal),
-              ) + 1,
-            status,
-            startedAt: now,
-            completedAt: now,
-            updatedAt: now,
-            ...input.item,
-          };
-          const eventPayloads = [
-            { type: "turn-item.updated", payload: item },
-            { type: "run.updated", payload: { ...run, status, ...started, completedAt: now } },
-            {
-              type: "run-attempt.updated",
-              payload: { ...attempt, status, ...started, completedAt: now },
-            },
-            {
-              type: "node.updated",
-              payload: { ...rootNode, status, ...started, completedAt: now },
-            },
-            ...(input.providerThreadUpdate === undefined
-              ? []
-              : [
-                  {
-                    type: "provider-thread.updated" as const,
-                    payload: input.providerThreadUpdate,
-                  },
-                ]),
-          ] as const;
-          const events = yield* Effect.forEach(eventPayloads, (event) =>
-            Effect.gen(function* () {
-              return {
-                ...event,
-                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
-                threadId: projection.thread.id,
-                runId,
-                nodeId: rootNode.id,
-                providerInstanceId: input.providerInstanceId,
-                occurredAt: now,
-              } satisfies OrchestrationV2DomainEvent;
-            }),
-          );
-          const written = yield* eventSink.writeIfRunCurrent({
-            threadId: projection.thread.id,
-            runId,
-            activeAttemptId: attempt.id,
-            expectedStatus: "starting",
-            events,
-          });
-          // A steering restart that cannot start still ends a run whose earlier turns counted.
-          if (written.committed) {
-            yield* turnAnalytics.runSettled({
-              runId,
-              status,
-              completedAt: now,
-              childrenRunning: false,
-            });
-          }
-        },
-      );
+      const manualResume =
+        run.manualContinuationOfRunId !== undefined && attempt.reason !== "steering_restart";
+      const resumeSource = manualResume
+        ? unsentManualContinuationSource(run, projection)
+        : undefined;
+      const unsentResumeMessage =
+        resumeSource !== undefined
+          ? projection.messages.find((source) => source.id === resumeSource.userMessageId)
+          : undefined;
+      const providerMessage = unsentResumeMessage ?? message;
       const settleStartFailure = Effect.fn("ProviderTurnStartService.settleStartFailure")(
         function* (failed: {
           readonly signal: string;
@@ -556,6 +531,10 @@ export const layer: Layer.Layer<
           readonly message?: string;
         }) {
           yield* settleRunBeforeStart({
+            run,
+            rootNode,
+            attempt,
+            turnItems: projection.turnItems,
             signal: failed.signal,
             status: "failed",
             now: yield* DateTime.now,
@@ -573,9 +552,12 @@ export const layer: Layer.Layer<
           });
         },
       );
-      if (message.attachments.length === 0 && message.text.trimStart().startsWith("/")) {
+      if (
+        providerMessage.attachments.length === 0 &&
+        providerMessage.text.trimStart().startsWith("/")
+      ) {
         const isEmptyCompaction =
-          message.text.trim().toLowerCase() === "/compact" && !projection.hasConversation;
+          providerMessage.text.trim().toLowerCase() === "/compact" && !projection.hasConversation;
         // Preparation may select a new provider; account commands still target the last native session.
         const nativeThreads = new Map(
           projection.providerThreads
@@ -606,8 +588,8 @@ export const layer: Layer.Layer<
               providerAuth.tryHandlePromptCommand({
                 instanceId: authInstanceId,
                 text: projectComposerContextForProvider({
-                  text: message.text,
-                  records: message.context?.records ?? [],
+                  text: providerMessage.text,
+                  records: providerMessage.context?.records ?? [],
                 }),
                 hasAttachments: false,
               }),
@@ -627,6 +609,10 @@ export const layer: Layer.Layer<
               : undefined;
           const status = failure === undefined ? "completed" : "failed";
           yield* settleRunBeforeStart({
+            run,
+            rootNode,
+            attempt,
+            turnItems: projection.turnItems,
             signal: isEmptyCompaction ? "empty-compaction" : "provider-sign-out",
             status,
             now,
@@ -645,7 +631,7 @@ export const layer: Layer.Layer<
                 : {
                     type: "command_execution",
                     title: "Provider signed out",
-                    input: message.text.trim(),
+                    input: providerMessage.text.trim(),
                     output: "Provider signed out",
                     exitCode: 0,
                   },
@@ -736,22 +722,31 @@ export const layer: Layer.Layer<
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
       );
-      const failedRuns = new Map(
-        projection.runs
-          .filter(
-            (previous) =>
-              previous.ordinal < run.ordinal &&
-              previous.providerThreadId === providerThread.id &&
-              previous.status === "failed",
-          )
-          .map((previous) => [previous.activeAttemptId, previous] as const),
-      );
+      // A run that ended without completing can leave its provider turn projected as
+      // running when the agent ignored Stop or an interrupt timed out. Every attempt
+      // of such a run owns a possible abandoned turn, including attempts a steering
+      // restart superseded, and the session cannot be reused until those turns stop.
+      const abandonedRuns = new Map<string | null, OrchestrationV2Run>();
+      for (const previous of projection.runs) {
+        if (
+          previous.ordinal >= run.ordinal ||
+          previous.providerThreadId !== providerThread.id ||
+          !NON_COMPLETING_TERMINAL_RUN_STATUSES.has(previous.status)
+        ) {
+          continue;
+        }
+        if (previous.activeAttemptId !== null) {
+          abandonedRuns.set(previous.activeAttemptId, previous);
+        }
+        for (const attempt of projection.attempts) {
+          if (attempt.runId === previous.id) abandonedRuns.set(attempt.id, previous);
+        }
+      }
       const abandonedTurns = projection.providerTurns.flatMap((turn) => {
-        const previous = failedRuns.get(turn.runAttemptId);
+        const previous = abandonedRuns.get(turn.runAttemptId);
         return turn.providerThreadId === providerThread.id &&
           turn.status === "running" &&
-          previous !== undefined &&
-          turn.nodeId === previous.rootNodeId
+          previous !== undefined
           ? [{ turn, run: previous }]
           : [];
       });
@@ -759,8 +754,9 @@ export const layer: Layer.Layer<
       if (abandonedTurn !== undefined) {
         const liveSession = yield* providerSessions.get(providerSessionId);
         if (Option.isSome(liveSession)) {
-          // Older versions could fail the run without stopping its provider.
-          // Recover that exact turn before reusing its native conversation.
+          // The run already ended without stopping its provider — a failed start, an
+          // ignored Stop, or an interrupt that never confirmed. Recover that exact
+          // turn before reusing its native conversation.
           const recovered = yield* Effect.result(
             liveSession.value.interruptTurn({
               providerThread,
@@ -784,15 +780,15 @@ export const layer: Layer.Layer<
           runId: run.id,
           activeAttemptId: attempt.id,
           expectedStatus: "starting",
-          events: yield* Effect.forEach(abandonedTurns, ({ turn, run: failedRun }) =>
+          events: yield* Effect.forEach(abandonedTurns, ({ turn, run: abandonedRun }) =>
             Effect.gen(function* () {
               return {
                 id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
                 type: "provider-turn.updated" as const,
                 threadId: projection.thread.id,
-                runId: failedRun.id,
+                runId: abandonedRun.id,
                 nodeId: turn.nodeId,
-                providerInstanceId: failedRun.providerInstanceId,
+                providerInstanceId: abandonedRun.providerInstanceId,
                 occurredAt: completedAt,
                 payload: { ...turn, status: "interrupted" as const, completedAt },
               };
@@ -801,6 +797,12 @@ export const layer: Layer.Layer<
         });
         if (!repaired.committed) return;
       }
+      // Opening a session does not prompt the provider, so the workspace is still unchanged.
+      const baseline = yield* runExecution.forkBaseline({
+        appThread: projection.thread,
+        run,
+        checkpointScope,
+      });
       const sessionResult = yield* Effect.result(
         providerSessions.open({
           threadId: projection.thread.id,
@@ -853,16 +855,15 @@ export const layer: Layer.Layer<
       let effectiveHandoffs = handoffs;
       let resumeFellBack = false;
       const userText = projectComposerContextForProvider({
-        text: message.text,
-        records: message.context?.records ?? [],
+        text: providerMessage.text,
+        records: providerMessage.context?.records ?? [],
       });
       // Native goal commands go verbatim; handoff history waits a turn.
       const goalDriver =
         session.driver === "codex" ||
         session.driver === "claudeAgent" ||
-        (session.driver === "opencode" &&
-          session.providerSession.capabilities.turns.supportsNativeGoals === true);
-      const goalCommand = goalDriver && parseGoalCommand(message) !== null;
+        session.providerSession.capabilities.turns.supportsNativeGoals === true;
+      const goalCommand = goalDriver && parseGoalCommand(providerMessage) !== null;
       // The provider turn marks cancellation work delivered; restart continuations use their own text or resume natively.
       const noteContinuation = isRestartNoteContinuation(
         run,
@@ -1035,7 +1036,7 @@ export const layer: Layer.Layer<
               tokenCap,
               modelContextWindow,
               userText: restartNote === "" ? userText : `${restartNote}\n\n${userText}`,
-              attachments: message.attachments,
+              attachments: providerMessage.attachments,
               providerThread: budgetProviderThread,
               nativeContextEstimate:
                 budgetProviderThread.contextUsage?.usedTokens === undefined
@@ -1364,7 +1365,7 @@ export const layer: Layer.Layer<
             handoffs: [...handoffs, ...resumedRetryHandoff],
             providerThread: { ...resumed.success, id: providerThread.id },
             budget: context.budget,
-            deferInline: isCompactionCommandMessage(message) || goalCommand,
+            deferInline: isCompactionCommandMessage(providerMessage) || goalCommand,
             alreadyDeliveredItemIds: context.deliveredItemIds,
             persist: () => Effect.void,
           }).pipe(
@@ -1547,6 +1548,17 @@ export const layer: Layer.Layer<
         legacyInputRunIds,
         budget,
       } = handoffContext;
+      if (manualResume && unsentResumeMessage === undefined && session.resumeTurn === undefined) {
+        yield* settleStartFailure({
+          signal: "resume-unsupported",
+          title: "Native resume is unavailable",
+          error: new ProviderAdapter.ProviderResumeUnsupportedError({
+            driver: session.driver,
+            providerThreadId: providerThread.id,
+          }),
+        });
+        return;
+      }
       const retryHandoff = resumedRetryHandoff ?? (yield* prepareRetryHandoff(handoffContext));
       const runningProviderThread: OrchestrationV2ProviderThread = {
         ...loadedProviderThread,
@@ -1571,7 +1583,7 @@ export const layer: Layer.Layer<
       const runningRun: OrchestrationV2Run = {
         ...run,
         status: "running",
-        startedAt: now,
+        startedAt: run.startedAt ?? now,
       };
       const runningAttempt: OrchestrationV2RunAttempt = {
         ...attempt,
@@ -1691,8 +1703,11 @@ export const layer: Layer.Layer<
       if (!runningWrite.committed) {
         return;
       }
-      const routableSubagents = projection.subagents.filter((subagent) =>
-        RunExecutionService.canRouteRelatedSubagent(subagent.status),
+      // Delegated (app_owned) children run their own runs; routing them here ingests their items twice.
+      const routableSubagents = projection.subagents.filter(
+        (subagent) =>
+          subagent.origin === "provider_native" &&
+          RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
       const persistHandoff = Effect.fn("ProviderTurnStartService.persist")(function* (
         handoff: OrchestrationV2ContextHandoff,
@@ -1744,13 +1759,24 @@ export const layer: Layer.Layer<
             .filter((part) => part !== "")
             .join("\n\n");
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;
-          yield* start({
-            ...(noteContinuation ? promptedInput : turnInput),
-            message: {
-              ...turnInput.message,
-              text: goalCommand ? userText : withInlineContext(context, userText),
-            },
-          }).pipe(
+          const text = goalCommand ? userText : withInlineContext(context, userText);
+          const startInput = noteContinuation ? promptedInput : turnInput;
+          const { resume: _resume, ...contextInput } = startInput;
+          const { message: resumeMessage, resume: _resumeIntent, ...resumeInput } = startInput;
+          const operation =
+            turnInput.resume && context === "" && session.resumeTurn !== undefined
+              ? session.resumeTurn({ ...resumeInput, messageId: resumeMessage.messageId })
+              : start({
+                  ...(context === "" ? startInput : contextInput),
+                  message: {
+                    ...turnInput.message,
+                    text,
+                  },
+                  ...(text === userText
+                    ? {}
+                    : { inlineContextLength: text.length - userText.length }),
+                });
+          yield* operation.pipe(
             // Clear pending handoff markers for refused prompts so the next turn retains the native session.
             Effect.tapError((error) =>
               refusedBeforePrompt(error)
@@ -1822,6 +1848,7 @@ export const layer: Layer.Layer<
         providerThread: runningProviderThread,
         attempt: runningAttempt,
         attemptId: attempt.id,
+        baseline,
         loadInheritedBackgroundTurnItems: runControls.loadInheritedBackgroundTurnItems,
         relatedThreadIds: routableSubagents.flatMap((subagent) =>
           subagent.childThreadId === null ? [] : [subagent.childThreadId],
@@ -1836,6 +1863,7 @@ export const layer: Layer.Layer<
               .filter((turn) => turn.providerThreadId === providerThread.id)
               .map((turn) => turn.ordinal),
           ) + 1,
+        resume: manualResume && unsentResumeMessage === undefined,
         nativeThreadHasTurns:
           nativeInputRunIds.size > 0 ||
           (legacyInputRunIds.size > 0 &&
@@ -1849,7 +1877,7 @@ export const layer: Layer.Layer<
         message: {
           messageId: message.id,
           text: userText,
-          attachments: message.attachments,
+          attachments: providerMessage.attachments,
           createdBy: message.createdBy,
           creationSource: message.creationSource,
           ...(message.scheduledTaskId === undefined
@@ -1867,85 +1895,103 @@ export const layer: Layer.Layer<
     return ProviderTurnStartServiceV2.of({
       start: Effect.fn("ProviderTurnStartService.start")(
         function* (input) {
-          const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
-          const { worktreePath, branch } = thread;
-          // Storage cleanup removes worktrees under the same lease. Only startup
-          // holds it; the provider turn runs after it is released.
-          const leased = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-            worktreePath === null ? effect : withWorkspaceLease(path.resolve(worktreePath), effect);
-          let setupFailure: Error | undefined;
-          let recreateFailure: WorktreeRecreateError | WorktreeRecreateNoBaseError | undefined;
-          if (worktreePath !== null && branch !== null) {
-            const recreated = yield* leased(
-              Effect.gen(function* () {
-                const exists = yield* fileSystem
-                  .exists(worktreePath)
-                  .pipe(Effect.orElseSucceed(() => true));
-                if (exists || !(yield* isManagedWorktreePath(worktreePath))) return undefined;
-                const project = yield* projects.getById(thread.projectId).pipe(
-                  Effect.map(Option.getOrUndefined),
-                  Effect.orElseSucceed(() => undefined),
-                );
-                if (project === undefined) return undefined;
-                yield* Effect.logWarning("provider turn start recreating missing worktree", {
+          let startingRun: OrchestrationV2Run | undefined;
+          const captureStartingRun = (run: OrchestrationV2Run) => {
+            startingRun = run;
+          };
+          return yield* Effect.gen(function* () {
+            // Storage cleanup removes worktrees under the same lease. Only startup
+            // holds it; the provider turn runs after it is released.
+            const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
+            const { worktreePath } = thread;
+            const leased = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+              worktreePath === null
+                ? effect
+                : withWorkspaceLease(path.resolve(worktreePath), effect);
+            const cwd =
+              worktreePath ??
+              (yield* projects
+                .getById(thread.projectId, { includeDeleted: true })
+                .pipe(Effect.map((project) => Option.getOrUndefined(project)?.workspaceRoot)));
+            const startup = Effect.gen(function* () {
+              const restored = yield* Effect.result(leased(worktreeRestore.restoreAwaitingSetup(thread)));
+              const project = restored._tag === "Success" ? restored.success : undefined;
+              let setupFailure: Error | undefined;
+              // A recreated worktree gets a new one's setup, blocking or async alike. Setup that
+              // fails, cannot start, or is interrupted removes the worktree so the next turn retries;
+              // the provider never starts in a checkout that skipped it. Setup opens its terminal
+              // under this same non-reentrant lease, so it runs between the leased steps.
+              if (project !== undefined && worktreePath !== null) {
+                const removeRecreated = () =>
+                  leased(
+                    worktreeManager
+                      .removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: true })
+                      .pipe(Effect.ignoreCause({ log: true })),
+                  );
+                setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(setupScripts, {
                   threadId: thread.id,
+                  projectId: project.id,
+                  projectCwd: project.workspaceRoot,
                   worktreePath,
-                  branch,
-                });
-                return yield* recreateMissingWorktree({
-                  cwd: project.workspaceRoot,
-                  worktreePath,
-                  branch,
+                  project: {
+                    id: project.id,
+                    workspaceRoot: project.workspaceRoot,
+                    scripts: project.scripts,
+                  },
                 }).pipe(
-                  Effect.mapError((cause) =>
-                    cause._tag === "WorktreeRecreateNoBaseError"
-                      ? cause
-                      : new WorktreeRecreateError({ worktreePath, branch, cause }),
-                  ),
-                  Effect.as(project),
-                  Effect.result,
+                  Effect.as(undefined),
+                  Effect.catch((error) => Effect.succeed(error)),
+                  Effect.onInterrupt(removeRecreated),
                 );
-              }),
-            );
-            if (recreated?._tag === "Failure") recreateFailure = recreated.failure;
-            // A recreated worktree gets a new one's setup, blocking or async alike. Setup that
-            // fails, cannot start, or is interrupted removes the worktree so the next turn retries;
-            // the provider never starts in a checkout that skipped it. Setup opens its terminal
-            // under this same non-reentrant lease, so it runs between the leased steps.
-            if (recreated?._tag === "Success") {
-              const project = recreated.success;
-              const removeRecreated = () =>
-                leased(
-                  worktreeManager
-                    .removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: true })
-                    .pipe(Effect.ignoreCause({ log: true })),
-                );
-              setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(setupScripts, {
-                threadId: thread.id,
-                projectId: project.id,
-                projectCwd: project.workspaceRoot,
-                worktreePath,
-                project: {
-                  id: project.id,
-                  workspaceRoot: project.workspaceRoot,
-                  scripts: project.scripts,
-                },
-              }).pipe(
-                Effect.as(undefined),
-                Effect.catch((error) => Effect.succeed(error)),
-                Effect.onInterrupt(removeRecreated),
+                if (setupFailure !== undefined) yield* removeRecreated();
+              }
+              return yield* leased(
+                start(
+                  {
+                    ...input,
+                    ...(setupFailure === undefined ? {} : { setupFailure }),
+                    ...(restored._tag === "Failure" ? { recreateFailure: restored.failure } : {}),
+                  },
+                  captureStartingRun,
+                ),
               );
-              if (setupFailure !== undefined) yield* removeRecreated();
+            });
+            const providerTurn = yield* cwd === undefined
+              ? startup
+              : withTurnStartReservation(fileSystem, path, path.resolve(cwd), startup);
+            if (providerTurn !== undefined) {
+              // Run execution owns finalization after the running write. A later
+              // failure must not settle a replacement attempt committed by steering.
+              yield* providerTurn.pipe(
+                Effect.catchCauseIf(
+                  (cause) => !Cause.hasInterruptsOnly(cause),
+                  (cause) =>
+                    Effect.logWarning(
+                      "Run execution failed after starting",
+                      { runId: input.runId },
+                      cause,
+                    ),
+                ),
+              );
             }
-          }
-          const providerTurn = yield* leased(
-            start({
-              ...input,
-              ...(setupFailure === undefined ? {} : { setupFailure }),
-              ...(recreateFailure === undefined ? {} : { recreateFailure }),
-            }),
+          }).pipe(
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              (cause) =>
+                Effect.fail(
+                  new ProviderTurnStartError({
+                    runId: input.runId,
+                    cause: Cause.squash(cause),
+                    ...(startingRun?.activeAttemptId == null || startingRun.rootNodeId == null
+                      ? {}
+                      : {
+                          attemptId: startingRun.activeAttemptId,
+                          rootNodeId: startingRun.rootNodeId,
+                        }),
+                  }),
+                ),
+            ),
           );
-          if (providerTurn !== undefined) yield* providerTurn;
         },
         (effect, input) =>
           effect.pipe(
@@ -1953,6 +1999,50 @@ export const layer: Layer.Layer<
               isProviderTurnStartError(cause)
                 ? cause
                 : new ProviderTurnStartError({ runId: input.runId, cause }),
+            ),
+          ),
+      ),
+      failStartingRun: Effect.fn("ProviderTurnStartService.failStartingRun")(
+        function* ({ threadId, runId, attemptId, rootNodeId }) {
+          const projection = yield* projectionStore.getTurnStartContext(threadId, runId);
+          const run = projection.runs.find((candidate) => candidate.id === runId);
+          if (
+            run === undefined ||
+            run.status !== "starting" ||
+            run.activeAttemptId !== attemptId ||
+            run.rootNodeId !== rootNodeId
+          )
+            return;
+          const rootNode = projection.nodes.find((candidate) => candidate.id === run.rootNodeId);
+          const attempt = projection.attempts.find(
+            (candidate) => candidate.id === run.activeAttemptId,
+          );
+          if (rootNode === undefined || attempt === undefined) {
+            return yield* new ProviderTurnStartRunStateMissingError({ runId });
+          }
+          yield* settleRunBeforeStart({
+            run,
+            rootNode,
+            attempt,
+            turnItems: projection.turnItems,
+            signal: "provider-turn-start-failure",
+            status: "failed",
+            now: yield* DateTime.now,
+            providerInstanceId: run.providerInstanceId,
+            itemProviderThreadId: run.providerThreadId,
+            item: {
+              type: "error",
+              title: "Turn failed to start",
+              failure: makeProviderFailure({ message: START_GAVE_UP_MESSAGE }),
+            },
+          });
+        },
+        (effect, { runId }) =>
+          effect.pipe(
+            Effect.mapError((cause) =>
+              isProviderTurnStartRunStateMissingError(cause)
+                ? cause
+                : new ProviderTurnStartError({ runId, cause }),
             ),
           ),
       ),
