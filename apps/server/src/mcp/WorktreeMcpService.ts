@@ -259,16 +259,6 @@ const make = Effect.gen(function* () {
         );
         const worktreePath = worktree.worktree.path;
 
-        const reportFailed = (logMessage: string) =>
-          Effect.catchCause((cause: Cause.Cause<unknown>) => {
-            const detail = errorMessage(Cause.squash(cause));
-            return Effect.logWarning(logMessage, {
-              threadId: scope.thread.threadId,
-              worktreePath,
-              detail,
-            }).pipe(Effect.as({ status: "failed", detail } as const));
-          });
-
         const removeCreatedWorktree = Effect.suspend(() =>
           gitWorkflow.removeWorktree({ cwd: projectCwd, path: worktreePath, force: true }).pipe(
             Effect.andThen(

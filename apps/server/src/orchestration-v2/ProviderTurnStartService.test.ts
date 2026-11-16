@@ -535,8 +535,8 @@ const layerRestoreLeaseTest = layerThreadWorktreeRestore.pipe(
       Layer.mock(GitWorkflow.GitWorkflowService)({
         pruneWorktrees: () => Effect.void,
         listLocalBranchNames: () => Effect.succeed(["feature/restore"]),
+        createWorktree: restoreLeaseCreateWorktree,
       }),
-      Layer.mock(WorktreeManager.WorktreeManager)({ createWorktree: restoreLeaseCreateWorktree }),
       Layer.mock(ProjectService.ProjectService)({
         getById: () =>
           Effect.succeedSome({ workspaceRoot: "/tmp/provider-turn-start-project" } as never),
@@ -602,7 +602,6 @@ it.each([
             } as ServerConfig.ServerConfig["Service"]),
             ServerSettings.layerTest(),
             Layer.mock(GitWorkflow.GitWorkflowService)({}),
-            Layer.mock(WorktreeManager.WorktreeManager)({}),
             Layer.mock(ProjectService.ProjectService)({
               getById: () =>
                 Effect.succeedSome({

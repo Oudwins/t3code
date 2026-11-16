@@ -712,7 +712,6 @@ describe("t3_worktree_handoff", () => {
       );
       yield* Deferred.await(started);
       expect(harness.dispatch).not.toHaveBeenCalled();
-      expect(harness.sendToThread).not.toHaveBeenCalled();
 
       yield* Deferred.succeed(release, undefined);
       const result = yield* Fiber.join(fiber);
@@ -751,7 +750,6 @@ describe("t3_worktree_handoff", () => {
       );
       expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "operation_failed" });
       expect(harness.dispatch).not.toHaveBeenCalled();
-      expect(harness.sendToThread).not.toHaveBeenCalled();
       expect(harness.removeWorktree).toHaveBeenCalledTimes(1);
       expect(harness.deleteLocalBranch).toHaveBeenCalledTimes(1);
     });
