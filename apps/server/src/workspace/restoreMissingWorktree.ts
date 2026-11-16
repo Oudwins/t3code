@@ -215,7 +215,10 @@ export class ThreadWorktreeRestore extends Context.Service<
      */
     readonly restoreAwaitingSetup: (
       thread: WorktreeThread,
-    ) => Effect.Effect<RestoredProject | undefined, WorktreeRecreateError | WorktreeRecreateNoBaseError>;
+    ) => Effect.Effect<
+      RestoredProject | undefined,
+      WorktreeRecreateError | WorktreeRecreateNoBaseError
+    >;
   }
 >()("t3/workspace/restoreMissingWorktree/ThreadWorktreeRestore") {}
 

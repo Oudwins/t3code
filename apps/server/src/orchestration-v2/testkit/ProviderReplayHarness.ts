@@ -452,7 +452,9 @@ export function layerWithRegistry<Error>(
         layerRuntime,
         layerServerConfig,
         layerServerSettings,
-        layerThreadWorktreeRestore.pipe(Layer.provide(layerServerConfig)),
+        layerThreadWorktreeRestore.pipe(
+          Layer.provide(Layer.merge(layerServerConfig, layerServerSettings)),
+        ),
       ),
     ),
   );

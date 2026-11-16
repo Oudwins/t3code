@@ -234,7 +234,11 @@ import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations"
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { isPreviewFocused } from "../lib/previewFocus";
-import { focusTerminal, getTerminalFocusOwner, type TerminalFocusOwner } from "../lib/terminalFocus";
+import {
+  focusTerminal,
+  getTerminalFocusOwner,
+  type TerminalFocusOwner,
+} from "../lib/terminalFocus";
 import { draftModelSelectionApplies, threadHasStarted } from "../lib/chatThreadActions";
 import {
   deriveLogicalProjectKeyFromSettings,

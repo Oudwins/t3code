@@ -1914,7 +1914,9 @@ export const layer: Layer.Layer<
                 .getById(thread.projectId, { includeDeleted: true })
                 .pipe(Effect.map((project) => Option.getOrUndefined(project)?.workspaceRoot)));
             const startup = Effect.gen(function* () {
-              const restored = yield* Effect.result(leased(worktreeRestore.restoreAwaitingSetup(thread)));
+              const restored = yield* Effect.result(
+                leased(worktreeRestore.restoreAwaitingSetup(thread)),
+              );
               const project = restored._tag === "Success" ? restored.success : undefined;
               let setupFailure: Error | undefined;
               // A recreated worktree gets a new one's setup, blocking or async alike. Setup that
@@ -1925,7 +1927,11 @@ export const layer: Layer.Layer<
                 const removeRecreated = () =>
                   leased(
                     worktreeManager
-                      .removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: true })
+                      .removeWorktree({
+                        cwd: project.workspaceRoot,
+                        path: worktreePath,
+                        force: true,
+                      })
                       .pipe(Effect.ignoreCause({ log: true })),
                   );
                 setupFailure = yield* ProjectSetupScriptRunner.runForThreadSettled(setupScripts, {
