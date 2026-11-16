@@ -2698,23 +2698,36 @@ describe("storage cleanup reports and local file policies", () => {
       scheduled: true,
       reason: "Thread has a scheduled task",
     },
+    {
+      name: "an open terminal, even when cleanup may force",
+      policy: "tracked-changes",
+      forceWithTerminal: true,
+      reason: "Open terminal",
+    },
   ] as const)(
     "keeps an idle No project thread's scratch folder with $name",
     ({
       policy,
       repository,
       scheduled,
+      forceWithTerminal,
       reason,
     }: {
       readonly policy?: WorktreeKeepWhen;
       readonly repository?: string;
       readonly scheduled?: boolean;
+      readonly forceWithTerminal?: boolean;
       readonly reason: string;
     }) =>
       runCleanupTest(
         Effect.gen(function* () {
           yield* TestClock.setTime(NOW_MS);
-          const fixture = yield* cleanupFixture();
+          const fixture = yield* cleanupFixture({
+            ...DEFAULT_SERVER_SETTINGS.storageCleanup,
+            worktreeAfterDays: 8,
+            worktreeOnDelete: true,
+            worktreeForce: forceWithTerminal ?? false,
+          });
           const scratchRoot = `${fixture.config.baseDir}/scratch`;
           const folder = `${scratchRoot}/quiet-otter`;
           yield* fixture.fs.makeDirectory(
@@ -2731,8 +2744,31 @@ describe("storage cleanup reports and local file policies", () => {
           if (policy !== undefined) fixture.setPolicy(policy);
           if (scheduled) fixture.setScheduledThreadIds(["thread-1"]);
           fixture.setThreads([
-            shell({ worktreePath: folder, settledAt: at(-20 * DAY_MS), status: "completed" }),
+            shell({
+              worktreePath: folder,
+              settledAt: at(-20 * DAY_MS),
+              status: "completed",
+              // Force applies only to a thread the user is done with.
+              ...(forceWithTerminal ? { settledOverride: "settled" as const } : {}),
+            }),
           ]);
+          if (forceWithTerminal) {
+            yield* fixture.setTerminals([
+              {
+                threadId: ThreadId.make("thread-1"),
+                terminalId: "terminal-1",
+                cwd: folder,
+                worktreePath: folder,
+                status: "running",
+                pid: 1,
+                exitCode: null,
+                exitSignal: null,
+                hasRunningSubprocess: false,
+                label: "Terminal",
+                updatedAt: DateTime.formatIso(at(0)),
+              },
+            ]);
+          }
           const report = yield* fixture.service.runNow;
           expect(
             report.entries.map(({ path, outcome, reason }) => ({ path, outcome, reason })),

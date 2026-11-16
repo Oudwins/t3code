@@ -1206,8 +1206,10 @@ const make = Effect.gen(function* () {
       // Force removal drops the in-use gates: uncommitted changes, ignored files,
       // open terminals and live sessions. It only applies once the user is done
       // with the thread. Thread activity, shared checkouts and the managed-worktree
-      // checks still apply.
-      const force = settings.worktreeForce && (deleted || storageCleanupThreadFinished(thread));
+      // checks still apply. Scratch folders are removed without closing what uses them, so
+      // they keep the gates.
+      const force =
+        !scratch && settings.worktreeForce && (deleted || storageCleanupThreadFinished(thread));
       const project = deleted
         ? { workspaceRoot: thread.workspaceRoot }
         : snapshot.projects.find((entry) => entry.id === thread.projectId);
