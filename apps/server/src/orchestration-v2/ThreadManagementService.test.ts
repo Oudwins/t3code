@@ -229,6 +229,7 @@ it.effect.each([
               cause: new Error("branch_checked_out_in_worktree"),
             }),
           ),
+        restoreAwaitingSetup: () => Effect.undefined,
       }),
     ),
     Layer.provide(

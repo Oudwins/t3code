@@ -1,5 +1,5 @@
 import { threadKey } from "@t3tools/client-runtime/state/entities";
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS, EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -7,6 +7,7 @@ import { act, render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { LAST_USED_PROJECT_STORAGE_KEY } from "../hooks/useHandleNewThread";
+import { __setClientSettingsForTests } from "../hooks/useSettings";
 import { removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { makeThreadFixture } from "../test-fixtures";
 import type { Project, Thread } from "../types";
@@ -24,10 +25,14 @@ vi.mock("../state/entities", async (original) => ({
   useDelegatedUnderParent: () => entities.delegatedUnderParent,
 }));
 
-function setup(state: Partial<typeof entities> = {}) {
+function setup(state: Partial<typeof entities> & { threadsOnly?: boolean } = {}) {
   // Earlier browser test files share this origin's localStorage; a remembered project
   // that is not listed here hides the default "New thread in <project>" row.
   removeLocalStorageItem(LAST_USED_PROJECT_STORAGE_KEY);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    commandPaletteThreadsOnly: state.threadsOnly ?? true,
+  });
   useCommandPaletteStore.setState(useCommandPaletteStore.getInitialState(), true);
   entities.projects = state.projects ?? [];
   entities.threads = state.threads ?? [];
@@ -149,6 +154,8 @@ describe("CommandPalette open intents", () => {
     const parentId = ThreadId.make("parent");
     const delegatedId = ThreadId.make("delegated");
     setup({
+      // Threads-only search hides project rows.
+      threadsOnly: false,
       delegatedUnderParent: new Set([threadKey({ environmentId, threadId: delegatedId })]),
       projects: [
         {
@@ -206,7 +213,7 @@ describe("CommandPalette open intents", () => {
     await using screen = await render(<CommandPalette>{null}</CommandPalette>);
 
     openCommandPalette({ query: "Acme" });
-    await page.getByRole("option", { name: /Acme/ }).first().click();
+    await page.getByRole("option", { name: /^Acme/ }).first().click();
 
     await vi.waitFor(() => expect(screen.router?.state.location.pathname).toBe("/local/parent"));
   });

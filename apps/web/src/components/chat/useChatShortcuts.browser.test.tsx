@@ -216,6 +216,7 @@ function ChatWithSideChatPane(props: { ran: string[] }) {
       } as Partial<ChatComposerHandle> as ChatComposerHandle,
     },
     branchToolbarRef: { current: null },
+    conversationHidden: false,
     closeThreadFind: () => {},
     commands: {
       "rightPanel.toggle": () => void props.ran.push("toggle"),

@@ -781,6 +781,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           change.keybindings.some(
             (rule) =>
               rule.command === "threadPanel.toggle" &&
+              "shortcut" in rule &&
               rule.shortcut.key === "k" &&
               rule.shortcut.modKey,
           ),
