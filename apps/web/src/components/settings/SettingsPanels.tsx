@@ -593,11 +593,14 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
       ? ["Archive confirmation"]
       : []),
+    ...(settings.confirmTerminalClose !== DEFAULT_UNIFIED_SETTINGS.confirmTerminalClose
+      ? ["Terminal close confirmation"]
+      : []),
     ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
       ? ["Delete confirmation"]
       : []),
     ...(settings.confirmTabClose !== DEFAULT_UNIFIED_SETTINGS.confirmTabClose
-      ? ["Close confirmation"]
+      ? ["Browser tab close confirmation"]
       : []),
     ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
     ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
@@ -712,6 +715,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       ghqCloneLayout: DEFAULT_UNIFIED_SETTINGS.ghqCloneLayout,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
+      confirmTerminalClose: DEFAULT_UNIFIED_SETTINGS.confirmTerminalClose,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
       confirmTabClose: DEFAULT_UNIFIED_SETTINGS.confirmTabClose,
@@ -1029,12 +1033,37 @@ export function GeneralSettingsPanel() {
           }
         />
         <SettingsRow
-          {...searchableSetting("close-confirmation")}
-          description="Ask before closing terminals, or browser tabs the agent is using."
+          {...setting("terminal-close-confirmation")}
+          description={<T>Ask before closing terminals and stopping their running processes.</T>}
+          resetAction={
+            settings.confirmTerminalClose !== DEFAULT_UNIFIED_SETTINGS.confirmTerminalClose ? (
+              <SettingResetButton
+                label="terminal close confirmation"
+                onClick={() =>
+                  updateSettings({
+                    confirmTerminalClose: DEFAULT_UNIFIED_SETTINGS.confirmTerminalClose,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.confirmTerminalClose}
+              onCheckedChange={(checked) =>
+                updateSettings({ confirmTerminalClose: Boolean(checked) })
+              }
+              aria-label={gt("Confirm terminal closing")}
+            />
+          }
+        />
+        <SettingsRow
+          {...setting("close-confirmation")}
+          description={<T>Ask before closing browser tabs the agent is using.</T>}
           resetAction={
             settings.confirmTabClose !== DEFAULT_UNIFIED_SETTINGS.confirmTabClose ? (
               <SettingResetButton
-                label="close confirmation"
+                label="browser tab close confirmation"
                 onClick={() =>
                   updateSettings({
                     confirmTabClose: DEFAULT_UNIFIED_SETTINGS.confirmTabClose,
@@ -1047,7 +1076,7 @@ export function GeneralSettingsPanel() {
             <Switch
               checked={settings.confirmTabClose}
               onCheckedChange={(checked) => updateSettings({ confirmTabClose: Boolean(checked) })}
-              aria-label="Confirm closing terminals and tabs"
+              aria-label={gt("Confirm closing agent browser tabs")}
             />
           }
         />
