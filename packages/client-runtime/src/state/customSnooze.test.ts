@@ -1,6 +1,6 @@
 // @effect-diagnostics globalDate:off -- Tests exercise local calendar and elapsed-time snooze input.
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { resolveCustomSnooze } from "./threadSettled.ts";
+import { resolveCustomSnooze, resolveSnoozeQuery } from "./threadSettled.ts";
 
 const now = new Date(2026, 8, 14, 14, 30);
 
@@ -46,4 +46,30 @@ describe("custom snooze", () => {
     const wake = resolveCustomSnooze({ mode: "duration", amount: "1", unit: "days" }, before);
     expect(wake).toBe(new Date(2027, 2, 14, 13).toISOString());
   });
+});
+
+describe("typed snooze query", () => {
+  it.each([
+    ["5d", 5 * 24 * 60],
+    ["5h", 5 * 60],
+    ["45m", 45],
+    ["2w", 14 * 24 * 60],
+    ["1.5h", 90],
+    ["1.1h", 66],
+    ["1h 30m", 90],
+    ["3 days", 3 * 24 * 60],
+    ["in 2 hours", 120],
+    [" 10 MIN ", 10],
+  ])("resolves %s", (query, minutes) => {
+    expect(resolveSnoozeQuery(query, now)?.snoozedUntil).toBe(
+      new Date(now.getTime() + minutes * 60_000).toISOString(),
+    );
+  });
+
+  it.each(["", "5", "tomorrow", "5x", "5 in", "0.2m", "1.5m", "h5", "400d", "1e9w"])(
+    "rejects %s",
+    (query) => {
+      expect(resolveSnoozeQuery(query, now)).toBeNull();
+    },
+  );
 });
