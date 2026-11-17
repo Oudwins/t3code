@@ -22,6 +22,7 @@
   "de0d79b74d3e4af6": "Confirm thread archiving",
   "4ab8a4878cd80c77": "Confirm thread deletion",
   "b210068e1f078ffa": "Confirm terminal closing",
+  "eab5b2e34ef94471": "Confirm closing agent browser tabs",
   "0c853c878aab1908": "Quit shortcut behavior",
   "22e745b7db60e52f": "Display",
   "2c1c93a646bbea6e": "Language",
@@ -29,11 +30,12 @@
   "cbf6a6bbc17e75e1": "Show a toast when another thread finishes, fails, or needs input or approval while this app has focus.",
   "83ca942c7163904f": "Combine matching repositories across environments.",
   "609da998ca13521e": "Order of projects in the sidebar project picker and command palette.",
-  "b4c541137a76b351": "Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you. The boring sidebar in Labs has no Working section.",
+  "e43bc1aaa002e6c3": "Fold busy threads into a Working section, and threads waiting on background work into a Waiting section. They return to the top of the inbox when they need you. The boring sidebar in Labs has neither.",
   "e815f49e5abedcfd": "Ask before unpinning a thread from the pinned section.",
   "41210f99adeeba78": "Require a second click on the inline archive action before a thread is archived.",
   "84f3d2cefc8d2a74": "Ask before deleting a thread and its chat history.",
   "ca169211b232a6c4": "Ask before closing terminals and stopping their running processes.",
+  "dbcf0f5de22e8bcd": "Ask before closing browser tabs the agent is using.",
   "3fc130f1e8170073": "Hold mode also quits on two quick presses.",
   "72c7fda6ae301e6d": "System default follows your browser or OS language.",
   "b9ebecdb8db71466": "System default follows your browser or OS clock preference.",
@@ -75,5 +77,6 @@
   "1d5052cbe70d0b28": "Archive confirmation",
   "d5dd27a4eb853248": "Delete confirmation",
   "5503ef439beb8d42": "Terminal close confirmation",
+  "07d54be3e05902bf": "Browser tab close confirmation",
   "86b43caa9ff41ea2": "Quit shortcut"
 }

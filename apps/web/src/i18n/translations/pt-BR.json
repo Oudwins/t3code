@@ -22,6 +22,7 @@
   "de0d79b74d3e4af6": "Confirmar ao arquivar conversas",
   "4ab8a4878cd80c77": "Confirmar ao excluir conversas",
   "b210068e1f078ffa": "Confirmar ao fechar terminais",
+  "eab5b2e34ef94471": "Confirmar o fechamento de abas do navegador do agente",
   "0c853c878aab1908": "Comportamento do atalho de saída",
   "22e745b7db60e52f": "Exibição",
   "2c1c93a646bbea6e": "Idioma",
@@ -29,11 +30,12 @@
   "cbf6a6bbc17e75e1": "Mostra um aviso quando outra conversa termina, falha ou precisa de uma resposta ou aprovação enquanto o app está em foco.",
   "83ca942c7163904f": "Combina repositórios correspondentes entre ambientes.",
   "609da998ca13521e": "Ordem dos projetos no seletor da barra lateral e na paleta de comandos.",
-  "b4c541137a76b351": "Agrupa as conversas em andamento e em monitoramento em uma seção Working. Elas voltam ao topo da caixa de entrada quando precisam de você. A boring sidebar do Labs não tem seção Working.",
+  "e43bc1aaa002e6c3": "Agrupe threads ocupadas em uma seção Working e threads aguardando trabalho em segundo plano em uma seção Waiting. Elas voltam ao topo da caixa de entrada quando precisam de você. A boring sidebar em Labs não tem nenhuma das duas.",
   "e815f49e5abedcfd": "Pergunta antes de desafixar uma conversa da seção de fixadas.",
   "41210f99adeeba78": "Exige um segundo clique na ação de arquivar antes de arquivar uma conversa.",
   "84f3d2cefc8d2a74": "Pergunta antes de excluir uma conversa e o histórico do chat.",
   "ca169211b232a6c4": "Pergunta antes de fechar terminais e encerrar os processos em execução.",
+  "dbcf0f5de22e8bcd": "Perguntar antes de fechar abas do navegador que o agente está usando.",
   "3fc130f1e8170073": "O modo \"Manter pressionado\" também sai ao pressionar duas vezes rapidamente.",
   "72c7fda6ae301e6d": "\"Padrão do sistema\" usa o idioma do navegador ou do sistema operacional.",
   "b9ebecdb8db71466": "\"Padrão do sistema\" usa o formato de hora do navegador ou do sistema operacional.",
@@ -75,5 +77,6 @@
   "1d5052cbe70d0b28": "Confirmação ao arquivar",
   "d5dd27a4eb853248": "Confirmação ao excluir",
   "5503ef439beb8d42": "Confirmação ao fechar terminais",
+  "07d54be3e05902bf": "Confirmação ao fechar abas do navegador",
   "86b43caa9ff41ea2": "Atalho de saída"
 }
