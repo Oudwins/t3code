@@ -1,6 +1,6 @@
 name: Fork release
 
-# CLI, desktop, and standalone Android release for this private fork, adapted
+# CLI and desktop (Linux, macOS) release for this private fork, adapted
 # from upstream's release.yml/release-desktop.yml:
 #   - Triggered by pushing a `v*.*.*` tag (or workflow_dispatch), not on every
 #     push to main. macOS hosted runners bill at a real multiplier on
@@ -14,13 +14,12 @@ name: Fork release
 #   - Signing secrets (CSC_*, APPLE_*) are intentionally left unset;
 #     release-desktop.yml already falls back to unsigned/ad-hoc builds when
 #     they're absent.
-#   - Android builds locally with Gradle, with upstream Expo OTA updates disabled.
+#   - No Android, iOS, or Windows builds, to keep CI cost down.
 
 on:
   pull_request:
     paths:
       - .github/workflows/fork-release.yml
-      - apps/mobile/app.config.ts
   push:
     tags:
       - "v*.*.*"
@@ -209,96 +208,9 @@ jobs:
       resource_key: darwin-arm64
       cli_archive: true
 
-  android:
-    name: Android APK (ARM64)
-    needs: [preflight]
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 60
-    env:
-      APP_VARIANT: production
-      CI: "1"
-      NODE_OPTIONS: --max-old-space-size=8192
-      T3CODE_ANDROID_PACKAGE: com.oudwins.t3code
-      T3CODE_ANDROID_VERSION_CODE: ${{ github.run_number }}
-      T3CODE_MOBILE_VERSION: ${{ needs.preflight.outputs.version }}
-      T3CODE_MOBILE_UPDATES_ENABLED: "0"
-      MOBILE_VERSION_POLICY: appVersion
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=@t3tools/mobile...
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-
-      - name: Setup Gradle cache
-        uses: gradle/actions/setup-gradle@v5
-
-      - name: Generate Android project
-        working-directory: apps/mobile
-        run: vp exec expo prebuild --clean --platform android --no-install
-
-      # Expo's template signs release builds with its fixed development key.
-      - name: Build standalone APK
-        working-directory: apps/mobile/android
-        env:
-          NODE_ENV: production
-        run: >-
-          ./gradlew :app:assembleRelease
-          -PreactNativeArchitectures=arm64-v8a
-          --no-daemon
-
-      - name: Verify standalone APK
-        run: |
-          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
-          "$build_tools/apksigner" verify "$apk"
-          test "$(apkanalyzer manifest application-id "$apk")" = "$T3CODE_ANDROID_PACKAGE"
-          test "$(apkanalyzer manifest version-code "$apk")" = "$T3CODE_ANDROID_VERSION_CODE"
-          test "$(apkanalyzer manifest version-name "$apk")" = "$T3CODE_MOBILE_VERSION"
-          unzip -Z1 "$apk" | grep -Fx 'assets/index.android.bundle'
-
-      - name: Prepare release asset
-        env:
-          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          mkdir -p release-assets
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
-            "release-assets/T3-Code-${RELEASE_VERSION}-android-arm64.apk"
-
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: android-apk
-          path: release-assets/*.apk
-          if-no-files-found: error
-          retention-days: 1
-
   release:
     name: Publish GitHub Release
-    needs: [preflight, desktop_linux_x64, desktop_linux_arm64, desktop_mac_arm64, android]
+    needs: [preflight, desktop_linux_x64, desktop_linux_arm64, desktop_mac_arm64]
     if: github.event_name != 'pull_request' && !inputs.build_only
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 30
@@ -337,13 +249,7 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Download Android APK
-        uses: actions/download-artifact@v8
-        with:
-          name: android-apk
-          path: release-assets
-
-      - name: Write CLI and Android checksums
+      - name: Write CLI checksums
         shell: bash
         run: |
           set -euo pipefail
@@ -354,7 +260,7 @@ jobs:
             echo "No CLI archives were produced." >&2
             exit 1
           fi
-          sha256sum "${archives[@]}" ./*.apk > SHA256SUMS
+          sha256sum "${archives[@]}" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Merge macOS updater manifests
@@ -378,7 +284,6 @@ jobs:
             echo 'release-assets/*.zip'
             echo 'release-assets/*.AppImage'
             echo 'release-assets/*.deb'
-            echo 'release-assets/*.apk'
             echo 'release-assets/*.blockmap'
             echo 'release-assets/*.yml'
             echo 'release-assets/*.tar.gz'
