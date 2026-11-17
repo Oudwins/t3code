@@ -68,7 +68,8 @@ shortcuts work as usual. This is not configurable in Settings.
 With a thread open, `mod+shift+s` settles it and `mod+alt+s` snoozes it. Both toggle:
 the same shortcut un-settles a settled thread or wakes a snoozed one. Snooze opens a
 list of wake times; type to filter it, press Enter to pick one, or choose **Custom…**
-for a date or duration. A thread waiting on an approval or question cannot be snoozed.
+for a date or duration. Type a duration such as `30m`, `5h`, `5d`, `2w`, or `1h 30m` to
+snooze for exactly that long. A thread waiting on an approval or question cannot be snoozed.
 The command palette (`Cmd/Ctrl+K`) has the same actions: **Settle thread**,
 **Un-settle thread**, **Snooze thread**, and **Wake thread**.
 

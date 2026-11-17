@@ -385,6 +385,56 @@ export function resolveCustomSnooze(input: CustomSnoozeInput, now: Date): string
     : null;
 }
 
+const SNOOZE_QUERY_UNIT_MINUTES: Readonly<Record<string, number>> = {
+  m: 1,
+  min: 1,
+  mins: 1,
+  minute: 1,
+  minutes: 1,
+  h: 60,
+  hr: 60,
+  hrs: 60,
+  hour: 60,
+  hours: 60,
+  d: 24 * 60,
+  day: 24 * 60,
+  days: 24 * 60,
+  w: 7 * 24 * 60,
+  wk: 7 * 24 * 60,
+  wks: 7 * 24 * 60,
+  week: 7 * 24 * 60,
+  weeks: 7 * 24 * 60,
+};
+const SNOOZE_QUERY_PATTERN = /^(?:in\s+)?(?:\d+(?:\.\d+)?\s*[a-z]+\s*)+$/;
+const SNOOZE_QUERY_PART = /(\d+(?:\.\d+)?)\s*([a-z]+)/g;
+// Longer waits go through Custom…; the cap also keeps wake dates representable.
+const MAX_SNOOZE_QUERY_MINUTES = 365 * 24 * 60;
+
+function parseSnoozeQuery(query: string): number | null {
+  const text = query.trim().toLowerCase();
+  if (!SNOOZE_QUERY_PATTERN.test(text)) return null;
+  let minutes = 0;
+  for (const [, amount, unit] of text.matchAll(SNOOZE_QUERY_PART)) {
+    const unitMinutes = SNOOZE_QUERY_UNIT_MINUTES[unit!];
+    if (unitMinutes === undefined) return null;
+    minutes += Number(amount) * unitMinutes;
+  }
+  const whole = Math.round(minutes);
+  // Sub-minute amounts like "1.5m" are rejected; the tolerance absorbs float error in "1.1h".
+  if (Math.abs(minutes - whole) > 1e-9) return null;
+  return whole >= 1 && whole <= MAX_SNOOZE_QUERY_MINUTES ? whole : null;
+}
+
+/** A typed duration such as "5d", "2h30m", or "in 3 hours" as a snooze choice; null otherwise. */
+export function resolveSnoozeQuery(
+  query: string,
+  now: Date,
+  formatTime?: (date: Date) => string,
+): SnoozePreset | null {
+  const minutes = parseSnoozeQuery(query);
+  return minutes === null ? null : resolveSnoozePreset({ kind: "after", minutes }, now, formatTime);
+}
+
 export function localSnoozeDate(date: Date): string {
   return `${String(date.getFullYear()).padStart(4, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
