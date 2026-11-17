@@ -217,7 +217,7 @@ jobs:
     env:
       APP_VARIANT: production
       CI: "1"
-      NODE_OPTIONS: --max-old-space-size=3072
+      NODE_OPTIONS: --max-old-space-size=8192
       T3CODE_ANDROID_PACKAGE: com.oudwins.t3code
       T3CODE_ANDROID_VERSION_CODE: ${{ github.run_number }}
       T3CODE_MOBILE_VERSION: ${{ needs.preflight.outputs.version }}
@@ -268,8 +268,7 @@ jobs:
         run: >-
           ./gradlew :app:assembleRelease
           -PreactNativeArchitectures=arm64-v8a
-          '-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=1024m -XX:+ExitOnOutOfMemoryError'
-          --no-daemon --max-workers=2
+          --no-daemon
 
       - name: Verify standalone APK
         run: |
