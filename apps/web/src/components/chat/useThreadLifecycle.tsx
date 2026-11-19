@@ -335,8 +335,8 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     toastManager.add(
       stackedThreadToast({
         type: "error",
-        title: "Failed to snooze thread",
-        description: error instanceof Error ? error.message : "An error occurred.",
+        title: m(msg("Failed to snooze thread")),
+        description: error instanceof Error ? error.message : m(msg("An error occurred.")),
       }),
     );
   };
@@ -744,7 +744,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Can't snooze thread",
+            title: m(msg("Can't snooze thread")),
             description: new ThreadSnoozeBlockedError(activeThreadRef).message,
           }),
         );

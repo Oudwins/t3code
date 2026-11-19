@@ -1,4 +1,7 @@
+import { msg } from "gt-react";
 import { CalendarClockIcon, CircleCheckIcon, ClockIcon } from "lucide-react";
+
+import { m, type MessageResolver } from "../i18n/messages";
 
 import type { SnoozePreset } from "./Sidebar.snooze";
 import {
@@ -14,16 +17,19 @@ import {
  * "Un-settle", a snoozed one "Wake". A null state means the environment's
  * server predates the feature, so the row is left out.
  */
-export function buildThreadStateActionItems(input: {
-  readonly settled: boolean | null;
-  readonly snoozed: boolean | null;
-  readonly canSnooze: boolean;
-  readonly snoozePresets: ReadonlyArray<SnoozePreset>;
-  readonly onSettledChange: (settled: boolean) => Promise<void>;
-  readonly onSnooze: (snoozedUntil: string) => Promise<void>;
-  readonly onCustomSnooze: () => Promise<void>;
-  readonly onWake: () => Promise<void>;
-}): Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> {
+export function buildThreadStateActionItems(
+  input: {
+    readonly settled: boolean | null;
+    readonly snoozed: boolean | null;
+    readonly canSnooze: boolean;
+    readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+    readonly onSettledChange: (settled: boolean) => Promise<void>;
+    readonly onSnooze: (snoozedUntil: string) => Promise<void>;
+    readonly onCustomSnooze: () => Promise<void>;
+    readonly onWake: () => Promise<void>;
+  },
+  resolve: MessageResolver = m,
+): Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> {
   const items: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (input.settled !== null) {
@@ -33,7 +39,7 @@ export function buildThreadStateActionItems(input: {
       searchTerms: input.settled
         ? ["un-settle", "unsettle", "settled", "reopen", "active"]
         : ["settle", "done", "finish", "complete", "close"],
-      title: input.settled ? "Un-settle thread" : "Settle thread",
+      title: input.settled ? resolve(msg("Un-settle thread")) : resolve(msg("Settle thread")),
       icon: <CircleCheckIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.settle",
       run: () => input.onSettledChange(!input.settled),
@@ -45,7 +51,7 @@ export function buildThreadStateActionItems(input: {
       kind: "action",
       value: "action:wake-thread",
       searchTerms: ["wake", "unsnooze", "snoozed", "resume"],
-      title: "Wake thread",
+      title: resolve(msg("Wake thread")),
       icon: <ClockIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.snooze",
       run: input.onWake,
@@ -55,8 +61,10 @@ export function buildThreadStateActionItems(input: {
       kind: "submenu",
       value: "action:snooze-thread",
       searchTerms: ["snooze", "later", "remind", "defer", "hide"],
-      title: "Snooze thread...",
-      ...(input.canSnooze ? {} : { description: "Waiting on you or has queued work" }),
+      title: resolve(msg("Snooze thread...")),
+      ...(input.canSnooze
+        ? {}
+        : { description: resolve(msg("Waiting on you or has queued work")) }),
       disabled: !input.canSnooze,
       icon: <ClockIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <ClockIcon className={ADDON_ICON_CLASS} />,
@@ -64,7 +72,7 @@ export function buildThreadStateActionItems(input: {
       groups: [
         {
           value: "snooze-options",
-          label: "Snooze until",
+          label: resolve(msg("Snooze until")),
           items: [
             ...input.snoozePresets.map((preset): CommandPaletteActionItem => ({
               kind: "action",
@@ -79,7 +87,7 @@ export function buildThreadStateActionItems(input: {
               kind: "action",
               value: "snooze:custom",
               searchTerms: ["custom", "pick a time", "date"],
-              title: "Custom…",
+              title: resolve(msg("Custom…", { $context: "custom snooze time" })),
               icon: <CalendarClockIcon className={ITEM_ICON_CLASS} />,
               run: input.onCustomSnooze,
             },

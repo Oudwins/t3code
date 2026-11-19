@@ -193,17 +193,21 @@ function PortSpacesSwitchRow(props: {
   readonly disabled: boolean;
   readonly onValueChange: (value: boolean) => void;
 }) {
+  const gt = useGT();
   const status = useEnvironmentQuery(
     props.statusEnvironmentId === null
       ? null
       : serverEnvironment.portSpacesStatus({ environmentId: props.statusEnvironmentId, input: {} }),
   );
   const note = status.error ?? (status.data?.available === false ? status.data.detail : null);
+  const description = gt(
+    "Give each thread its own network, so threads can use the same port. Needs a Linux environment.",
+  );
   return (
     <SettingsSwitchRow
       icon="point.3.connected.trianglepath.dotted"
-      label="Port spaces"
-      subtitle={`Give each thread its own network, so threads can use the same port. Needs a Linux environment.${note ? `\n${note}` : ""}`}
+      label={gt("Port spaces")}
+      subtitle={note ? `${description}\n${note}` : description}
       value={props.value}
       disabled={props.disabled}
       onValueChange={props.onValueChange}
@@ -435,7 +439,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
                   />
                 </SettingsSection>
-                <SettingsSection title="Port spaces">
+                <SettingsSection title={gt("Port spaces")}>
                   <PortSpacesSwitchRow
                     statusEnvironmentId={
                       targets.length === 1 && uniform("enablePortSpaces") === true

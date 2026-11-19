@@ -1106,19 +1106,30 @@ function PortSpacesStatusNote({ environmentId }: { readonly environmentId: Envir
     serverEnvironment.portSpacesStatus({ environmentId, input: {} }),
   );
   if (status.error) return <span>{status.error}</span>;
-  if (status.data === null) return <span>Checking…</span>;
-  if (status.data.available) return <span>Ready.</span>;
+  if (status.data === null)
+    return (
+      <span>
+        <T>Checking…</T>
+      </span>
+    );
+  if (status.data.available)
+    return (
+      <span>
+        <T context="port spaces status">Ready.</T>
+      </span>
+    );
   return (
     <span className="flex flex-wrap items-center gap-x-2">
       <span className="whitespace-pre-line">{status.data.detail}</span>
       <Button size="xs" variant="outline" onClick={status.refresh}>
-        Check again
+        <T>Check again</T>
       </Button>
     </span>
   );
 }
 
 function PortSpacesIntegrationSettings() {
+  const gt = useGT();
   const { environment: selected } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -1128,12 +1139,14 @@ function PortSpacesIntegrationSettings() {
       : null;
 
   return (
-    <SettingsSection id="port-spaces" title="Port spaces">
+    <SettingsSection id="port-spaces" title={gt("Port spaces")}>
       <SettingsRow
         {...searchableSetting("port-spaces")}
         serverScoped
         settingKeys={["enablePortSpaces"]}
-        description="Give each thread its own network, so threads and agents can run servers on the same port. Each thread's servers show in its preview tab in the desktop app. Needs a Linux environment."
+        description={gt(
+          "Give each thread its own network, so threads and agents can run servers on the same port. Each thread's servers show in its preview tab in the desktop app. Needs a Linux environment.",
+        )}
         status={
           settings.enablePortSpaces && environmentId ? (
             <PortSpacesStatusNote key={environmentId} environmentId={environmentId} />
@@ -1144,7 +1157,7 @@ function PortSpacesIntegrationSettings() {
             settingKeys={["enablePortSpaces"]}
             checked={settings.enablePortSpaces}
             onCheckedChange={(checked) => updateSettings({ enablePortSpaces: Boolean(checked) })}
-            aria-label="Port spaces"
+            aria-label={gt("Port spaces")}
           />
         }
       />
@@ -1198,11 +1211,17 @@ function AgentBrowserAccessSetting() {
 }
 
 function PortForwardingStatusNote() {
+  const gt = useGT();
   const status = usePortForwardingStatus();
   const thread = useThreadShell(
     status === null ? null : scopeThreadRef(status.environmentId, status.threadId),
   );
-  if (status === null) return <span>Open a thread with port spaces to forward its ports.</span>;
+  if (status === null)
+    return (
+      <span>
+        <T>Open a thread with port spaces to forward its ports.</T>
+      </span>
+    );
   const forwarding = new Set(
     status.ports.filter((port) => port.state === "forwarding").map((port) => port.port),
   );
@@ -1217,33 +1236,43 @@ function PortForwardingStatusNote() {
           : String(port.port),
       ),
   );
-  const title = thread?.title ?? "the selected thread";
+  const title = thread?.title;
+  const ports = [...forwarding].map((port) => `localhost:${port}`).join(", ");
   return (
     <span>
       {forwarding.size === 0
-        ? `Nothing in ${title} is listening.`
-        : `Forwarding ${title}: ${[...forwarding].map((port) => `localhost:${port}`).join(", ")}.`}
+        ? title
+          ? gt("Nothing in {title} is listening.", { title })
+          : gt("Nothing in the selected thread is listening.")
+        : title
+          ? gt("Forwarding {title}: {ports}.", { title, ports })
+          : gt("Forwarding the selected thread: {ports}.", { ports })}
       {conflicts.size > 0
-        ? ` Already in use by another app on this machine: ${[...conflicts].join(", ")}.`
+        ? ` ${gt("Already in use by another app on this machine: {ports}.", {
+            ports: [...conflicts].join(", "),
+          })}`
         : null}
     </span>
   );
 }
 
 function PortForwardingSetting() {
+  const gt = useGT();
   const enabled = useClientSettings((settings) => settings.portForwardingEnabled);
   const updateSettings = useUpdatePrimarySettings();
 
   return (
     <SettingsRow
       {...searchableSetting("port-forwarding")}
-      description="Reach the selected thread's servers at their own ports on this computer, from any browser or tool. Selecting another thread switches them; refresh to see it. Follows the last focused window."
+      description={gt(
+        "Reach the selected thread's servers at their own ports on this computer, from any browser or tool. Selecting another thread switches them; refresh to see it. Follows the last focused window.",
+      )}
       status={enabled ? <PortForwardingStatusNote /> : null}
       control={
         <Switch
           checked={enabled}
           onCheckedChange={(checked) => updateSettings({ portForwardingEnabled: Boolean(checked) })}
-          aria-label="Forward to this computer"
+          aria-label={gt("Forward to this computer")}
         />
       }
     />

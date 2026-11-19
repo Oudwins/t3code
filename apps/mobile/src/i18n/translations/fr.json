@@ -3591,6 +3591,8 @@
   "2e54c9d636c7d212": "Affiche la réponse quand l’agent a terminé.",
   "d5db39feffc9d626": "Paragraphes terminés",
   "875890264aa547fc": "Affiche chaque paragraphe ou bloc de code dès qu’il est complet.",
+  "08713d77c92112b0": "Donne à chaque fil son propre réseau, pour que les fils puissent utiliser le même port. Nécessite un environnement Linux.",
+  "f0714481e29ba6e3": "Espaces de ports",
   "3b969d1b0381a986": "{subtitle} {reason}",
   "5fc597e1e2a7ec55": "Sélectionnez un projet qui a un checkout dans un environnement connecté.",
   "83b95c78e73eaa43": "Utilisez le filtre ci-dessus pour sélectionner un environnement connecté.",

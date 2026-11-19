@@ -441,8 +441,8 @@ export function useThreadActions() {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not open the next thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            title: m(msg("Could not open the next thread")),
+            description: error instanceof Error ? error.message : m(msg("An error occurred.")),
           }),
         );
       }

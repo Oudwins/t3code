@@ -177,18 +177,21 @@ export function resolvePreviousWorktreeLabel(
 
 // The "Run on" choices as command palette rows, in the same order and wording
 // as the dropdown. Auto balance counts as current while it picks the machine.
-export function buildEnvironmentPaletteOptions(input: {
-  environments: readonly EnvironmentOption[];
-  environmentId: EnvironmentId;
-  autoEnvironmentLabel: string | undefined;
-  onAutoEnvironment: (() => void) | undefined;
-  select: (environmentId: EnvironmentId) => void;
-}): EnvironmentPaletteOption[] {
+export function buildEnvironmentPaletteOptions(
+  input: {
+    environments: readonly EnvironmentOption[];
+    environmentId: EnvironmentId;
+    autoEnvironmentLabel: string | undefined;
+    onAutoEnvironment: (() => void) | undefined;
+    select: (environmentId: EnvironmentId) => void;
+  },
+  resolve: MessageResolver = m,
+): EnvironmentPaletteOption[] {
   const { onAutoEnvironment } = input;
   const options: EnvironmentPaletteOption[] = input.environments.map((env) => ({
     id: env.environmentId,
     label: env.label,
-    description: env.isPrimary ? "This device" : null,
+    description: env.isPrimary ? resolve(msg("This device")) : null,
     machine: env.machine,
     selected: !input.autoEnvironmentLabel && env.environmentId === input.environmentId,
     select: () => input.select(env.environmentId),
@@ -196,7 +199,7 @@ export function buildEnvironmentPaletteOptions(input: {
   if (onAutoEnvironment) {
     options.unshift({
       id: "auto",
-      label: input.autoEnvironmentLabel ?? "Auto balance",
+      label: input.autoEnvironmentLabel ?? resolve(msg("Auto balance")),
       description: null,
       machine: null,
       selected: input.autoEnvironmentLabel !== undefined,
@@ -208,16 +211,19 @@ export function buildEnvironmentPaletteOptions(input: {
 
 // The workspace selector's choices as command palette rows, in the same order
 // and wording as the dropdown.
-export function buildWorkspacePaletteOptions(input: {
-  activeWorktreePath: string | null;
-  effectiveEnvMode: EnvMode;
-  previousWorktree: PreviousWorktreeSeed | null;
-  select: (id: WorkspacePaletteOption["id"]) => void;
-}): WorkspacePaletteOption[] {
+export function buildWorkspacePaletteOptions(
+  input: {
+    activeWorktreePath: string | null;
+    effectiveEnvMode: EnvMode;
+    previousWorktree: PreviousWorktreeSeed | null;
+    select: (id: WorkspacePaletteOption["id"]) => void;
+  },
+  resolve: MessageResolver = m,
+): WorkspacePaletteOption[] {
   const options: WorkspacePaletteOption[] = [
     {
       id: "local",
-      label: resolveCurrentWorkspaceLabel(input.activeWorktreePath),
+      label: resolveCurrentWorkspaceLabel(input.activeWorktreePath, resolve),
       description: null,
       icon: input.activeWorktreePath ? "worktree" : "checkout",
       selected: input.effectiveEnvMode === "local",
@@ -225,7 +231,7 @@ export function buildWorkspacePaletteOptions(input: {
     },
     {
       id: "worktree",
-      label: resolveEnvModeLabel("worktree"),
+      label: resolveEnvModeLabel("worktree", resolve),
       description: null,
       icon: "new-worktree",
       selected: input.effectiveEnvMode === "worktree",
@@ -235,7 +241,7 @@ export function buildWorkspacePaletteOptions(input: {
   if (input.previousWorktree) {
     options.push({
       id: "previous-worktree",
-      label: "Previous worktree",
+      label: resolve(msg("Previous worktree")),
       description: input.previousWorktree.branch,
       icon: "previous-worktree",
       selected: false,

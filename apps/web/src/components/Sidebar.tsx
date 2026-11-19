@@ -2936,6 +2936,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
+    gt,
     keybindings,
     navigateToThread,
     navigateToDraft,

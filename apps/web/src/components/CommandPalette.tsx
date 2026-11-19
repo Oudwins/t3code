@@ -346,7 +346,7 @@ function openIntentView(
         groups: [
           {
             value: "workspaces",
-            label: "Select workspace",
+            label: resolve(msg("Select workspace")),
             items: enumerateCommandPaletteItems(
               intent.options.map((option): CommandPaletteActionItem => ({
                 kind: "action",
@@ -364,7 +364,9 @@ function openIntentView(
                 ...(option.selected
                   ? {
                       titleTrailingContent: (
-                        <span className="text-xs text-muted-foreground/70">Current</span>
+                        <span className="text-xs text-muted-foreground/70">
+                          <T context="the option in use now">Current</T>
+                        </span>
                       ),
                     }
                   : {}),
@@ -380,7 +382,7 @@ function openIntentView(
         groups: [
           {
             value: "environments",
-            label: "Select environment",
+            label: resolve(msg("Select environment")),
             items: enumerateCommandPaletteItems(
               intent.options.map((option): CommandPaletteActionItem => ({
                 kind: "action",
@@ -403,7 +405,9 @@ function openIntentView(
                 ...(option.selected
                   ? {
                       titleTrailingContent: (
-                        <span className="text-xs text-muted-foreground/70">Current</span>
+                        <span className="text-xs text-muted-foreground/70">
+                          <T context="the option in use now">Current</T>
+                        </span>
                       ),
                     }
                   : {}),
@@ -1622,7 +1626,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:last-thread",
       searchTerms: ["last", "previous", "back", "recent", "thread", "switch"],
-      title: "Go to last thread",
+      title: gt("Go to last thread"),
       icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.last",
       run: async () => {
@@ -1644,29 +1648,32 @@ function OpenCommandPaletteDialog(props: {
       }
     };
     actionItems.push(
-      ...buildThreadStateActionItems({
-        settled:
-          capabilities?.threadSettlement === true
-            ? activeThread.settledOverride === "settled"
-            : null,
-        snoozed:
-          capabilities?.threadSnooze === true ? effectiveSnoozed(activeThread, { now }) : null,
-        canSnooze: canSnooze(activeThread, { now }),
-        snoozePresets: resolveSnoozePresets(
-          openedAt,
-          clientSettings.timestampFormat,
-          activeThread.environmentId,
-        ),
-        onSettledChange: async (settled) =>
-          throwOnFailure(await (settled ? settleThread(threadRef) : unsettleThread(threadRef))),
-        onSnooze: async (snoozedUntil) =>
-          throwOnFailure(await snoozeThread(threadRef, snoozedUntil)),
-        onCustomSnooze: async () => {
-          const choice = await requestCustomSnooze();
-          if (choice) throwOnFailure(await snoozeThread(threadRef, choice.snoozedUntil));
+      ...buildThreadStateActionItems(
+        {
+          settled:
+            capabilities?.threadSettlement === true
+              ? activeThread.settledOverride === "settled"
+              : null,
+          snoozed:
+            capabilities?.threadSnooze === true ? effectiveSnoozed(activeThread, { now }) : null,
+          canSnooze: canSnooze(activeThread, { now }),
+          snoozePresets: resolveSnoozePresets(
+            openedAt,
+            clientSettings.timestampFormat,
+            activeThread.environmentId,
+          ),
+          onSettledChange: async (settled) =>
+            throwOnFailure(await (settled ? settleThread(threadRef) : unsettleThread(threadRef))),
+          onSnooze: async (snoozedUntil) =>
+            throwOnFailure(await snoozeThread(threadRef, snoozedUntil)),
+          onCustomSnooze: async () => {
+            const choice = await requestCustomSnooze();
+            if (choice) throwOnFailure(await snoozeThread(threadRef, choice.snoozedUntil));
+          },
+          onWake: async () => throwOnFailure(await unsnoozeThread(threadRef)),
         },
-        onWake: async () => throwOnFailure(await unsnoozeThread(threadRef)),
-      }),
+        messages,
+      ),
     );
   }
 
@@ -1680,7 +1687,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:new-thread-tab",
       searchTerms: ["tab", "new tab", "surface", "terminal", "browser", "files"],
-      title: "New tab",
+      title: gt("New tab"),
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.newTab",
       run: async () => useRightPanelStore.getState().openNewTab(threadTabsRef(tabsTargetThreadRef)),
@@ -1692,7 +1699,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:change-model",
       searchTerms: ["model", "change model", "switch model", "provider", "picker"],
-      title: "Change model",
+      title: gt("Change model"),
       icon: <BotIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "modelPicker.toggle",
       run: async () => handles.composer?.openModelPicker(),
@@ -1704,7 +1711,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:select-workspace",
       searchTerms: ["workspace", "worktree", "checkout", "local", "new worktree"],
-      title: "Select workspace",
+      title: gt("Select workspace"),
       icon: <FolderGit2Icon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       shortcutCommand: "composer.workspace",
@@ -1717,7 +1724,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:select-environment",
       searchTerms: ["machine", "host", "environment", "run on", "server", "remote"],
-      title: "Select environment",
+      title: gt("Select environment"),
       icon: <ServerIcon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       shortcutCommand: "composer.environment",

@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { useGT } from "gt-react";
 import { CalendarClockIcon, ClockIcon } from "lucide-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
@@ -28,11 +29,12 @@ export function ThreadSnoozePicker(props: {
   readonly onOpenChange: (open: boolean) => void;
   readonly onSelect: (choice: SnoozeChoice) => void;
 }) {
+  const gt = useGT();
   return (
     <CommandDialog open={props.open} onOpenChange={props.onOpenChange}>
       {props.open ? (
         <CommandDialogPopup
-          aria-label="Snooze thread"
+          aria-label={gt("Snooze thread")}
           className="overflow-hidden"
           data-command-palette="true"
           onBackdropPointerDown={() => props.onOpenChange(false)}
@@ -60,6 +62,7 @@ function SnoozePickerContent(props: {
   readonly onSelect: (choice: SnoozeChoice) => void;
 }) {
   const { onSelect } = props;
+  const gt = useGT();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const [query, setQuery] = useState("");
@@ -108,7 +111,7 @@ function SnoozePickerContent(props: {
       kind: "action",
       value: "snooze:custom",
       searchTerms: ["custom"],
-      title: "Custom…",
+      title: gt("Custom…", { $context: "custom snooze time" }),
       icon: <CalendarClockIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         const choice = await requestCustomSnooze();
@@ -119,11 +122,11 @@ function SnoozePickerContent(props: {
 
   return (
     <CommandPaletteContent
-      aria-label="Snooze thread"
+      aria-label={gt("Snooze thread")}
       autoHighlight="always"
-      escapeLabel="Close"
-      footerActionLabel="Snooze"
-      inputProps={{ placeholder: "Snooze until… or type 2h, 3d" }}
+      escapeLabel={gt("Close")}
+      footerActionLabel={gt("Snooze", { $context: "verb, snoozes the thread" })}
+      inputProps={{ placeholder: gt("Snooze until… or type 2h, 3d") }}
       mode="none"
       onItemHighlighted={(value) => {
         setHighlightedItemValue(typeof value === "string" ? value : null);

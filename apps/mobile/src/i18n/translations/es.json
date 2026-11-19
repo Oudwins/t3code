@@ -3591,6 +3591,8 @@
   "2e54c9d636c7d212": "Muestra la respuesta cuando el agente termina.",
   "d5db39feffc9d626": "Párrafos terminados",
   "875890264aa547fc": "Muestra cada párrafo o bloque de código cuando está completo.",
+  "08713d77c92112b0": "Da a cada hilo su propia red, para que los hilos puedan usar el mismo puerto. Requiere un entorno Linux.",
+  "f0714481e29ba6e3": "Espacios de puertos",
   "3b969d1b0381a986": "{subtitle} {reason}",
   "5fc597e1e2a7ec55": "Selecciona un proyecto con un checkout en un entorno conectado.",
   "83b95c78e73eaa43": "Usa el filtro de arriba para seleccionar un entorno conectado.",

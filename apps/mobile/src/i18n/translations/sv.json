@@ -3597,6 +3597,8 @@
   "2e54c9d636c7d212": "Visa svaret när agenten är klar.",
   "d5db39feffc9d626": "Färdiga stycken",
   "875890264aa547fc": "Visa varje stycke eller kodblock när det är klart.",
+  "08713d77c92112b0": "Ger varje tråd ett eget nätverk så att trådar kan använda samma port. Kräver en Linux-miljö.",
+  "f0714481e29ba6e3": "Portutrymmen",
   "3b969d1b0381a986": "{subtitle} {reason}",
   "5fc597e1e2a7ec55": "Välj ett projekt med en utcheckning i en ansluten miljö.",
   "83b95c78e73eaa43": "Använd filtret ovan för att välja en ansluten miljö.",

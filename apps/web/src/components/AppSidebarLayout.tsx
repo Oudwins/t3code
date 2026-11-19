@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useGT } from "gt-react";
+import { msg, useGT } from "gt-react";
 import * as Schema from "effect/Schema";
 import {
   useEffect,
@@ -13,6 +13,7 @@ import { useLocation, useRouter, type AnyRouter } from "@tanstack/react-router";
 import { moveWorkspaceFocus, workspaceAreaProps } from "../lib/workspaceFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
+import { m } from "../i18n/messages";
 import { noteThreadVisit, readLastThread } from "../lastThread";
 import {
   releaseThreadUndoShortcut,
@@ -173,7 +174,7 @@ export function registerNavigationHistoryCommands(router: AnyRouter): () => void
         event.stopPropagation();
         const lastThread = readLastThread(readRouteThreadRef(router));
         if (lastThread === null) {
-          toastManager.add({ type: "info", title: "No previous thread to go back to" });
+          toastManager.add({ type: "info", title: m(msg("No previous thread to go back to")) });
           return;
         }
         void router.navigate({

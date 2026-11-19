@@ -3597,6 +3597,8 @@
   "2e54c9d636c7d212": "Show the answer when the agent finishes.",
   "d5db39feffc9d626": "Finished paragraphs",
   "875890264aa547fc": "Show each paragraph or code block as it completes.",
+  "08713d77c92112b0": "Give each thread its own network, so threads can use the same port. Needs a Linux environment.",
+  "f0714481e29ba6e3": "Port spaces",
   "3b969d1b0381a986": "{subtitle} {reason}",
   "5fc597e1e2a7ec55": "Select a project with a checkout on a connected environment.",
   "83b95c78e73eaa43": "Use the filter above to select a connected environment.",

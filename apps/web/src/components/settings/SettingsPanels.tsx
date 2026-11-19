@@ -1226,12 +1226,12 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...setting("command-palette-threads-only")}
-          description="The command palette lists only threads until you type > for commands."
+          description={gt("The command palette lists only threads until you type > for commands.")}
           resetAction={
             settings.commandPaletteThreadsOnly !==
             DEFAULT_UNIFIED_SETTINGS.commandPaletteThreadsOnly ? (
               <SettingResetButton
-                label="search threads by default"
+                ariaLabel={gt("Reset search threads by default to default")}
                 onClick={() =>
                   updateSettings({
                     commandPaletteThreadsOnly: DEFAULT_UNIFIED_SETTINGS.commandPaletteThreadsOnly,
@@ -1246,7 +1246,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ commandPaletteThreadsOnly: Boolean(checked) })
               }
-              aria-label="Search threads by default"
+              aria-label={gt("Search threads by default")}
             />
           }
         />

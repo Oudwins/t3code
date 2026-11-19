@@ -690,13 +690,16 @@ export const BranchToolbar = memo(function BranchToolbar({
   const openWorkspacePicker = () => {
     if (!canPickWorkspace) return;
     openCommandPalette({
-      workspace: buildWorkspacePaletteOptions({
-        activeWorktreePath,
-        effectiveEnvMode,
-        previousWorktree: previousWorktreeSeed,
-        select: (id) =>
-          id === "previous-worktree" ? onUsePreviousWorktree() : onEnvModeChange(id),
-      }),
+      workspace: buildWorkspacePaletteOptions(
+        {
+          activeWorktreePath,
+          effectiveEnvMode,
+          previousWorktree: previousWorktreeSeed,
+          select: (id) =>
+            id === "previous-worktree" ? onUsePreviousWorktree() : onEnvModeChange(id),
+        },
+        m,
+      ),
     });
   };
 
@@ -712,13 +715,16 @@ export const BranchToolbar = memo(function BranchToolbar({
   const openEnvironmentPicker = () => {
     if (!canPickEnvironment || !availableEnvironments || !onEnvironmentChange) return;
     openCommandPalette({
-      environment: buildEnvironmentPaletteOptions({
-        environments: availableEnvironments,
-        environmentId,
-        autoEnvironmentLabel,
-        onAutoEnvironment,
-        select: onEnvironmentChange,
-      }),
+      environment: buildEnvironmentPaletteOptions(
+        {
+          environments: availableEnvironments,
+          environmentId,
+          autoEnvironmentLabel,
+          onAutoEnvironment,
+          select: onEnvironmentChange,
+        },
+        m,
+      ),
     });
   };
 

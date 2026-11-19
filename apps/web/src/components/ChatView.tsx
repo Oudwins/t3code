@@ -3579,7 +3579,7 @@ export default function ChatView(props: ChatViewProps) {
         getShortcutContext={getShortcutContextStable}
         noDrag={false}
         leadingTab={{
-          label: "Thread",
+          label: gt("Thread", { $context: "tab label for the conversation" }),
           active: !conversationHidden,
           attention: threadNeedsAttention,
           onActivate: showConversationStable,

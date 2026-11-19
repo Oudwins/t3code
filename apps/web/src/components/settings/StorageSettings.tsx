@@ -67,6 +67,7 @@ function UnitNumberField({
   max: number;
   onChange: (value: number) => void;
 }) {
+  const gt = useGT();
   const [draft, setDraft] = useState<number | null>(value);
   const [savedValue, setSavedValue] = useState(value);
   if (savedValue !== value) {
@@ -93,16 +94,16 @@ function UnitNumberField({
       }}
     >
       <NumberFieldGroup>
-        <NumberFieldDecrement aria-label={`Decrease ${label}`} />
+        <NumberFieldDecrement aria-label={gt("Decrease {label}", { label })} />
         <NumberFieldInput
-          aria-label={`${label} (${unit})`}
+          aria-label={gt("{label} ({unit})", { label, unit })}
           size={5}
           className="w-auto grow-0 text-right"
         />
         <span aria-hidden="true" className="self-center pr-2 text-xs">
           {unit}
         </span>
-        <NumberFieldIncrement aria-label={`Increase ${label}`} />
+        <NumberFieldIncrement aria-label={gt("Increase {label}", { label })} />
       </NumberFieldGroup>
     </NumberField>
   );
@@ -869,13 +870,15 @@ export function WorktreeCleanupSection() {
                 }
               />
               <SettingsRow
-                title="Delete even when in use"
+                title={gt("Delete even when in use")}
                 status={ruleStatus("worktreeForce")}
-                description="For settled, archived, and deleted threads, also remove worktrees with uncommitted changes, ignored files, open terminals, or live sessions. Terminals and sessions close; uncommitted work is lost."
+                description={gt(
+                  "For settled, archived, and deleted threads, also remove worktrees with uncommitted changes, ignored files, open terminals, or live sessions. Terminals and sessions close; uncommitted work is lost.",
+                )}
                 serverScoped={!isProjectScope}
                 control={
                   <Switch
-                    aria-label="Delete even when in use"
+                    aria-label={gt("Delete even when in use")}
                     checked={settings.worktreeForce}
                     onCheckedChange={(worktreeForce) => updateWorktree({ worktreeForce })}
                   />

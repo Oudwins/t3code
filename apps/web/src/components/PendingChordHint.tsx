@@ -1,3 +1,4 @@
+import { T } from "gt-react";
 import { useSyncExternalStore } from "react";
 
 import { getPendingChordLabel, subscribePendingChord } from "../keybindings";
@@ -14,7 +15,9 @@ export function PendingChordHint() {
     >
       <div className="flex items-center gap-2 rounded-lg border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-lg/5">
         <Kbd>{leader}</Kbd>
-        <span className="text-muted-foreground">Press the next key, or Esc to cancel</span>
+        <span className="text-muted-foreground">
+          <T>Press the next key, or Esc to cancel</T>
+        </span>
       </div>
     </div>
   );

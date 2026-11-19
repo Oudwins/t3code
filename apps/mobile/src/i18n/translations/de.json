@@ -3596,6 +3596,8 @@
   "2e54c9d636c7d212": "Die Antwort anzeigen, wenn der Agent fertig ist.",
   "d5db39feffc9d626": "Fertige Absätze",
   "875890264aa547fc": "Jeden Absatz oder Codeblock anzeigen, sobald er vollständig ist.",
+  "08713d77c92112b0": "Gibt jedem Thread ein eigenes Netzwerk, sodass Threads denselben Port verwenden können. Erfordert eine Linux-Umgebung.",
+  "f0714481e29ba6e3": "Port-Räume",
   "3b969d1b0381a986": "{subtitle} {reason}",
   "5fc597e1e2a7ec55": "Wähle ein Projekt mit einem Checkout in einer verbundenen Umgebung.",
   "83b95c78e73eaa43": "Verwende den Filter oben, um eine verbundene Umgebung auszuwählen.",
