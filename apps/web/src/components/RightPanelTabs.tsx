@@ -1675,6 +1675,8 @@ export function SurfaceTabStrip(props: SurfaceTabStripProps) {
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
+  const gt = useGT();
+  const messages = useMessages();
   const focusedSurface = props.surfaces.find((surface) => surface.id === props.activeSurfaceId);
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
 
