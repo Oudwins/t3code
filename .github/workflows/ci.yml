@@ -1,10 +1,9 @@
 name: CI
 
+# Fork: no push-to-main run. Every change already passed CI on its PR, and a
+# second full run per merge doubled the Blacksmith bill.
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -18,8 +17,8 @@ jobs:
   # server shards, a server change does not run the mobile tests, and the macOS
   # lint (~6.7x a Linux minute) runs only for native mobile sources.
   # .github/scripts/ci-changes.cjs maps changed files to workspace packages and
-  # their dependents. Pushes to main still run every Linux job. Detection fails
-  # open: if the diff cannot be resolved, everything runs.
+  # their dependents. Detection fails open: if the diff cannot be resolved,
+  # everything runs.
   changes:
     name: Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
