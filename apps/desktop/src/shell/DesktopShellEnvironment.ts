@@ -93,6 +93,8 @@ export class DesktopShellEnvironment extends Context.Service<
     readonly awaitDiscovery: Effect.Effect<boolean>;
     /** Whether the user's own login shell, not a fallback, gave the PATH a new terminal gets. */
     readonly awaitUserShellDiscovery: Effect.Effect<boolean>;
+    /** Whether discovery has settled (the user's shell answered or retries ran out), without waiting. */
+    readonly discoveryFinished: Effect.Effect<boolean>;
     readonly updates: Stream.Stream<DesktopShellEnvironmentSnapshot>;
   }
 >()("@t3tools/desktop/shell/DesktopShellEnvironment") {}
@@ -633,9 +635,11 @@ const CACHED_ENV_NAMES = [
   "HOMEBREW_CELLAR",
   "HOMEBREW_REPOSITORY",
   "JAVA_HOME",
+  "PNPM_HOME",
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
+  "T3CODE_TELEMETRY_ENABLED",
   // The server reads these once at startup, before fresh discovery finishes.
   "CODE_PROJECTS_PARENT_DIRS",
   "CODE_PROJECTS",
@@ -649,6 +653,21 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
   const env = process.env;
+  const isLinuxAppImage =
+    environment.platform === "linux" && (env.APPIMAGE !== undefined || env.APPDIR !== undefined);
+  const appDir = env.APPDIR?.replace(/\/+$/u, "");
+  const stripAppImagePaths = (target: NodeJS.ProcessEnv) => {
+    if (!isLinuxAppImage || target.PATH === undefined) return;
+    // Cached PATHs can outlive the AppImage mount that originally contributed them.
+    const kept = target.PATH.split(":").filter(
+      (entry) =>
+        !(appDir && (entry === appDir || entry.startsWith(`${appDir}/`))) &&
+        !/^\/tmp\/\.mount_T3-[^/]+(?:\/|$)/u.test(entry),
+    );
+    if (kept.length > 0) target.PATH = kept.join(":");
+    else delete target.PATH;
+  };
+  stripAppImagePaths(env);
   const inherited = { ...env };
   const key = encodeCacheKey([
     environment.platform,
@@ -672,6 +691,7 @@ export const make = Effect.gen(function* () {
   const changes = yield* PubSub.unbounded<DesktopShellEnvironmentSnapshot>();
   const latest = yield* Ref.make<Option.Option<DesktopShellEnvironmentSnapshot>>(Option.none());
   const discovered = yield* Deferred.make<ShellDiscovery>();
+  const settledDiscovery = yield* Deferred.make<void>();
   const publish = Effect.fn("desktop.shellEnvironment.publish")(function* (
     patch: ShellEnvironmentPatch,
     discovered = false,
@@ -697,6 +717,7 @@ export const make = Effect.gen(function* () {
         budget,
       });
       const { prepared } = discovery;
+      stripAppImagePaths(fresh);
       if (prepared || Option.isNone(yield* Ref.get(latest))) {
         yield* publish(toPatch(fresh), prepared);
       }
@@ -740,6 +761,7 @@ export const make = Effect.gen(function* () {
             ),
           ),
     ),
+    Effect.onExit(() => Deferred.succeed(settledDiscovery, undefined)),
   );
   const installIntoProcess = yield* Effect.cached(
     Effect.gen(function* () {
@@ -756,6 +778,7 @@ export const make = Effect.gen(function* () {
             return typeof value === "string" ? [[name, value]] : [];
           }),
         );
+        stripAppImagePaths(cached);
         const baseline = { ...inherited };
         const cachedPath = cached.PATH;
         if (cachedPath) {
@@ -791,6 +814,7 @@ export const make = Effect.gen(function* () {
       Effect.andThen(Deferred.await(discovered)),
       Effect.map(({ fromUserShell }) => fromUserShell),
     ),
+    discoveryFinished: Deferred.isDone(settledDiscovery),
     updates,
   });
 });

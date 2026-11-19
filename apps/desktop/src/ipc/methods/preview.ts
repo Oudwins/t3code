@@ -23,6 +23,7 @@ import {
   DesktopPreviewImportCookiesInputSchema,
   DesktopPreviewCreateTabInputSchema,
   DesktopPreviewTabInputSchema,
+  DesktopPreviewTunnelAccessResolutionInputSchema,
   DesktopPreviewWebviewConfigSchema,
   PreviewAnnotationSubmissionResultSchema,
   PreviewCaptureFailure,
@@ -38,6 +39,7 @@ import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import * as LoopbackTunnel from "../../preview/LoopbackTunnel.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as PortSpaceProxy from "../../preview/PortSpaceProxy.ts";
 import { normalizeCaptureFailure } from "../../preview/captureErrors.ts";
@@ -370,17 +372,27 @@ export const getPreviewConfig = DesktopIpc.makeIpcMethod({
     environmentId,
     profileId,
     portSpaceThreadId,
+    tunnelLoopback,
   }) {
     const manager = yield* PreviewManager.PreviewManager;
     const portSpaceProxy = yield* PortSpaceProxy.PortSpaceProxy;
+    const tunnel = yield* LoopbackTunnel.LoopbackTunnel;
     const { scope, persistent, namespace } =
       portSpaceThreadId === undefined
         ? resolvePartitionScope(environmentId, profileId)
         : resolvePortSpacePartitionScope(environmentId, portSpaceThreadId, profileId);
     // Session creation installs UA and permission handlers before a guest can attach.
     const browserSession = yield* manager.getBrowserSession(scope, persistent, namespace);
+    // Routed before the renderer learns the partition, so no guest loads loopback directly.
+    // A port space proxy already reaches the environment, so it replaces the loopback tunnel.
     if (portSpaceThreadId !== undefined) {
       yield* portSpaceProxy.attach(browserSession, { environmentId, threadId: portSpaceThreadId });
+    } else {
+      yield* tunnel.route({
+        environmentId,
+        session: browserSession,
+        tunnelled: tunnelLoopback === true,
+      });
     }
     return {
       partition: yield* manager.getBrowserPartition(scope, persistent, namespace),
@@ -397,6 +409,16 @@ export const setPortSpaceTunnel = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.setPortSpaceTunnel")(function* (input) {
     const portSpaceProxy = yield* PortSpaceProxy.PortSpaceProxy;
     yield* portSpaceProxy.setTunnel(input);
+  }),
+});
+
+const resolveTunnelAccess = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_TUNNEL_ACCESS_RESOLVE_CHANNEL,
+  payload: DesktopPreviewTunnelAccessResolutionInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.resolveTunnelAccess")(function* (input) {
+    const tunnel = yield* LoopbackTunnel.LoopbackTunnel;
+    yield* tunnel.resolveAccess(input);
   }),
 });
 
@@ -542,6 +564,7 @@ export const methods = [
   openDevTools,
   clearCookies,
   clearCache,
+  resolveTunnelAccess,
   setAnnotationTheme,
   setAnnotationSendEnabled,
   pickElement,

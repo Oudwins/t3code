@@ -14,7 +14,7 @@ import { isPreviewSupportedInRuntime } from "../../previewStateStore";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const TAB_OPTIONS = {
@@ -25,6 +25,7 @@ const TAB_OPTIONS = {
 } as const satisfies Record<NewThreadTab, { label: string; icon: typeof Files }>;
 
 export function NewThreadTabsSettings() {
+  const searchableSetting = useSearchableSetting();
   const tabs = useScopedSettings((settings) => settings.newThreadTabs);
   const updateSettings = useUpdateScopedSettings();
   const browserAvailable = isPreviewSupportedInRuntime();

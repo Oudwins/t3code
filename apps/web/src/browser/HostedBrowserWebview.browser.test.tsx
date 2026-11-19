@@ -136,6 +136,7 @@ describe("HostedBrowserWebview port spaces", () => {
       threadRef.environmentId,
       undefined,
       threadRef.threadId,
+      false,
     );
     expect(guest()).toBeNull();
 

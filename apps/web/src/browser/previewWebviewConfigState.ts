@@ -10,6 +10,9 @@ import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import { previewBridge } from "~/components/preview/previewBridge";
+import { environmentCatalog } from "~/connection/catalog";
+
+import { tunnelsEnvironmentLoopback } from "./browserTargetResolver";
 
 const PREVIEW_CONFIG_STALE_TIME_MS = 5 * 60_000;
 const PREVIEW_CONFIG_IDLE_TTL_MS = 10 * 60_000;
@@ -45,7 +48,8 @@ type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 
 const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
-  profileId?: string,
+  profileId: string | undefined,
+  tunnelLoopback: boolean,
   bridge: PreviewConfigBridge | null = previewBridge,
   portSpaceThreadId?: ThreadId,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
@@ -54,7 +58,8 @@ const loadPreviewWebviewConfig = (
   }
 
   return Effect.tryPromise({
-    try: () => bridge.getPreviewConfig(environmentId, profileId, portSpaceThreadId),
+    try: () =>
+      bridge.getPreviewConfig(environmentId, profileId, portSpaceThreadId, tunnelLoopback),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };
@@ -86,8 +91,17 @@ const parseConfigKey = (
 
 const previewWebviewConfigAtom = Atom.family((key: string) => {
   const { environmentId, threadId, profileId } = parseConfigKey(key);
-  return Atom.make(
-    loadPreviewWebviewConfig(environmentId, profileId, previewBridge, threadId),
+  // The catalog knows the target before the environment connects, and a change re-routes the partition.
+  return Atom.make((get) =>
+    loadPreviewWebviewConfig(
+      environmentId,
+      profileId,
+      tunnelsEnvironmentLoopback(
+        get(environmentCatalog.catalogValueAtom).entries.get(environmentId)?.target,
+      ),
+      previewBridge,
+      threadId,
+    ),
   ).pipe(
     Atom.swr({
       staleTime: PREVIEW_CONFIG_STALE_TIME_MS,

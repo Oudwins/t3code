@@ -12,11 +12,15 @@ import {
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { getTerminalLabel, nextTerminalId } from "@t3tools/shared/terminalLabels";
+import { nextTerminalId } from "@t3tools/shared/terminalLabels";
+import { getTerminalLabel } from "@t3tools/shared/terminalLabelsCopy";
 import { readEnvironmentScope } from "../state/session";
 
 import { isBrowserSettingsReadError } from "../browser/openFileInPreview";
 import { useDiffPanelStore } from "../diffPanelStore";
+import { msg } from "gt-react";
+import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
+import { m } from "../i18n/messages";
 import { confirmTerminalClose } from "../lib/terminalCloseConfirm";
 import { readLocalApi } from "../localApi";
 import { requestWorkspaceFocus } from "../lib/workspaceFocus";
@@ -133,8 +137,8 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Unable to open browser",
-          description: error.message,
+          title: m(msg("Unable to open browser")),
+          description: errorDisplayMessage(error, m) ?? error.message,
         }),
       );
     }
@@ -272,7 +276,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     requestTerminalFocus();
   };
   const requestCloseTerminal = (terminalId: string) => {
-    const label = terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
+    const label = terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId, m);
     void confirmTerminalClose([label]).then((confirmed) => {
       if (confirmed) closeTerminal(terminalId);
     });
@@ -348,7 +352,7 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     closeSurfaces: () => void,
   ) => {
     const message = agentControlledBrowserCloseConfirmation(closing, previewDesktopByTabId);
-    if (!message || !getClientSettings().confirmTabClose) {
+    if (!message || !getClientSettings().confirmTerminalClose) {
       closeSurfaces();
       return;
     }
@@ -409,29 +413,50 @@ export function useSurfaceGroupActions(input: SurfaceGroupInput) {
     }
     const activeLabel =
       terminalLabelsById.get(surface.activeTerminalId) ??
-      getTerminalLabel(surface.activeTerminalId);
+      getTerminalLabel(surface.activeTerminalId, m);
     const otherLabels = surface.terminalIds
       .filter((terminalId) => terminalId !== surface.activeTerminalId)
-      .map((terminalId) => terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId));
+      .map((terminalId) => terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId, m));
     void confirmTerminalClose([activeLabel, ...otherLabels]).then((confirmed) => {
       if (confirmed) finish();
     });
   };
+  const closeConfirmed = (closing: readonly RightPanelSurface[]) => {
+    closeAfterAgentBrowserConfirmation(closing, () => {
+      const labels =
+        threadRef && readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
+          ? closing.flatMap((surface) =>
+              surface.kind === "terminal"
+                ? surface.terminalIds.map(
+                    (terminalId) =>
+                      terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId, m),
+                  )
+                : [],
+            )
+          : [];
+      const [first, ...rest] = labels;
+      if (first === undefined) {
+        finishClose(closing);
+        return;
+      }
+      void confirmTerminalClose([first, ...rest]).then((confirmed) => {
+        if (confirmed) finishClose(closing);
+      });
+    });
+  };
   const closeOthers = (surface: RightPanelSurface) => {
     if (!groupRef) return;
-    const closing = surfaces.filter((entry) => entry.id !== surface.id);
-    closeAfterAgentBrowserConfirmation(closing, () => finishClose(closing));
+    closeConfirmed(surfaces.filter((entry) => entry.id !== surface.id));
   };
   const closeToRight = (surface: RightPanelSurface) => {
     if (!groupRef) return;
     const surfaceIndex = surfaces.findIndex((entry) => entry.id === surface.id);
     if (surfaceIndex < 0) return;
-    const closing = surfaces.slice(surfaceIndex + 1);
-    closeAfterAgentBrowserConfirmation(closing, () => finishClose(closing));
+    closeConfirmed(surfaces.slice(surfaceIndex + 1));
   };
   const closeAll = () => {
     if (!groupRef) return;
-    closeAfterAgentBrowserConfirmation(surfaces, () => finishClose(surfaces));
+    closeConfirmed(surfaces);
   };
 
   // Fixed identities, so the actions can go into props and dependency arrays
