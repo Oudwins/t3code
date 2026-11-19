@@ -58,8 +58,7 @@ const loadPreviewWebviewConfig = (
   }
 
   return Effect.tryPromise({
-    try: () =>
-      bridge.getPreviewConfig(environmentId, profileId, portSpaceThreadId, tunnelLoopback),
+    try: () => bridge.getPreviewConfig(environmentId, profileId, portSpaceThreadId, tunnelLoopback),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };

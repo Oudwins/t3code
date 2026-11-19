@@ -3414,7 +3414,7 @@ function OpenCommandPaletteDialog(props: {
                         currentView === null &&
                         !isActionsOnly
                       ? { emptyStateMessage: gt("No matching threads.") }
-                    : {})}
+                      : {})}
       />
     </CommandPaletteContent>
   );

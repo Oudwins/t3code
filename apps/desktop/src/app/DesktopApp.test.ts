@@ -355,7 +355,12 @@ it.effect(
       yield* fs.writeFileString(
         launcher,
         DesktopCliShim.renderCliShim({
-          target: { kind: "appimage", appImage: removedAppImage, executableName: "t3code" },
+          target: {
+            kind: "appimage",
+            appImage: removedAppImage,
+            appDirectory: baseDir,
+            executableName: "t3code",
+          },
           shimPath: launcher,
           t3Home: baseDir,
         }),

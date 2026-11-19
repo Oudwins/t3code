@@ -496,7 +496,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "working-shelf",
     title: msg("Working section"),
     to: "/settings/general",
-    searchTerms: [msg("hide fold running waiting monitoring checks ci threads inbox sidebar shelf")],
+    searchTerms: [
+      msg("hide fold running waiting monitoring checks ci threads inbox sidebar shelf"),
+    ],
   },
   {
     id: "boring-sidebar",
@@ -802,7 +804,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "new-thread-tabs",
     title: msg("Tabs for new threads"),
     to: "/settings/chat",
-    searchTerms: [msg("open automatically terminal files diff browser layout start thread default")],
+    searchTerms: [
+      msg("open automatically terminal files diff browser layout start thread default"),
+    ],
   },
   {
     id: "skills-in-slash-menu",
@@ -1140,7 +1144,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Port spaces"),
     to: "/settings/devices",
     searchTerms: [
-      msg("network namespace isolate same port dev server vite collision linux thread forward proxy"),
+      msg(
+        "network namespace isolate same port dev server vite collision linux thread forward proxy",
+      ),
     ],
   },
   {
@@ -1344,7 +1350,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Ignored checks"),
     to: "/settings/source-control",
     searchTerms: [
-      msg("pull request pr watch monitor babysit ci checks pending skip approval bot policy-bot wait regex pattern"),
+      msg(
+        "pull request pr watch monitor babysit ci checks pending skip approval bot policy-bot wait regex pattern",
+      ),
     ],
     environmentOnly: true,
   },

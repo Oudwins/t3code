@@ -1064,7 +1064,12 @@ export function scoreThreadSearch(
   const fieldQuery = threadFieldQuery(normalizedQuery);
   const isWholeBranch = (branch: string | null): branch is string =>
     branch !== null && prepareSearchField(branch).text === fieldQuery;
-  const wholeBranchMatch = (exact: number, label: string, branch: string) => ({
+  const wholeBranchMatch = (
+    exact: number,
+    field: SearchMatchHintField,
+    label: string,
+    branch: string,
+  ) => ({
     score: WHOLE_NAME * threadUsageBoost(thread, now),
     quality: WHOLE_NAME,
     wholeWords: true,
@@ -1072,14 +1077,14 @@ export function scoreThreadSearch(
     strong: true,
     exact,
     ranges: [],
-    explain: () => ({ label, text: branch, ranges: [{ start: 0, end: branch.length }] }),
+    explain: () => ({ field, label, text: branch, ranges: [{ start: 0, end: branch.length }] }),
   });
   const branch = searchableBranch(thread.branch);
-  if (isWholeBranch(branch)) return wholeBranchMatch(2, "Branch", branch);
+  if (isWholeBranch(branch)) return wholeBranchMatch(2, "branch", "Branch", branch);
   for (const pullRequest of thread.pullRequests ?? []) {
     const headBranch = searchableBranch(pullRequest.headBranch);
     if (isWholeBranch(headBranch)) {
-      return wholeBranchMatch(1, `PR #${pullRequest.number} branch`, headBranch);
+      return wholeBranchMatch(1, "pull-request", `PR #${pullRequest.number} branch`, headBranch);
     }
   }
   const fieldMatch = matchSearchFields(fieldQuery, fields, options);

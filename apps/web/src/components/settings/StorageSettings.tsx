@@ -965,7 +965,9 @@ export function WorktreeReuseSection() {
           <SettingsRow
             title={gt("Reuse worktrees")}
             status={reuseStatus("enabled")}
-            description={gt("Keep removed worktrees on standby for new threads instead of creating new ones. A reused worktree moves, resets to the requested branch, and reruns setup; ignored files like node_modules stay.")}
+            description={gt(
+              "Keep removed worktrees on standby for new threads instead of creating new ones. A reused worktree moves, resets to the requested branch, and reruns setup; ignored files like node_modules stay.",
+            )}
             serverScoped
             settingKeys={["worktreeReuse"]}
             control={
@@ -981,7 +983,9 @@ export function WorktreeReuseSection() {
               <SettingsRow
                 title={gt("Standby limit")}
                 status={reuseStatus("maxStandby")}
-                description={gt("The most worktrees kept on standby for each repository. The least recently released are removed first.")}
+                description={gt(
+                  "The most worktrees kept on standby for each repository. The least recently released are removed first.",
+                )}
                 serverScoped
                 settingKeys={["worktreeReuse"]}
                 control={
@@ -998,7 +1002,9 @@ export function WorktreeReuseSection() {
               <SettingsRow
                 title={gt("Standby time")}
                 status={reuseStatus("standbyHours")}
-                description={gt("Remove a worktree from standby after it has gone unused this long.")}
+                description={gt(
+                  "Remove a worktree from standby after it has gone unused this long.",
+                )}
                 serverScoped
                 settingKeys={["worktreeReuse"]}
                 control={
