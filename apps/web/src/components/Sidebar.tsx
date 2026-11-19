@@ -187,8 +187,10 @@ import {
   filterSidebarProjectScopeItems,
   firstValidTimestampMs,
   isSidebarNestedLinkClick,
+  hasUnseenCompletion,
   isSidebarThreadWaiting,
   isSidebarThreadWorking,
+  isThreadWokeUnseen,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   orderSidebarDraftIds,
@@ -201,6 +203,7 @@ import {
   resolveSidebarDropVerb,
   resolveSidebarThreadSection,
   resolveSidebarReorderableThreadKeys,
+  resolveThreadLastVisitedAt,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
   sidebarListItemId,
@@ -2896,6 +2899,28 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             routeRowThreadKey ??
             (routeDraftIdForRows === null ? null : `draft:${routeDraftIdForRows}`),
           direction: traversalDirection,
+          isUnseen: (threadKey) => {
+            const thread = threadByKey.get(threadKey);
+            if (
+              thread === undefined ||
+              settledThreadKeysRef.current.has(threadKey) ||
+              snoozedThreadKeysRef.current.has(threadKey)
+            ) {
+              return false;
+            }
+            const lastVisitedAt = resolveThreadLastVisitedAt(
+              thread.lastVisitedAt,
+              useUiStateStore.getState().threadLastVisitedAtById[threadKey],
+            );
+            return (
+              hasUnseenCompletion({ ...thread, lastVisitedAt }) ||
+              isThreadWokeUnseen({
+                wokeAt: threadWokeAt(thread, { now: new Date().toISOString() }),
+                lastVisitedAt,
+                settledOverride: thread.settledOverride,
+              })
+            );
+          },
         });
         if (target?.startsWith("draft:")) {
           event.preventDefault();

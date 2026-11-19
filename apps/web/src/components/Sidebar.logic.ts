@@ -904,12 +904,24 @@ export function orderItemsByPreferredIds<TItem, TId>(input: {
   return [...ordered, ...remaining];
 }
 
+/** Unseen threads are visited first, nearest in `direction`; once none remain it walks in order. */
 export function resolveAdjacentThreadId<T>(input: {
   threadIds: readonly T[];
   currentThreadId: T | null;
   direction: ThreadTraversalDirection;
+  isUnseen: (threadId: T) => boolean;
 }): T | null {
   const { currentThreadId, direction, threadIds } = input;
+
+  const unseenTarget = resolveAdjacentAttentionThreadId({
+    threadIds,
+    currentThreadId,
+    direction,
+    needsAttention: input.isUnseen,
+  });
+  if (unseenTarget !== null) {
+    return unseenTarget;
+  }
 
   if (threadIds.length === 0) {
     return null;
