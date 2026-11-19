@@ -15,6 +15,7 @@ import {
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
   resolveAdjacentAttentionThreadId,
+  resolveAdjacentThreadId,
   resolveSidebarSweepKeys,
   resolveSidebarRowStatus,
   resolveSidebarThreadStatus,
@@ -176,6 +177,28 @@ describe("orderItemsByPreferredIds", () => {
       "physical-a",
       "physical-b",
     ]);
+  });
+});
+
+describe("resolveAdjacentThreadId", () => {
+  const threadIds = ["t1", "t2", "t3", "t4"];
+
+  it("visits unseen threads first in either direction, then walks in order", () => {
+    const unseen = new Set(["t1"]);
+    const input = { threadIds, isUnseen: (id: string) => unseen.has(id) };
+    expect(resolveAdjacentThreadId({ ...input, currentThreadId: "t2", direction: "next" })).toBe(
+      "t1",
+    );
+    expect(
+      resolveAdjacentThreadId({ ...input, currentThreadId: "t2", direction: "previous" }),
+    ).toBe("t1");
+    unseen.delete("t1");
+    expect(resolveAdjacentThreadId({ ...input, currentThreadId: "t1", direction: "next" })).toBe(
+      "t2",
+    );
+    expect(
+      resolveAdjacentThreadId({ ...input, currentThreadId: "t1", direction: "previous" }),
+    ).toBeNull();
   });
 });
 
