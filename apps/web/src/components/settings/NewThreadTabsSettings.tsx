@@ -1,4 +1,5 @@
 import type { NewThreadTab } from "@t3tools/contracts";
+import { msg, T, useGT, useMessages } from "gt-react";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -14,17 +15,20 @@ import { isPreviewSupportedInRuntime } from "../../previewStateStore";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const TAB_OPTIONS = {
-  terminal: { label: "Terminal", icon: TerminalSquare },
-  files: { label: "Files", icon: Files },
-  diff: { label: "Diff", icon: FileDiff },
-  browser: { label: "Browser", icon: Globe2 },
+  terminal: { label: msg("Terminal"), icon: TerminalSquare },
+  files: { label: msg("Files"), icon: Files },
+  diff: { label: msg("Diff"), icon: FileDiff },
+  browser: { label: msg("Browser"), icon: Globe2 },
 } as const satisfies Record<NewThreadTab, { label: string; icon: typeof Files }>;
 
 export function NewThreadTabsSettings() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const messages = useMessages();
   const tabs = useScopedSettings((settings) => settings.newThreadTabs);
   const updateSettings = useUpdateScopedSettings();
   const browserAvailable = isPreviewSupportedInRuntime();
@@ -43,17 +47,22 @@ export function NewThreadTabsSettings() {
   return (
     <SettingsRow
       {...searchableSetting("new-thread-tabs")}
-      description="Tabs opened in order when you start a thread. The conversation stays in front. Terminals start empty and browsers start blank."
+      description={gt(
+        "Tabs opened in order when you start a thread. The conversation stays in front. Terminals start empty and browsers start blank.",
+      )}
       resetAction={
         tabs.length > 0 ? (
-          <SettingResetButton label="tabs for new threads" onClick={() => setTabs([])} />
+          <SettingResetButton
+            ariaLabel={gt("Reset tabs for new threads to default")}
+            onClick={() => setTabs([])}
+          />
         ) : null
       }
       control={
         <Menu>
           <MenuTrigger render={<Button size="sm" variant="outline" />}>
             <PlusIcon />
-            Add tab
+            <T>Add tab</T>
           </MenuTrigger>
           <MenuPopup align="end">
             {addable.map((kind) => {
@@ -61,7 +70,7 @@ export function NewThreadTabsSettings() {
               return (
                 <MenuItem key={kind} onClick={() => setTabs([...tabs, kind])}>
                   <Icon />
-                  {label}
+                  {messages(label)}
                 </MenuItem>
               );
             })}
@@ -72,7 +81,8 @@ export function NewThreadTabsSettings() {
       {tabs.length > 0 ? (
         <ol className="mt-3 mb-2 divide-y divide-border/50 rounded-lg border border-border/60">
           {tabs.map((kind, index) => {
-            const { label, icon: Icon } = TAB_OPTIONS[kind];
+            const { icon: Icon } = TAB_OPTIONS[kind];
+            const label = messages(TAB_OPTIONS[kind].label);
             const occurrence = tabs.slice(0, index).filter((entry) => entry === kind).length;
             return (
               <li key={`${kind}-${occurrence}`} className="flex items-center gap-2 py-1 pr-1 pl-3">
@@ -82,7 +92,7 @@ export function NewThreadTabsSettings() {
                   size="icon-xs"
                   variant="ghost-muted"
                   disabled={index === 0}
-                  aria-label={`Move ${label} up`}
+                  aria-label={gt("Move {label} up", { label })}
                   onClick={() => move(index, -1)}
                 >
                   <ArrowUpIcon />
@@ -91,7 +101,7 @@ export function NewThreadTabsSettings() {
                   size="icon-xs"
                   variant="ghost-muted"
                   disabled={index === tabs.length - 1}
-                  aria-label={`Move ${label} down`}
+                  aria-label={gt("Move {label} down", { label })}
                   onClick={() => move(index, 1)}
                 >
                   <ArrowDownIcon />
@@ -99,7 +109,7 @@ export function NewThreadTabsSettings() {
                 <Button
                   size="icon-xs"
                   variant="ghost-muted"
-                  aria-label={`Remove ${label}`}
+                  aria-label={gt("Remove {label}", { label })}
                   onClick={() => setTabs(tabs.filter((_, entryIndex) => entryIndex !== index))}
                 >
                   <XIcon />

@@ -7,10 +7,12 @@ import type {
 } from "@t3tools/contracts";
 import type { ThreadStructureRuntime } from "@t3tools/client-runtime/state/shell";
 import * as Schema from "effect/Schema";
+import { msg } from "gt-react";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import type { EnvironmentPaletteOption, WorkspacePaletteOption } from "../commandPaletteBus";
 import { workspaceRelativeFilePath } from "@t3tools/shared/path";
 import { toSortableTimestamp } from "@t3tools/client-runtime/state/thread-sort";
+import { m, type MessageResolver } from "../i18n/messages";
 import { deriveCanInterruptRunningThread } from "../session-logic";
 export { deriveLocalBranchNameFromRemoteRef, sanitizeNewRefName } from "@t3tools/shared/git";
 
@@ -36,12 +38,15 @@ function normalizeDisplayLabel(value: string | null | undefined): string | null 
   return trimmed && trimmed.length > 0 ? trimmed : null;
 }
 
-export function resolveEnvironmentOptionLabel(input: {
-  isPrimary: boolean;
-  environmentId: EnvironmentId;
-  runtimeLabel?: string | null;
-  savedLabel?: string | null;
-}): string {
+export function resolveEnvironmentOptionLabel(
+  input: {
+    isPrimary: boolean;
+    environmentId: EnvironmentId;
+    runtimeLabel?: string | null;
+    savedLabel?: string | null;
+  },
+  resolve: MessageResolver = m,
+): string {
   const runtimeLabel = normalizeDisplayLabel(input.runtimeLabel);
   const savedLabel = normalizeDisplayLabel(input.savedLabel);
 
@@ -50,7 +55,7 @@ export function resolveEnvironmentOptionLabel(input: {
       if (!label) return false;
       return !GENERIC_LOCAL_ENVIRONMENT_LABELS.has(label.toLowerCase());
     });
-    return preferredLocalLabel ?? "This device";
+    return preferredLocalLabel ?? resolve(msg("This device"));
   }
 
   return runtimeLabel ?? savedLabel ?? input.environmentId;
@@ -92,26 +97,35 @@ export function resolveContextStripLabelsCompact(input: {
     : input.neededWidth > input.availableWidth;
 }
 
-export function resolveEnvModeLabel(mode: EnvMode): string {
-  return mode === "worktree" ? "New worktree" : "Current checkout";
+export function resolveEnvModeLabel(mode: EnvMode, resolve: MessageResolver = m): string {
+  return mode === "worktree" ? resolve(msg("New worktree")) : resolve(msg("Current checkout"));
 }
 
 export const WORKTREE_SUBMODULES_LABELS: Record<WorktreeSubmodules, string> = {
-  recursive: "Recursive",
-  "top-level": "Top level only",
-  none: "Skip",
+  recursive: msg("Recursive"),
+  "top-level": msg("Top level only"),
+  none: msg("Skip"),
 };
 
-export function resolveCurrentWorkspaceLabel(activeWorktreePath: string | null): string {
-  return activeWorktreePath ? "Current worktree" : resolveEnvModeLabel("local");
+export function resolveCurrentWorkspaceLabel(
+  activeWorktreePath: string | null,
+  resolve: MessageResolver = m,
+): string {
+  return activeWorktreePath
+    ? resolve(msg("Current worktree"))
+    : resolveEnvModeLabel("local", resolve);
 }
 
 export function resolveLockedWorkspaceLabel(
   activeWorktreePath: string | null,
   effectiveEnvMode: EnvMode,
+  resolve: MessageResolver = m,
 ): string {
-  if (activeWorktreePath) return activeWorktreePath.split(/[\\/]/).findLast(Boolean) ?? "Worktree";
-  return effectiveEnvMode === "worktree" ? resolveEnvModeLabel("worktree") : "Local checkout";
+  if (activeWorktreePath)
+    return activeWorktreePath.split(/[\\/]/).findLast(Boolean) ?? resolve(msg("Worktree"));
+  return effectiveEnvMode === "worktree"
+    ? resolveEnvModeLabel("worktree", resolve)
+    : resolve(msg("Local checkout"));
 }
 
 export interface PreviousWorktreeSeed {
@@ -152,24 +166,32 @@ export function resolvePreviousWorktreeSeed(input: {
   return latest === null ? null : { branch: latest.branch, worktreePath: latest.worktreePath };
 }
 
-export function resolvePreviousWorktreeLabel(seed: PreviousWorktreeSeed): string {
-  return seed.branch ? `Previous worktree (${seed.branch})` : "Previous worktree";
+export function resolvePreviousWorktreeLabel(
+  seed: PreviousWorktreeSeed,
+  resolve: MessageResolver = m,
+): string {
+  return seed.branch
+    ? resolve(msg("Previous worktree ({branch})", { branch: seed.branch }))
+    : resolve(msg("Previous worktree"));
 }
 
 // The "Run on" choices as command palette rows, in the same order and wording
 // as the dropdown. Auto balance counts as current while it picks the machine.
-export function buildEnvironmentPaletteOptions(input: {
-  environments: readonly EnvironmentOption[];
-  environmentId: EnvironmentId;
-  autoEnvironmentLabel: string | undefined;
-  onAutoEnvironment: (() => void) | undefined;
-  select: (environmentId: EnvironmentId) => void;
-}): EnvironmentPaletteOption[] {
+export function buildEnvironmentPaletteOptions(
+  input: {
+    environments: readonly EnvironmentOption[];
+    environmentId: EnvironmentId;
+    autoEnvironmentLabel: string | undefined;
+    onAutoEnvironment: (() => void) | undefined;
+    select: (environmentId: EnvironmentId) => void;
+  },
+  resolve: MessageResolver = m,
+): EnvironmentPaletteOption[] {
   const { onAutoEnvironment } = input;
   const options: EnvironmentPaletteOption[] = input.environments.map((env) => ({
     id: env.environmentId,
     label: env.label,
-    description: env.isPrimary ? "This device" : null,
+    description: env.isPrimary ? resolve(msg("This device")) : null,
     machine: env.machine,
     selected: !input.autoEnvironmentLabel && env.environmentId === input.environmentId,
     select: () => input.select(env.environmentId),
@@ -177,7 +199,7 @@ export function buildEnvironmentPaletteOptions(input: {
   if (onAutoEnvironment) {
     options.unshift({
       id: "auto",
-      label: input.autoEnvironmentLabel ?? "Auto balance",
+      label: input.autoEnvironmentLabel ?? resolve(msg("Auto balance")),
       description: null,
       machine: null,
       selected: input.autoEnvironmentLabel !== undefined,
@@ -189,16 +211,19 @@ export function buildEnvironmentPaletteOptions(input: {
 
 // The workspace selector's choices as command palette rows, in the same order
 // and wording as the dropdown.
-export function buildWorkspacePaletteOptions(input: {
-  activeWorktreePath: string | null;
-  effectiveEnvMode: EnvMode;
-  previousWorktree: PreviousWorktreeSeed | null;
-  select: (id: WorkspacePaletteOption["id"]) => void;
-}): WorkspacePaletteOption[] {
+export function buildWorkspacePaletteOptions(
+  input: {
+    activeWorktreePath: string | null;
+    effectiveEnvMode: EnvMode;
+    previousWorktree: PreviousWorktreeSeed | null;
+    select: (id: WorkspacePaletteOption["id"]) => void;
+  },
+  resolve: MessageResolver = m,
+): WorkspacePaletteOption[] {
   const options: WorkspacePaletteOption[] = [
     {
       id: "local",
-      label: resolveCurrentWorkspaceLabel(input.activeWorktreePath),
+      label: resolveCurrentWorkspaceLabel(input.activeWorktreePath, resolve),
       description: null,
       icon: input.activeWorktreePath ? "worktree" : "checkout",
       selected: input.effectiveEnvMode === "local",
@@ -206,7 +231,7 @@ export function buildWorkspacePaletteOptions(input: {
     },
     {
       id: "worktree",
-      label: resolveEnvModeLabel("worktree"),
+      label: resolveEnvModeLabel("worktree", resolve),
       description: null,
       icon: "new-worktree",
       selected: input.effectiveEnvMode === "worktree",
@@ -216,7 +241,7 @@ export function buildWorkspacePaletteOptions(input: {
   if (input.previousWorktree) {
     options.push({
       id: "previous-worktree",
-      label: "Previous worktree",
+      label: resolve(msg("Previous worktree")),
       description: input.previousWorktree.branch,
       icon: "previous-worktree",
       selected: false,
@@ -310,13 +335,16 @@ export function resolveDefaultWorktreeBaseBranch(
   return (refs.find((ref) => ref.isDefault) ?? refs.find((ref) => ref.current))?.name ?? null;
 }
 
-export function resolveBranchTriggerLabel(input: {
-  activeWorktreePath: string | null;
-  effectiveEnvMode: EnvMode;
-  resolvedActiveBranch: string | null;
-  resolvedActiveBranchIsRemote: boolean | null;
-  startFromOrigin: boolean;
-}): string {
+export function resolveBranchTriggerLabel(
+  input: {
+    activeWorktreePath: string | null;
+    effectiveEnvMode: EnvMode;
+    resolvedActiveBranch: string | null;
+    resolvedActiveBranchIsRemote: boolean | null;
+    startFromOrigin: boolean;
+  },
+  resolve: MessageResolver = m,
+): string {
   const {
     activeWorktreePath,
     effectiveEnvMode,
@@ -325,13 +353,13 @@ export function resolveBranchTriggerLabel(input: {
     startFromOrigin,
   } = input;
   if (!resolvedActiveBranch) {
-    return "Select ref";
+    return resolve(msg("Select ref"));
   }
   if (effectiveEnvMode === "worktree" && !activeWorktreePath) {
     // Only the server can determine a local branch's configured remote.
     return startFromOrigin && resolvedActiveBranchIsRemote === false
-      ? `From ${resolvedActiveBranch} (remote)`
-      : `From ${resolvedActiveBranch}`;
+      ? resolve(msg("From {branch} (remote)", { branch: resolvedActiveBranch }))
+      : resolve(msg("From {branch}", { branch: resolvedActiveBranch }));
   }
   return resolvedActiveBranch;
 }

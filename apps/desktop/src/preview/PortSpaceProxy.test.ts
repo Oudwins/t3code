@@ -502,7 +502,8 @@ describe("tunnel WebSocket stream", () => {
             tunnel.end();
             await farEndDone;
             assert.strictEqual(consumed, total);
-            assert.isBelow(widest, 32 * MIB);
+            // Loopback socket buffers autotune per runner; unbounded would reach the full 128 MiB.
+            assert.isBelow(widest, 64 * MIB);
           } finally {
             tunnel.destroy();
           }
