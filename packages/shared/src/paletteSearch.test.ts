@@ -215,6 +215,7 @@ describe("scoreThreadSearch", () => {
       ]);
     }
     expect(scoreThreadSearch("cmdk-search-v2", subject, NOW)?.explain?.()).toEqual({
+      field: "branch",
       label: "Branch",
       text: "cmdk-search-v2",
       ranges: [{ start: 0, end: 14 }],
@@ -235,6 +236,7 @@ describe("scoreThreadSearch", () => {
       "cmdk-search-v2",
     ]);
     expect(scoreThreadSearch("cmdk-search-v2", reviewer, NOW)?.explain?.()).toEqual({
+      field: "pull-request",
       label: "PR #12 branch",
       text: "cmdk-search-v2",
       ranges: [{ start: 0, end: 14 }],

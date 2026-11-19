@@ -1129,6 +1129,7 @@ function PortSpacesStatusNote({ environmentId }: { readonly environmentId: Envir
 }
 
 function PortSpacesIntegrationSettings() {
+  const searchableSetting = useSearchableSetting();
   const gt = useGT();
   const { environment: selected } = useSettingsScope();
   const settings = useScopedSettings();
@@ -1257,6 +1258,7 @@ function PortForwardingStatusNote() {
 }
 
 function PortForwardingSetting() {
+  const searchableSetting = useSearchableSetting();
   const gt = useGT();
   const enabled = useClientSettings((settings) => settings.portForwardingEnabled);
   const updateSettings = useUpdatePrimarySettings();

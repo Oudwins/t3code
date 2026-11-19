@@ -184,8 +184,7 @@ function defaultBindingForBinding(
     (bindingWhen === "false"
       ? DEFAULT_RESOLVED_KEYBINDINGS.find(
           (entry) =>
-            entry.command === binding.command &&
-            shortcutToKeybindingInput(entry.shortcut) === bindingKey,
+            entry.command === binding.command && bindingToKeybindingInput(entry) === bindingKey,
         )
       : undefined) ??
     DEFAULT_RESOLVED_KEYBINDINGS.find(
