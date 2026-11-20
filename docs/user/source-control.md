@@ -338,7 +338,7 @@ review is terminal. An open or unsynced link keeps it active.
 
 Ask the agent to watch, monitor, or babysit a pull request and it calls `watch_pull_request`. While
 the thread is active, the server checks the pull request every two minutes and wakes the agent when a
-check fails or waits for a maintainer's approval, the required checks pass, someone else comments or reviews, or the branch starts to
+check fails or waits for a maintainer's approval, the required checks pass, the other checks finish after a failure, someone else comments or reviews, or the branch starts to
 conflict. On github.com it also wakes the agent, with GitHub's reason, when the merge queue drops
 the pull request without merging it. A check that stays pending until someone acts, such as an
 approval bot, would keep the agent waiting; add a pattern for it under **Settings → Source control →
@@ -373,8 +373,9 @@ out from the matching organization and repository.
 The Issues page lists the issues of every project whose remote is on GitHub, GitLab, Azure
 DevOps or Forgejo, grouped per tracker account. Open it from the sidebar's utility row or with
 **Open issues** in the command palette. Filter by open or closed, by your involvement
-(assigned, opened by you, mentioning you), by project, and by tracker; the search box asks the tracker
-itself where it can search. Press **Load more** at the end of a group to read further back.
+(assigned, opened by you, mentioning you), and by tracker. Under **Projects**, uncheck the
+projects you do not want to see; the list remembers them, and a project you add later shows.
+The search box asks the tracker itself where it can search. Press **Load more** at the end of a group to read further back.
 The **Views** menu saves and restores a search, filter, and sort setup, as it does for pull
 requests.
 
