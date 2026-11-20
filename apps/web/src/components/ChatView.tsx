@@ -3044,7 +3044,8 @@ export default function ChatView(props: ChatViewProps) {
   });
 
   const closeActiveRightPanelSurfaceStable = useStableCallback(() => {
-    if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface);
+    if (activeTabSurface) tabsActions.close(activeTabSurface);
+    else if (activeRightPanelSurface) sideActions.close(activeRightPanelSurface);
   });
 
   // A focused desktop browser page forwards these chords as menu actions.
